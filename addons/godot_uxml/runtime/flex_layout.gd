@@ -34,6 +34,21 @@ extends RefCounted
 ## only when the content actually overflows — the same two-pass Unity uses).
 ## Their computed content size is reported in "content_sizes" so the host
 ## can size the scroll container's content child.
+##
+## Performance notes (the algorithm above is unchanged, bit for bit):
+##   * every per-element style read is memoized for the pass — padding /
+##     border / margin edges per containing-block width, enums, flex
+##     children, numbers — and value parsing is memoized by text in
+##     UssValues, so the hot recursion does no regex or string building;
+##   * _measure() results are memoized per (element, avail, hint) for
+##     subtrees whose measurer is pure. options["volatile"] names elements
+##     whose intrinsic size depends on measurer call history (a wrapping
+##     Label is measured at the width the previous call left on it); any
+##     subtree containing one is always measured for real, so the measurer
+##     sees exactly the call sequence it always did;
+##   * flex items are parallel packed arrays, not per-item Dictionaries.
+## Diagnostics are deduplicated per (property, message) for the document's
+## lifetime, so skipping a repeated identical call never drops a warning.
 
 const EPS := 0.01
 const JUSTIFY := ["flex-start", "center", "flex-end", "space-between", "space-around", "space-evenly"]
@@ -41,6 +56,17 @@ const ALIGN := ["flex-start", "center", "flex-end", "stretch", "baseline"]
 const ALIGN_CONTENT := ["flex-start", "center", "flex-end", "stretch", "space-between", "space-around", "space-evenly"]
 const DIRECTIONS := ["column", "row", "column-reverse", "row-reverse"]
 const WRAPS := ["nowrap", "wrap", "wrap-reverse"]
+
+const PAD_NAMES := ["padding-top", "padding-right", "padding-bottom", "padding-left"]
+const MAR_NAMES := ["margin-top", "margin-right", "margin-bottom", "margin-left"]
+const BOR_NAMES := ["border-top-width", "border-right-width", "border-bottom-width", "border-left-width"]
+# Edge arrays are [t, r, b, l].
+const T := 0
+const R := 1
+const B := 2
+const L := 3
+
+static var _empty_style := {}
 
 var _styles: Dictionary = {}
 var _measurer: Callable
@@ -52,13 +78,25 @@ var _insets: Dictionary = {}
 var _source: String = ""
 var _file: String = ""
 var _scroll_bar_width: float = 0.0
+var _volatile: Dictionary = {}
+
+# Per-pass memos.
+var _st := {}         # el -> style dict
+var _pad_m := {}      # el -> [cb_width, PackedFloat64Array]
+var _mar_m := {}      # el -> [cb_width, PackedFloat64Array]
+var _bor_m := {}      # el -> PackedFloat64Array
+var _kids_m := {}     # el -> Array
+var _enum_m := {}     # el -> {prop: String}
+var _num_m := {}      # el -> {prop: float}
+var _meas_m := {}     # el -> Array of [ax, ay, hint, Vector2]
+var _vol_m := {}      # el -> bool (subtree contains a volatile element)
 
 
 ## Compute layout for `root` inside `host_size`. `options` may carry
-## "source"/"file" (diagnostic locations), "scroll_bar_width", and
-## "warned" — a caller-owned Dictionary the dedupe set is shared through,
-## so repeated computes (restyles) do not re-emit the same warning into a
-## warnings array that accumulates.
+## "source"/"file" (diagnostic locations), "scroll_bar_width", "volatile"
+## (see the class notes), and "warned" — a caller-owned Dictionary the
+## dedupe set is shared through, so repeated computes (restyles) do not
+## re-emit the same warning into a warnings array that accumulates.
 ## Returns {"rects": {element: Rect2}, "content_sizes": {element: Vector2},
 ## "insets": {element: [Vector2 start, Vector2 end]}} — start/end are the
 ## resolved padding+border edges (the content-box insets) the runtime uses
@@ -78,6 +116,7 @@ static func compute(
 	l._source = String(options.get("source", ""))
 	l._file = String(options.get("file", ""))
 	l._scroll_bar_width = float(options.get("scroll_bar_width", 0.0))
+	l._volatile = options.get("volatile", {})
 	if options.has("warned"):
 		l._warned = options["warned"]
 	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
@@ -92,8 +131,16 @@ static func compute(
 # Style access
 # ---------------------------------------------------------------------------
 
+func _style(el: UxmlElement) -> Dictionary:
+	var s = _st.get(el)
+	if s == null:
+		s = _styles.get(el, _empty_style)
+		_st[el] = s
+	return s
+
+
 func _prop(el: UxmlElement, name: String) -> Variant:
-	var entry = _styles.get(el, {}).get(name)
+	var entry = _style(el).get(name)
 	return null if entry == null else entry["value"]
 
 
@@ -103,117 +150,148 @@ func _str(el: UxmlElement, name: String, default: String) -> String:
 
 
 func _num(el: UxmlElement, name: String, default: float) -> float:
+	var m: Dictionary = _num_m.get(el, {})
+	var hit = m.get(name)
+	if hit != null:
+		return hit
+	var out := default
 	var v = _prop(el, name)
-	if v == null:
-		return default
-	var n := UssValues.parse_number(String(v))
-	if is_nan(n):
-		_warn_once(el, name, '%s: "%s" is not a number; %s used' % [name, v, default])
-		return default
-	return n
+	if v != null:
+		var n := UssValues.parse_number(String(v))
+		if is_nan(n):
+			_warn_once(el, name, '%s: "%s" is not a number; %s used' % [name, v, default])
+		else:
+			out = n
+	m[name] = out
+	_num_m[el] = m
+	return out
 
 
 func _enum(el: UxmlElement, name: String, valid: Array, default: String) -> String:
+	var m: Dictionary = _enum_m.get(el, {})
+	var hit = m.get(name)
+	if hit != null:
+		return hit
 	var v := _str(el, name, default)
-	if valid.has(v):
-		return v
-	_warn_once(el, name, '%s: "%s" is not supported; %s used' % [name, v, default])
-	return default
+	if not valid.has(v):
+		_warn_once(el, name, '%s: "%s" is not supported; %s used' % [name, v, default])
+		v = default
+	m[name] = v
+	_enum_m[el] = m
+	return v
 
 
-## A length value: {auto: bool, v: float}. `auto` covers the auto/none
-## keywords, unparseable text (warned once), and percentages against an
-## indefinite base (base < 0).
-func _len(el: UxmlElement, name: String, base: float) -> Dictionary:
+## A length value: NAN for auto. Auto covers the auto/none keywords,
+## unparseable text (warned once), and percentages against an indefinite
+## base (base < 0).
+func _len(el: UxmlElement, name: String, base: float) -> float:
 	var raw = _prop(el, name)
 	if raw == null:
-		return {"auto": true, "v": 0.0}
+		return NAN
+	return _len_raw(el, name, raw, base)
+
+
+func _len_raw(el: UxmlElement, name: String, raw, base: float) -> float:
 	var p := UssValues.parse_length(String(raw))
 	match p["kind"]:
 		"px":
-			return {"auto": false, "v": p["value"]}
+			return p["value"]
 		"percent":
 			if base < 0.0:
-				return {"auto": true, "v": 0.0}
-			return {"auto": false, "v": base * p["value"] / 100.0}
+				return NAN
+			return base * p["value"] / 100.0
 		"invalid":
 			_warn_once(el, name, "%s: %s" % [name, p["problem"]])
-			return {"auto": true, "v": 0.0}
+			return NAN
 		_:
-			return {"auto": true, "v": 0.0}
+			return NAN
 
 
 ## A box dimension (width/height/flex-basis): px value, or -1 for auto.
 func _dim(el: UxmlElement, name: String, base: float) -> float:
 	var r := _len(el, name, base)
-	return -1.0 if r["auto"] else r["v"]
+	return -1.0 if is_nan(r) else r
 
 
 ## A min/max bound. is_min: -1 means "no declared bound" (the caller decides
 ## the auto floor); !is_min: INF means none.
 func _bound(el: UxmlElement, name: String, base: float, is_min: bool) -> float:
-	if _prop(el, name) == null:
+	var raw = _prop(el, name)
+	if raw == null:
 		return -1.0 if is_min else INF
-	var r := _len(el, name, base)
-	if r["auto"]:
+	var r := _len_raw(el, name, raw, base)
+	if is_nan(r):
 		return -1.0 if is_min else INF
-	return r["v"]
+	return r
 
 
-## margin/padding edges {t,r,b,l} in px. Percentages resolve against the
+## margin/padding edges [t,r,b,l] in px. Percentages resolve against the
 ## containing block width, like CSS. `auto` margins are not part of the USS
 ## subset — diagnosed once and treated as 0. Margins may be negative (CSS
 ## semantics: they pull the box, and neighbors, backward); padding may not —
 ## a negative padding is invalid and diagnosed rather than silently clamped.
-func _edges(
-	el: UxmlElement, prefix: String, cb_width: float, allow_negative: bool = false
-) -> Dictionary:
-	var out := {}
-	for side in ["top", "right", "bottom", "left"]:
-		var name := "%s-%s" % [prefix, side]
-		var raw = _prop(el, name)
-		if raw == null:
-			out[side[0]] = 0.0
+func _edges(el: UxmlElement, names: Array, cb_width: float, allow_negative: bool) -> PackedFloat64Array:
+	var out := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
+	var st := _style(el)
+	for k in 4:
+		var name: String = names[k]
+		var entry = st.get(name)
+		if entry == null:
 			continue
+		var raw = entry["value"]
 		if String(raw).strip_edges() == "auto":
 			_warn_once(el, name, "%s: auto is not supported; 0 used" % name)
-			out[side[0]] = 0.0
 			continue
-		var r := _len(el, name, cb_width)
-		if r["auto"]:
-			out[side[0]] = 0.0
-		elif r["v"] < 0.0 and not allow_negative:
+		var r := _len_raw(el, name, raw, cb_width)
+		if is_nan(r):
+			continue
+		elif r < 0.0 and not allow_negative:
 			_warn_once(el, name, "%s: negative values are invalid; 0 used" % name)
-			out[side[0]] = 0.0
 		else:
-			out[side[0]] = r["v"]
+			out[k] = r
 	return out
 
 
-## Border widths {t,r,b,l} in px — USS borders are px-only; anything else is
+func _padding(el: UxmlElement, cb_width: float) -> PackedFloat64Array:
+	var m = _pad_m.get(el)
+	if m != null and m[0] == cb_width:
+		return m[1]
+	var e := _edges(el, PAD_NAMES, cb_width, false)
+	_pad_m[el] = [cb_width, e]
+	return e
+
+
+func _margins(el: UxmlElement, cb_width: float) -> PackedFloat64Array:
+	var m = _mar_m.get(el)
+	if m != null and m[0] == cb_width:
+		return m[1]
+	var e := _edges(el, MAR_NAMES, cb_width, true)
+	_mar_m[el] = [cb_width, e]
+	return e
+
+
+## Border widths [t,r,b,l] in px — USS borders are px-only; anything else is
 ## diagnosed and treated as 0.
-func _borders(el: UxmlElement, cb_width: float) -> Dictionary:
-	var out := {}
-	for side in ["top", "right", "bottom", "left"]:
-		var name := "border-%s-width" % side
-		var raw = _prop(el, name)
-		if raw == null:
-			out[side[0]] = 0.0
+func _borders(el: UxmlElement) -> PackedFloat64Array:
+	var m = _bor_m.get(el)
+	if m != null:
+		return m
+	var out := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
+	var st := _style(el)
+	for k in 4:
+		var name: String = BOR_NAMES[k]
+		var entry = st.get(name)
+		if entry == null:
 			continue
-		var p := UssValues.parse_length(String(raw))
+		var p := UssValues.parse_length(String(entry["value"]))
 		if p["kind"] == "px":
-			out[side[0]] = maxf(0.0, p["value"])
-		else:
-			if p["kind"] == "invalid":
-				_warn_once(el, name, "%s: %s" % [name, p["problem"]])
-			elif p["kind"] == "percent":
-				_warn_once(el, name, "%s: percentages are not supported for border width" % name)
-			out[side[0]] = 0.0
+			out[k] = maxf(0.0, p["value"])
+		elif p["kind"] == "invalid":
+			_warn_once(el, name, "%s: %s" % [name, p["problem"]])
+		elif p["kind"] == "percent":
+			_warn_once(el, name, "%s: percentages are not supported for border width" % name)
+	_bor_m[el] = out
 	return out
-
-
-func _margins(el: UxmlElement, cb_width: float) -> Dictionary:
-	return _edges(el, "margin", cb_width, true)
 
 
 ## The gap named `name` ("row-gap"/"column-gap"). The `gap` shorthand is
@@ -253,9 +331,13 @@ func _warn_once(el: UxmlElement, prop: String, message: String) -> void:
 ## Children that participate in flex layout: visual elements that are not
 ## display:none. UXML/Style are document structure, never boxes.
 func _flex_children(el: UxmlElement) -> Array:
+	var hit = _kids_m.get(el)
+	if hit != null:
+		return hit
 	var out: Array = []
 	for child in el.children:
-		if UssControls.is_non_visual(child.local):
+		var local: String = child.local
+		if local == "UXML" or local == "Style":
 			continue
 		var display := _str(child, "display", "flex")
 		if display == "none":
@@ -263,11 +345,8 @@ func _flex_children(el: UxmlElement) -> Array:
 		if display != "flex":
 			_warn_once(child, "display", 'display: "%s" is not supported; flex used' % display)
 		out.append(child)
+	_kids_m[el] = out
 	return out
-
-
-func _is_scroll(el: UxmlElement) -> bool:
-	return el.local == "ScrollView"
 
 
 func _is_row(el: UxmlElement) -> bool:
@@ -277,6 +356,22 @@ func _is_row(el: UxmlElement) -> bool:
 
 func _reverse_main(el: UxmlElement) -> bool:
 	return _enum(el, "flex-direction", DIRECTIONS, "column").ends_with("-reverse")
+
+
+func _has_volatile(el: UxmlElement) -> bool:
+	if _volatile.is_empty():
+		return false
+	var hit = _vol_m.get(el)
+	if hit != null:
+		return hit
+	var v := _volatile.has(el)
+	if not v:
+		for child in el.children:
+			if _has_volatile(child):
+				v = true
+				break
+	_vol_m[el] = v
+	return v
 
 
 # ---------------------------------------------------------------------------
@@ -293,12 +388,24 @@ func _measure(
 	avail: Vector2,
 	border_w_hint: float = -1.0
 ) -> Vector2:
+	var memo: Array
+	var pure := not _has_volatile(el)
+	if pure:
+		var m = _meas_m.get(el)
+		if m != null:
+			memo = m
+			for e in memo:
+				if e[0] == avail.x and e[1] == avail.y and e[2] == border_w_hint:
+					return e[3]
+		else:
+			memo = []
+			_meas_m[el] = memo
 	var w := _dim(el, "width", avail.x)
 	var h := _dim(el, "height", avail.y)
-	var pad := _edges(el, "padding", avail.x)
-	var bor := _borders(el, avail.x)
-	var in_w: float = pad["l"] + pad["r"] + bor["l"] + bor["r"]
-	var in_h: float = pad["t"] + pad["b"] + bor["t"] + bor["b"]
+	var pad := _padding(el, avail.x)
+	var bor := _borders(el)
+	var in_w: float = pad[L] + pad[R] + bor[L] + bor[R]
+	var in_h: float = pad[T] + pad[B] + bor[T] + bor[B]
 	var kids := _flex_children(el)
 	var bw: float
 	var bh: float
@@ -308,7 +415,7 @@ func _measure(
 			hint = maxf(0.0, border_w_hint - in_w)
 		elif w >= 0.0:
 			hint = maxf(0.0, w - in_w)
-		var intr: Vector2 = _measurer.call(el, _styles.get(el, {}), hint)
+		var intr: Vector2 = _measurer.call(el, _style_for_measure(el), hint)
 		bw = w if w >= 0.0 else intr.x + in_w
 		bh = h if h >= 0.0 else intr.y + in_h
 	else:
@@ -317,30 +424,35 @@ func _measure(
 		var nat := _measure_content(el, Vector2(cw, ch))
 		# Native chrome (e.g. a ScrollContainer's scrollbars) can floor the
 		# auto size, but an authored px/% always wins.
-		var chrome: Vector2 = _measurer.call(el, _styles.get(el, {}), cw)
+		var chrome: Vector2 = _measurer.call(el, _style_for_measure(el), cw)
 		bw = w if w >= 0.0 else maxf(nat.x, chrome.x) + in_w
 		bh = h if h >= 0.0 else maxf(nat.y, chrome.y) + in_h
 	# The border box can never be smaller than its own padding+border —
 	# the floor overrides explicit dims and max bounds alike (Yoga).
-	return Vector2(
+	var out := Vector2(
 		maxf(
-			clampf(bw, _min_or(el, "min-width", avail.x, 0.0), _max_or(el, "max-width", avail.x)),
+			clampf(bw, _min_or(el, "min-width", avail.x, 0.0), _bound(el, "max-width", avail.x, false)),
 			in_w
 		),
 		maxf(
-			clampf(bh, _min_or(el, "min-height", avail.y, 0.0), _max_or(el, "max-height", avail.y)),
+			clampf(bh, _min_or(el, "min-height", avail.y, 0.0), _bound(el, "max-height", avail.y, false)),
 			in_h
 		)
 	)
+	if pure:
+		memo.append([avail.x, avail.y, border_w_hint, out])
+	return out
+
+
+## The measurer gets the element's style Dictionary exactly as before
+## (a fresh {} when the element has no computed style).
+func _style_for_measure(el: UxmlElement) -> Dictionary:
+	return _styles.get(el, {})
 
 
 func _min_or(el: UxmlElement, name: String, base: float, fallback: float) -> float:
 	var b := _bound(el, name, base, true)
 	return fallback if b < 0.0 else b
-
-
-func _max_or(el: UxmlElement, name: String, base: float) -> float:
-	return _bound(el, name, base, false)
 
 
 ## Natural content-box size of a container's children (no padding/border).
@@ -354,34 +466,42 @@ func _measure_content(el: UxmlElement, cavail: Vector2) -> Vector2:
 	var cross := 1 - main
 	var gap_m := _gap(el, "column-gap" if row else "row-gap", cavail[main])
 	var gap_c := _gap(el, "row-gap" if row else "column-gap", cavail[cross])
-	var lines: Array = []
-	var cur := {"main": 0.0, "cross": 0.0, "n": 0}
+	var lines_main := PackedFloat64Array()
+	var lines_cross := PackedFloat64Array()
+	var cur_main := 0.0
+	var cur_cross := 0.0
+	var cur_n := 0
+	var am: float = cavail[main]
 	for child in kids:
 		var msz := _measure(child, cavail)
 		var m := _margins(child, cavail.x)
 		var o_main: float
 		var o_cross: float
 		if row:
-			o_main = msz.x + m["l"] + m["r"]
-			o_cross = msz.y + m["t"] + m["b"]
+			o_main = msz.x + m[L] + m[R]
+			o_cross = msz.y + m[T] + m[B]
 		else:
-			o_main = msz.y + m["t"] + m["b"]
-			o_cross = msz.x + m["l"] + m["r"]
+			o_main = msz.y + m[T] + m[B]
+			o_cross = msz.x + m[L] + m[R]
 		if (
-			wrap and cavail[main] >= 0.0 and cur["n"] > 0
-			and cur["main"] + gap_m + o_main > cavail[main] + EPS
+			wrap and am >= 0.0 and cur_n > 0
+			and cur_main + gap_m + o_main > am + EPS
 		):
-			lines.append(cur)
-			cur = {"main": 0.0, "cross": 0.0, "n": 0}
-		cur["main"] += (gap_m if cur["n"] > 0 else 0.0) + o_main
-		cur["cross"] = maxf(cur["cross"], o_cross)
-		cur["n"] += 1
-	if cur["n"] > 0:
-		lines.append(cur)
+			lines_main.append(cur_main)
+			lines_cross.append(cur_cross)
+			cur_main = 0.0
+			cur_cross = 0.0
+			cur_n = 0
+		cur_main += (gap_m if cur_n > 0 else 0.0) + o_main
+		cur_cross = maxf(cur_cross, o_cross)
+		cur_n += 1
+	if cur_n > 0:
+		lines_main.append(cur_main)
+		lines_cross.append(cur_cross)
 	var out := Vector2.ZERO
-	for i in lines.size():
-		out[main] = maxf(out[main], lines[i]["main"])
-		out[cross] += lines[i]["cross"] + (gap_c if i > 0 else 0.0)
+	for i in lines_main.size():
+		out[main] = maxf(out[main], lines_main[i])
+		out[cross] += lines_cross[i] + (gap_c if i > 0 else 0.0)
 	return out
 
 
@@ -396,28 +516,28 @@ func _measure_content(el: UxmlElement, cavail: Vector2) -> Vector2:
 ## padding+border inset, not at rect.position.
 func _layout(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 	_rects[el] = rect
-	var pad := _edges(el, "padding", cb_width)
-	var bor := _borders(el, cb_width)
+	var pad := _padding(el, cb_width)
+	var bor := _borders(el)
 	# The resolved content-box insets — the runtime insets internal chrome
 	# (field caption/native, scroll viewport, image rect) the flex pass
 	# does not itself position.
 	_insets[el] = [
-		Vector2(bor["l"] + pad["l"], bor["t"] + pad["t"]),
-		Vector2(bor["r"] + pad["r"], bor["b"] + pad["b"]),
+		Vector2(bor[L] + pad[L], bor[T] + pad[T]),
+		Vector2(bor[R] + pad[R], bor[B] + pad[B]),
 	]
-	var inner := Vector2(bor["l"] + pad["l"], bor["t"] + pad["t"])
+	var inner := Vector2(bor[L] + pad[L], bor[T] + pad[T])
 	var content := Rect2(
 		inner,
 		Vector2(
-			maxf(0.0, rect.size.x - (pad["l"] + pad["r"] + bor["l"] + bor["r"])),
-			maxf(0.0, rect.size.y - (pad["t"] + pad["b"] + bor["t"] + bor["b"]))
+			maxf(0.0, rect.size.x - (pad[L] + pad[R] + bor[L] + bor[R])),
+			maxf(0.0, rect.size.y - (pad[T] + pad[B] + bor[T] + bor[B]))
 		)
 	)
 	var kids := _flex_children(el)
 	if kids.is_empty():
 		_content_sizes[el] = Vector2.ZERO
 		return
-	if _is_scroll(el):
+	if el.local == "ScrollView":
 		_layout_scroll(el, content, pad, bor, kids)
 		return
 	_content_sizes[el] = _place(el, content, kids)
@@ -430,11 +550,11 @@ func _layout(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 func _layout_scroll(
 	el: UxmlElement,
 	content: Rect2,
-	pad: Dictionary,
-	bor: Dictionary,
+	pad: PackedFloat64Array,
+	bor: PackedFloat64Array,
 	kids: Array
 ) -> void:
-	var pad_bor := Vector2(pad["l"] + bor["l"], pad["t"] + bor["t"])
+	var pad_bor := Vector2(pad[L] + bor[L], pad[T] + bor[T])
 	var avail_w := content.size.x
 	var nat := _measure_content(el, Vector2(avail_w, -1.0))
 	if nat.y > content.size.y + EPS and _scroll_bar_width > 0.0:
@@ -468,16 +588,56 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	var gap_c := _gap(el, "row-gap" if row else "column-gap", ac)
 	var size_prop := "width" if row else "height"
 	var cross_prop := "height" if row else "width"
+	var min_main := "min-" + size_prop
+	var max_main := "max-" + size_prop
+	var min_cross := "min-" + cross_prop
+	var max_cross := "max-" + cross_prop
+	var asx: float = area.size.x
+	# Margin edge indices along main/cross: start/end.
+	var ms_i := L if row else T
+	var me_i := R if row else B
+	var cs_i := T if row else L
+	var ce_i := B if row else R
 
-	# Hypothetical main sizes, with min/max already applied.
-	var items: Array = []
-	for child in kids:
-		var m := _margins(child, area.size.x)
+	# Hypothetical main sizes, with min/max already applied. Items are
+	# parallel arrays indexed by kid position.
+	var n := kids.size()
+	var it_m: Array = []
+	it_m.resize(n)
+	var it_main := PackedFloat64Array()
+	it_main.resize(n)
+	var it_min := PackedFloat64Array()
+	it_min.resize(n)
+	var it_max := PackedFloat64Array()
+	it_max.resize(n)
+	var it_inc := PackedFloat64Array()
+	it_inc.resize(n)
+	var it_grow := PackedFloat64Array()
+	it_grow.resize(n)
+	var it_shrink := PackedFloat64Array()
+	it_shrink.resize(n)
+	var it_frozen := PackedByteArray()
+	it_frozen.resize(n)
+	var it_cross := PackedFloat64Array()
+	it_cross.resize(n)
+	var it_ncross := PackedFloat64Array()
+	it_ncross.resize(n)
+	var it_pos := PackedFloat64Array()
+	it_pos.resize(n)
+	var it_cpos := PackedFloat64Array()
+	it_cpos.resize(n)
+	var it_mmain := PackedFloat64Array() # margin total on main
+	it_mmain.resize(n)
+	var it_mcross := PackedFloat64Array() # margin total on cross
+	it_mcross.resize(n)
+	for k in n:
+		var child: UxmlElement = kids[k]
+		var m := _margins(child, asx)
 		var nat := _measure(child, area.size)
 		var hyp: float
 		var basis := _len(child, "flex-basis", am)
-		if not basis["auto"]:
-			hyp = basis["v"]
+		if not is_nan(basis):
+			hyp = basis
 		else:
 			var explicit := _dim(child, size_prop, am)
 			hyp = explicit if explicit >= 0.0 else nat[main]
@@ -489,60 +649,75 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 		# axis (a w80 child with 24px padding + 4px border in a 20px row
 		# ends 28, not 20) — and that floor also overrides explicit dims
 		# and authored max bounds.
-		var mn := _bound(child, "min-" + size_prop, am, true)
+		var mn := _bound(child, min_main, am, true)
 		if mn < 0.0:
 			mn = 0.0
-		var mx := _bound(child, "max-" + size_prop, am, false)
-		var pads := _edges(child, "padding", area.size.x)
-		var bors := _borders(child, area.size.x)
+		var mx := _bound(child, max_main, am, false)
+		var pads := _padding(child, asx)
+		var bors := _borders(child)
 		var in_main: float
 		var in_cross: float
 		if row:
-			in_main = pads["l"] + pads["r"] + bors["l"] + bors["r"]
-			in_cross = pads["t"] + pads["b"] + bors["t"] + bors["b"]
+			in_main = pads[L] + pads[R] + bors[L] + bors[R]
+			in_cross = pads[T] + pads[B] + bors[T] + bors[B]
 		else:
-			in_main = pads["t"] + pads["b"] + bors["t"] + bors["b"]
-			in_cross = pads["l"] + pads["r"] + bors["l"] + bors["r"]
+			in_main = pads[T] + pads[B] + bors[T] + bors[B]
+			in_cross = pads[L] + pads[R] + bors[L] + bors[R]
 		mn = maxf(mn, in_main)
 		mx = maxf(mx, mn)
-		items.append({
-			"el": child, "m": m, "nat": nat,
-			"main": clampf(hyp, mn, mx),
-			"min": mn, "max": mx, "in_cross": in_cross,
-			"grow": maxf(0.0, _num(child, "flex-grow", 0.0)),
-			"shrink": maxf(0.0, _num(child, "flex-shrink", 1.0)),
-			"frozen": false,
-			"cross": 0.0, "nat_cross": 0.0, "pos": 0.0, "cross_pos": 0.0,
-		})
+		it_m[k] = m
+		it_main[k] = clampf(hyp, mn, mx)
+		it_min[k] = mn
+		it_max[k] = mx
+		it_inc[k] = in_cross
+		it_grow[k] = maxf(0.0, _num(child, "flex-grow", 0.0))
+		it_shrink[k] = maxf(0.0, _num(child, "flex-shrink", 1.0))
+		if row:
+			it_mmain[k] = m[L] + m[R]
+			it_mcross[k] = m[T] + m[B]
+		else:
+			it_mmain[k] = m[T] + m[B]
+			it_mcross[k] = m[L] + m[R]
 
 	# Lines: one when nowrap, else split on hypothetical outer main size.
-	var lines: Array = []
+	# A line is [first item, end item) — items stay in order.
+	var line_lo := PackedInt32Array()
+	var line_hi := PackedInt32Array()
 	if wrap_mode == "nowrap":
-		lines.append({"items": items, "cross": 0.0, "pos": 0.0})
+		line_lo.append(0)
+		line_hi.append(n)
 	else:
-		var cur: Array = []
+		var start := 0
 		var cur_main := 0.0
-		for it in items:
-			var outer: float = it["main"] + _mtotal(it["m"], main)
-			var need: float = (gap_m if not cur.is_empty() else 0.0) + outer
-			if not cur.is_empty() and cur_main + need > am + EPS:
-				lines.append({"items": cur, "cross": 0.0, "pos": 0.0})
-				cur = []
+		for k in n:
+			var outer: float = it_main[k] + it_mmain[k]
+			var need: float = (gap_m if k > start else 0.0) + outer
+			if k > start and cur_main + need > am + EPS:
+				line_lo.append(start)
+				line_hi.append(k)
+				start = k
 				cur_main = 0.0
 				need = outer
 			cur_main += need
-			cur.append(it)
-		lines.append({"items": cur, "cross": 0.0, "pos": 0.0})
+		line_lo.append(start)
+		line_hi.append(n)
+	var nlines := line_lo.size()
 
 	# Grow/shrink within each line.
-	for line in lines:
-		_flex_line(line["items"], am, gap_m, main)
+	for li in nlines:
+		_flex_line(line_lo[li], line_hi[li], it_main, it_mmain, it_min, it_max,
+			it_grow, it_shrink, it_frozen, am, gap_m)
 
 	# Cross sizes: explicit or natural, then the line cross is the max outer.
-	for line in lines:
+	var l_cross := PackedFloat64Array()
+	l_cross.resize(nlines)
+	var l_pos := PackedFloat64Array()
+	l_pos.resize(nlines)
+	for li in nlines:
 		var line_cross := 0.0
-		for it in line["items"]:
-			var explicit := _dim(it["el"], cross_prop, ac)
+		for k in range(line_lo[li], line_hi[li]):
+			var child: UxmlElement = kids[k]
+			var explicit := _dim(child, cross_prop, ac)
 			var nat: float
 			if explicit >= 0.0:
 				nat = explicit
@@ -550,34 +725,32 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 				# For a row item the final main size is now known — measuring
 				# with it lets wrapped text report the height it really needs.
 				nat = _measure(
-					it["el"], area.size,
-					it["main"] if row else -1.0
+					child, area.size,
+					it_main[k] if row else -1.0
 				)[cross]
 			# Cross sizes floor at the cross-axis padding+border total the
 			# same way the main axis does — an explicit dim or max bound
 			# below it cannot produce a negative content box.
-			var cmin := maxf(
-				_min_or(it["el"], "min-" + cross_prop, ac, 0.0), it["in_cross"])
+			var cmin := maxf(_min_or(child, min_cross, ac, 0.0), it_inc[k])
 			nat = clampf(
 				nat, cmin,
-				maxf(_max_or(it["el"], "max-" + cross_prop, ac), cmin)
+				maxf(_bound(child, max_cross, ac, false), cmin)
 			)
-			it["nat_cross"] = nat
-			line_cross = maxf(line_cross, nat + _mtotal(it["m"], cross))
-		line["cross"] = line_cross
+			it_ncross[k] = nat
+			line_cross = maxf(line_cross, nat + it_mcross[k])
+		l_cross[li] = line_cross
 
 	# The container's cross space distributed over lines (align-content).
-	var nlines := lines.size()
 	var lines_cross := 0.0
-	for i in nlines:
-		lines_cross += lines[i]["cross"] + (gap_c if i > 0 else 0.0)
+	for li in nlines:
+		lines_cross += l_cross[li] + (gap_c if li > 0 else 0.0)
 	if wrap_mode == "nowrap" and ac >= 0.0:
-		lines[0]["cross"] = ac
+		l_cross[0] = ac
 		lines_cross = ac
 	elif wrap_mode != "nowrap" and ac >= 0.0 and align_content == "stretch" and ac > lines_cross:
 		var extra := (ac - lines_cross) / nlines
-		for line in lines:
-			line["cross"] += extra
+		for li in nlines:
+			l_cross[li] += extra
 		lines_cross = ac
 
 	var free_c := ac - lines_cross if ac >= 0.0 else 0.0
@@ -598,22 +771,25 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 			var u2 := free_c / (nlines + 1)
 			cpos += u2
 			cstep += u2
-	for line in lines:
-		line["pos"] = cpos
-		cpos += line["cross"] + cstep
+	for li in nlines:
+		l_pos[li] = cpos
+		cpos += l_cross[li] + cstep
 	if wrap_mode == "wrap-reverse" and ac >= 0.0:
-		for line in lines:
-			line["pos"] = (
+		for li in nlines:
+			l_pos[li] = (
 				area.position[cross] + ac
-				- (line["pos"] - area.position[cross]) - line["cross"]
+				- (l_pos[li] - area.position[cross]) - l_cross[li]
 			)
 
 	# Main-axis positions within each line (justify-content).
-	for line in lines:
-		var li: Array = line["items"]
-		var used := gap_m * maxf(0.0, li.size() - 1.0)
-		for it in li:
-			used += it["main"] + _mtotal(it["m"], main)
+	var reverse := _reverse_main(el)
+	for li in nlines:
+		var lo := line_lo[li]
+		var hi := line_hi[li]
+		var cnt := hi - lo
+		var used := gap_m * maxf(0.0, cnt - 1.0)
+		for k in range(lo, hi):
+			used += it_main[k] + it_mmain[k]
 		var free := am - used
 		var start := 0.0
 		var step := gap_m
@@ -623,142 +799,152 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 			"flex-end":
 				start = free
 			"space-between":
-				step += free / (li.size() - 1) if li.size() > 1 else 0.0
+				step += free / (cnt - 1) if cnt > 1 else 0.0
 			"space-around":
-				var u := free / li.size()
+				var u := free / cnt
 				start = u / 2.0
 				step += u
 			"space-evenly":
-				var u2 := free / (li.size() + 1)
+				var u2 := free / (cnt + 1)
 				start = u2
 				step += u2
 		var cursor := area.position[main] + start
-		for it in li:
-			it["pos"] = cursor + it["m"]["l" if row else "t"]
-			cursor += _mtotal(it["m"], main) + it["main"] + step
-		if _reverse_main(el):
-			for it in li:
-				var outer_start: float = it["pos"] - it["m"]["l" if row else "t"]
-				var outer_len: float = _mtotal(it["m"], main) + it["main"]
-				it["pos"] = (
+		for k in range(lo, hi):
+			var mk: PackedFloat64Array = it_m[k]
+			it_pos[k] = cursor + mk[ms_i]
+			cursor += it_mmain[k] + it_main[k] + step
+		if reverse:
+			for k in range(lo, hi):
+				var mk: PackedFloat64Array = it_m[k]
+				var outer_start: float = it_pos[k] - mk[ms_i]
+				var outer_len: float = it_mmain[k] + it_main[k]
+				it_pos[k] = (
 					2.0 * area.position[main] + am
-					- outer_start - outer_len + it["m"]["l" if row else "t"]
+					- outer_start - outer_len + mk[ms_i]
 				)
 
 	# Cross position and final cross size per item (align-items/align-self).
-	for line in lines:
-		for it in line["items"]:
-			var al := _str(it["el"], "align-self", "auto")
+	for li in nlines:
+		var lc := l_cross[li]
+		var lp := l_pos[li]
+		for k in range(line_lo[li], line_hi[li]):
+			var child: UxmlElement = kids[k]
+			var al := _str(child, "align-self", "auto")
 			if al == "auto":
 				al = align_items
 			if not ALIGN.has(al):
-				_warn_once(it["el"], "align-self", 'align-self: "%s" is not supported; flex-start used' % al)
+				_warn_once(child, "align-self", 'align-self: "%s" is not supported; flex-start used' % al)
 				al = "flex-start"
 			if al == "baseline":
-				_warn_once(it["el"], "align-items", "baseline alignment is not supported; flex-start used")
+				_warn_once(child, "align-items", "baseline alignment is not supported; flex-start used")
 				al = "flex-start"
-			var mct := _mtotal(it["m"], cross)
-			if al == "stretch" and _dim(it["el"], cross_prop, ac) < 0.0:
+			var mct: float = it_mcross[k]
+			if al == "stretch" and _dim(child, cross_prop, ac) < 0.0:
 				# Stretch still honors min/max — a max-height:30 item in a
 				# 100-high line stretches to 30, not 100 — and the
 				# padding+border floor applies here too.
-				var smin := maxf(
-					_min_or(it["el"], "min-" + cross_prop, ac, 0.0), it["in_cross"])
-				it["cross"] = clampf(
-					maxf(0.0, line["cross"] - mct),
+				var smin := maxf(_min_or(child, min_cross, ac, 0.0), it_inc[k])
+				it_cross[k] = clampf(
+					maxf(0.0, lc - mct),
 					smin,
-					maxf(_max_or(it["el"], "max-" + cross_prop, ac), smin)
+					maxf(_bound(child, max_cross, ac, false), smin)
 				)
 			else:
-				it["cross"] = it["nat_cross"]
-			var mc_start: float = it["m"]["t" if row else "l"]
-			var mc_end: float = it["m"]["b" if row else "r"]
+				it_cross[k] = it_ncross[k]
+			var mk: PackedFloat64Array = it_m[k]
+			var mc_start: float = mk[cs_i]
+			var mc_end: float = mk[ce_i]
 			match al:
 				"center":
-					it["cross_pos"] = line["pos"] + (line["cross"] - it["cross"] - mct) / 2.0 + mc_start
+					it_cpos[k] = lp + (lc - it_cross[k] - mct) / 2.0 + mc_start
 				"flex-end":
-					it["cross_pos"] = line["pos"] + line["cross"] - it["cross"] - mc_end
+					it_cpos[k] = lp + lc - it_cross[k] - mc_end
 				_:
-					it["cross_pos"] = line["pos"] + mc_start
+					it_cpos[k] = lp + mc_start
 
 	# Emit rects and recurse.
 	var extent := Vector2.ZERO
-	for line in lines:
-		for it in line["items"]:
+	var amain: float = area.position[main]
+	var across: float = area.position[cross]
+	for li in nlines:
+		for k in range(line_lo[li], line_hi[li]):
 			var pos := Vector2.ZERO
-			pos[main] = it["pos"]
-			pos[cross] = it["cross_pos"]
+			pos[main] = it_pos[k]
+			pos[cross] = it_cpos[k]
 			var size := Vector2.ZERO
-			size[main] = it["main"]
-			size[cross] = it["cross"]
-			_layout(it["el"], Rect2(pos, size), area.size.x)
-			var mend: float = it["m"]["r" if row else "b"]
-			var mcend: float = it["m"]["b" if row else "r"]
-			extent[main] = maxf(extent[main], pos[main] + size[main] + mend - area.position[main])
-			extent[cross] = maxf(extent[cross], pos[cross] + size[cross] + mcend - area.position[cross])
+			size[main] = it_main[k]
+			size[cross] = it_cross[k]
+			_layout(kids[k], Rect2(pos, size), asx)
+			var mk: PackedFloat64Array = it_m[k]
+			var mend: float = mk[me_i]
+			var mcend: float = mk[ce_i]
+			extent[main] = maxf(extent[main], pos[main] + size[main] + mend - amain)
+			extent[cross] = maxf(extent[cross], pos[cross] + size[cross] + mcend - across)
 	return extent
 
 
 ## Distribute a line's free main-axis space: grow when positive, shrink
 ## (scaled by basis) when negative, freezing items that hit min/max and
 ## redistributing until stable — bounded by the item count.
-func _flex_line(items: Array, am: float, gap_m: float, main: int) -> void:
-	for _iter in range(items.size() + 1):
-		var used := gap_m * maxf(0.0, items.size() - 1.0)
-		for it in items:
-			used += it["main"] + _mtotal(it["m"], main)
+func _flex_line(
+	lo: int, hi: int,
+	it_main: PackedFloat64Array, it_mmain: PackedFloat64Array,
+	it_min: PackedFloat64Array, it_max: PackedFloat64Array,
+	it_grow: PackedFloat64Array, it_shrink: PackedFloat64Array,
+	it_frozen: PackedByteArray, am: float, gap_m: float
+) -> void:
+	var cnt := hi - lo
+	for _iter in range(cnt + 1):
+		var used := gap_m * maxf(0.0, cnt - 1.0)
+		for k in range(lo, hi):
+			used += it_main[k] + it_mmain[k]
 		var free := am - used
 		if absf(free) < EPS:
 			break
 		var froze := false
 		if free > 0.0:
 			var gsum := 0.0
-			for it in items:
-				if not it["frozen"]:
-					gsum += it["grow"]
+			for k in range(lo, hi):
+				if it_frozen[k] == 0:
+					gsum += it_grow[k]
 			if gsum <= 0.0:
 				break
 			var eff := free if gsum >= 1.0 else free * gsum
-			for it in items:
-				if it["frozen"] or it["grow"] <= 0.0:
+			for k in range(lo, hi):
+				if it_frozen[k] != 0 or it_grow[k] <= 0.0:
 					continue
-				var target: float = it["main"] + eff * it["grow"] / gsum
-				if target > it["max"] + EPS:
-					it["main"] = it["max"]
-					it["frozen"] = true
+				var target: float = it_main[k] + eff * it_grow[k] / gsum
+				if target > it_max[k] + EPS:
+					it_main[k] = it_max[k]
+					it_frozen[k] = 1
 					froze = true
-				elif target < it["min"] - EPS:
-					it["main"] = it["min"]
-					it["frozen"] = true
+				elif target < it_min[k] - EPS:
+					it_main[k] = it_min[k]
+					it_frozen[k] = 1
 					froze = true
 				else:
-					it["main"] = target
+					it_main[k] = target
 		else:
 			var ssum := 0.0
-			for it in items:
-				if not it["frozen"]:
-					ssum += it["shrink"] * it["main"]
+			for k in range(lo, hi):
+				if it_frozen[k] == 0:
+					ssum += it_shrink[k] * it_main[k]
 			if ssum <= 0.0:
 				break
 			var eff := -free if ssum >= 1.0 else -free * ssum
-			for it in items:
-				if it["frozen"] or it["shrink"] <= 0.0:
+			for k in range(lo, hi):
+				if it_frozen[k] != 0 or it_shrink[k] <= 0.0:
 					continue
-				var target: float = it["main"] - eff * it["shrink"] * it["main"] / ssum
-				if target < it["min"] - EPS:
-					it["main"] = it["min"]
-					it["frozen"] = true
+				var target: float = it_main[k] - eff * it_shrink[k] * it_main[k] / ssum
+				if target < it_min[k] - EPS:
+					it_main[k] = it_min[k]
+					it_frozen[k] = 1
 					froze = true
-				elif target > it["max"] + EPS:
-					it["main"] = it["max"]
-					it["frozen"] = true
+				elif target > it_max[k] + EPS:
+					it_main[k] = it_max[k]
+					it_frozen[k] = 1
 					froze = true
 				else:
-					it["main"] = target
+					it_main[k] = target
 		if not froze:
 			break
-
-
-# Total margin along an axis index (0=x,1=y).
-func _mtotal(m: Dictionary, axis: int) -> float:
-	return m["l"] + m["r"] if axis == 0 else m["t"] + m["b"]

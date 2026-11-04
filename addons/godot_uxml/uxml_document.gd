@@ -451,6 +451,18 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 	return ms
 
 
+## Elements whose intrinsic measure depends on measurer call history: a
+## wrapping Label reports its height at the width the previous measure left
+## on it. The layout never memoizes subtrees containing one.
+func _volatile_measures() -> Dictionary:
+	var out := {}
+	for el in _controls:
+		var c: Control = _controls[el]
+		if c is Label and c.autowrap_mode != TextServer.AUTOWRAP_OFF:
+			out[el] = true
+	return out
+
+
 func _scroll_bar_width() -> float:
 	for el in _scroll:
 		var sc: ScrollContainer = _natives.get(el)
@@ -469,7 +481,8 @@ func _do_layout() -> void:
 		_measure_leaf, _rt_warnings,
 		{"source": _doc.source, "file": _doc.path,
 		 "scroll_bar_width": _scroll_bar_width(),
-		 "warned": _layout_warned}
+		 "warned": _layout_warned,
+		 "volatile": _volatile_measures()}
 	)
 	var rects: Dictionary = res["rects"]
 	var insets: Dictionary = res["insets"]

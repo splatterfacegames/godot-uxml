@@ -23,7 +23,24 @@ static var _re_number := RegEx.create_from_string("^-?(\\d+\\.?\\d*|\\.\\d+)$")
 ## "6px" / "50%" / "auto" / "none" / "0" ->
 ##   {kind: "px"|"percent"|"auto"|"none", value: float}
 ## or {kind: "invalid", problem: String} for anything unreadable.
+## Memoized by text: the cascade keeps author strings, so the same few
+## hundred values are re-read on every layout/apply. Results are shared —
+## callers treat them as read-only.
 static func parse_length(text: String) -> Dictionary:
+	var hit = _c_parse_length.get(text)
+	if hit != null:
+		return hit
+	if _c_parse_length.size() > 8192:
+		_c_parse_length.clear()
+	var out := _parse_length_uncached(text)
+	_c_parse_length[text] = out
+	return out
+
+
+static var _c_parse_length := {}
+
+
+static func _parse_length_uncached(text: String) -> Dictionary:
 	var value := text.strip_edges()
 	if value.is_empty():
 		return {"kind": "invalid", "problem": "empty value"}
@@ -48,7 +65,24 @@ static func parse_length(text: String) -> Dictionary:
 
 
 ## Bare numbers such as `flex-grow: 1`. NAN when the text is not a number.
+## Memoized by text: the cascade keeps author strings, so the same few
+## hundred values are re-read on every layout/apply. Results are shared —
+## callers treat them as read-only.
 static func parse_number(text: String) -> float:
+	var hit = _c_parse_number.get(text)
+	if hit != null:
+		return hit
+	if _c_parse_number.size() > 8192:
+		_c_parse_number.clear()
+	var out := _parse_number_uncached(text)
+	_c_parse_number[text] = out
+	return out
+
+
+static var _c_parse_number := {}
+
+
+static func _parse_number_uncached(text: String) -> float:
 	var value := text.strip_edges()
 	if _re_number.search(value) == null:
 		return NAN
@@ -59,7 +93,24 @@ static func parse_number(text: String) -> float:
 ## resource("name") is Unity resource lookup — out of scope, returns a
 ## problem so the caller diagnoses instead of guessing. A bare path with no
 ## wrapper is accepted for convenience and returned as-is.
+## Memoized by text: the cascade keeps author strings, so the same few
+## hundred values are re-read on every layout/apply. Results are shared —
+## callers treat them as read-only.
 static func parse_url(text: String) -> Dictionary:
+	var hit = _c_parse_url.get(text)
+	if hit != null:
+		return hit
+	if _c_parse_url.size() > 8192:
+		_c_parse_url.clear()
+	var out := _parse_url_uncached(text)
+	_c_parse_url[text] = out
+	return out
+
+
+static var _c_parse_url := {}
+
+
+static func _parse_url_uncached(text: String) -> Dictionary:
 	var value := text.strip_edges()
 	if value.is_empty():
 		return {"ok": false, "path": "", "problem": "empty reference"}
@@ -146,7 +197,24 @@ static var _re_hex := RegEx.create_from_string("^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{
 
 ## "#rgb" / "#rrggbb" / "#rrggbbaa" / rgb(r,g,b) / rgba(r,g,b,a) / named ->
 ## {color: Color} or {color: null-ish, problem: String}.
+## Memoized by text: the cascade keeps author strings, so the same few
+## hundred values are re-read on every layout/apply. Results are shared —
+## callers treat them as read-only.
 static func parse_color(text: String) -> Dictionary:
+	var hit = _c_parse_color.get(text)
+	if hit != null:
+		return hit
+	if _c_parse_color.size() > 8192:
+		_c_parse_color.clear()
+	var out := _parse_color_uncached(text)
+	_c_parse_color[text] = out
+	return out
+
+
+static var _c_parse_color := {}
+
+
+static func _parse_color_uncached(text: String) -> Dictionary:
 	var value := text.strip_edges().to_lower()
 	if value.is_empty():
 		return {"color": Color.TRANSPARENT, "ok": false, "problem": "empty value"}
