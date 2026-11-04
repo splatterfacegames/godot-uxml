@@ -1,0 +1,5 @@
+@import url("nested/theme.uss");
+
+.screen {
+  background-image: url("../Resources/UI/icon.png");
+}

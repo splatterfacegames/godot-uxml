@@ -1,0 +1,4 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="project://database/Assets/UI/base.uss" />
+  <ui:VisualElement name="screen" class="screen" />
+</ui:UXML>

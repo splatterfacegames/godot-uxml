@@ -1,0 +1,9 @@
+@import url("a.uss");
+
+.x {
+  color: #222222;
+}
+
+.y {
+  color: #333333;
+}

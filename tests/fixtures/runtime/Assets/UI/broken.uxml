@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="shell">
+    <ui:Label name="kept" text="survives" />
+    <ui:Button name="dangling" text="never closed"
+</ui:UXML>

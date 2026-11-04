@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="Options.uss" />
+  <ui:VisualElement class="options-shell">
+    <ui:VisualElement class="options-row">
+      <ui:TextField class="option-control" name="profile-name" label="Profile name" value="Runner" />
+      <ui:SliderInt class="option-control" name="volume" label="Volume" low-value="0" high-value="100" value="75" />
+      <ui:Slider class="option-control" name="ui-scale" label="UI scale" low-value="0.75" high-value="1.5" value="1.25" />
+      <ui:DropdownField class="option-control" name="quality" label="Quality" choices="Low,Medium,High" value="High" />
+      <ui:Toggle class="option-control" name="fullscreen" label="Fullscreen" value="true" />
+      <ui:ColorField class="option-control" name="accent" label="Accent" value="#35a36f" />
+      <ui:ObjectField class="option-control" name="icon-asset" label="Icon" object-type="UnityEngine.Texture2D" value="project://database/Assets/Textures/icon.png" />
+    </ui:VisualElement>
+  </ui:VisualElement>
+</ui:UXML>

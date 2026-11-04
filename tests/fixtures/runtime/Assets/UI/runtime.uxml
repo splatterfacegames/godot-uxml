@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="runtime.uss" />
+  <ui:VisualElement name="screen" class="screen">
+    <ui:Label name="title" text="Settings" class="title" />
+    <ui:Button name="play" class="btn" text="Play" />
+    <ui:Button name="dup" class="btn" text="A" />
+    <ui:Button name="dup" class="btn" text="B" />
+    <ui:Toggle name="mute" label="Mute" value="true" class="chk" />
+    <ui:Slider name="vol" label="Volume" low-value="0" high-value="10" value="4" />
+    <ui:SliderInt name="lives" label="Lives" low-value="0" high-value="5" value="3" />
+    <ui:TextField name="player" label="Name" value="Ada" placeholder-text="type here" />
+    <ui:DropdownField name="level" label="Level" choices="Easy,Normal,Hard" value="Normal" />
+    <ui:Image name="icon" src="icon.png" />
+    <ui:ScrollView name="scroller" class="scroller">
+      <ui:VisualElement name="tall" class="tall">
+        <ui:Button name="deep-button" class="btn" text="Deep" />
+      </ui:VisualElement>
+    </ui:ScrollView>
+    <ui:VisualElement name="off-area" class="hidden-area">
+      <ui:Button name="hidden-button" class="btn" text="Hidden" />
+    </ui:VisualElement>
+    <ui:VisualElement name="disabled-area" enabled="false">
+      <ui:Button name="disabled-button" class="btn" text="Disabled" />
+    </ui:VisualElement>
+    <ui:VisualElement name="ghost" class="ghost">
+      <ui:Button name="ghost-button" class="btn" text="Ghost" />
+    </ui:VisualElement>
+    <ui:MysteryWidget name="odd" class="odd">
+      <ui:Label name="odd-child" text="kept" />
+    </ui:MysteryWidget>
+  </ui:VisualElement>
+</ui:UXML>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <!-- preserved prefix: tabs and spacing stay untouched -->
+	<ui:Label name='before-repair' text="Before repair" />
+    <!-- repair-start: add a closing slash and angle bracket to the next element -->
+    <ui:Button name="broken-button" text="Repair me"
+    <!-- repair-end -->
+    <ui:Label name="after-repair" text='After repair' />
+</ui:UXML>

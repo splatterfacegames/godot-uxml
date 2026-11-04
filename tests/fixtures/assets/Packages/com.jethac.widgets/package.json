@@ -1,0 +1,8 @@
+{
+  "name": "com.jethac.widgets",
+  "version": "1.0.0",
+  "displayName": "Task 17A Fixture Widgets",
+  "description": "Deterministic package metadata for UXML Editor browser workflows.",
+  "unity": "2022.3",
+  "type": "library"
+}

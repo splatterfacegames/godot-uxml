@@ -1,0 +1,14 @@
+/* Task 17A menu stylesheet: preserve spacing and CRLF. */
+.menu-root {
+  padding-left: 24px;
+  padding-top: 16px;
+}
+
+.menu-button.primary {
+  background-color: #18794e;
+  color: #ffffff;
+}
+
+.menu-button {
+  min-width: 180px;
+}

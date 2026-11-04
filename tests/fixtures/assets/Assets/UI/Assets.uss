@@ -1,0 +1,11 @@
+.asset-root {
+  background-image: url("project://database/Assets/Textures/icon.png");
+}
+
+.asset-root > #relative-image {
+  background-image: url("../Textures/icon.png");
+}
+
+.asset-root > #package-image {
+  background-image: url("Packages/com.jethac.widgets/Textures/package-icon.png");
+}

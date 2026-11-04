@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="base.uss" />
+  <ui:VisualElement name="nested-root" class="nested-shell">
+    <ui:Button name="nested-action" class="nested-action" text="Nested action" />
+  </ui:VisualElement>
+</ui:UXML>

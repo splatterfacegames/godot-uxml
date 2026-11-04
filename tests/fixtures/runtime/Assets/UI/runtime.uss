@@ -1,0 +1,19 @@
+.screen {
+  flex-direction: column;
+  width: 400px;
+  height: 600px;
+  padding: 8px;
+  gap: 4px;
+}
+.title { font-size: 20px; color: #112233; }
+.btn { height: 30px; min-width: 60px; }
+.btn:hover { background-color: #00ff00; }
+.btn:active { background-color: #ff0000; }
+.btn:focus { border-width: 2px; border-color: #0000ff; }
+.btn:disabled { color: #888888; }
+.chk:checked { border-width: 3px; }
+.tall { height: 400px; }
+.scroller { height: 150px; }
+.hidden-area { display: none; }
+.ghost { visibility: hidden; height: 40px; }
+.odd { height: 20px; }

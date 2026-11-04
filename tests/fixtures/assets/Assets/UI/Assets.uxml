@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="Assets.uss" />
+  <ui:VisualElement name="asset-root" class="asset-root">
+    <ui:Image name="project-image" image="project://database/Assets/Textures/icon.png" />
+    <ui:Image name="relative-image" image="../Textures/icon.png" />
+    <ui:Image name="package-image" image="Packages/com.jethac.widgets/Textures/package-icon.png" />
+  </ui:VisualElement>
+</ui:UXML>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="ui.uss" />
+  <ui:VisualElement name="panel" class="panel">
+    <ui:Label name="title" text="godot-uxml minimal" class="title" />
+    <ui:Button name="play" class="btn" text="Play" />
+    <ui:Slider name="volume" label="Volume" low-value="0" high-value="100" value="60" />
+    <ui:Toggle name="fullscreen" label="Fullscreen" />
+    <ui:Button name="quit" class="btn" text="Quit" />
+  </ui:VisualElement>
+</ui:UXML>

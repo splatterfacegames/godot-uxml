@@ -1,0 +1,8 @@
+/* preserved header formatting remains exact */
+.recover-root{
+	padding-left : 12px;
+	color: #12zz34; /* repair: invalid hexadecimal color */
+	background-color: rgb(10, 20, ); /* repair: missing blue component */
+}
+
+.trailing-edge { width: calc(100% - ); } /* keep */

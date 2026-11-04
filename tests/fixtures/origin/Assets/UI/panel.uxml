@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="../Styles/sheet.uss" />
+  <ui:VisualElement name="root" class="fonted">
+    <ui:Label name="inheritor" text="hi" />
+    <ui:VisualElement name="mid">
+      <ui:Label name="deep" text="deeper" />
+    </ui:VisualElement>
+  </ui:VisualElement>
+</ui:UXML>

@@ -1,0 +1,10 @@
+.panel {
+  flex-direction: column;
+  width: 320px;
+  padding: 16px;
+  gap: 8px;
+}
+.title { font-size: 18px; margin-bottom: 8px; }
+.btn { height: 32px; }
+.btn:hover { background-color: #2c4a66; }
+.btn:focus { border-width: 2px; border-color: #66aaff; }

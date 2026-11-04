@@ -1,0 +1,15 @@
+.options-shell {
+  flex-direction: column;
+  padding: 18px;
+}
+
+.options-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.option-control {
+  min-width: 180px;
+  flex-grow: 1;
+}

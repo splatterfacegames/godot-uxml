@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="root">
+    <ui:Slider name="s" low-value="abc" high-value="xyz" value="nope" />
+    <ui:Toggle name="t" value="maybe" />
+    <ui:DropdownField name="d" choices="A,B" index="99" />
+    <ui:TextField name="f" multiline="perhaps" />
+    <ui:Button name="b" text="ok" />
+  </ui:VisualElement>
+</ui:UXML>

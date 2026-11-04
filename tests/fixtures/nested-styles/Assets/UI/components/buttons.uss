@@ -1,0 +1,5 @@
+.nested-action {
+  width: 160px;
+  color: #fef3c7;
+  background-color: #245f9e;
+}

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="review.uss" />
+  <ui:VisualElement name="screen" class="screen">
+    <!-- explicit widths must shrink below their preferred size -->
+    <ui:VisualElement name="row300" class="row300">
+      <ui:VisualElement name="s1" class="w200" />
+      <ui:VisualElement name="s2" class="w200" />
+    </ui:VisualElement>
+    <!-- stretch must honor max cross size on both axes -->
+    <ui:VisualElement name="rowmax" class="rowmax">
+      <ui:VisualElement name="maxh" class="maxh" />
+    </ui:VisualElement>
+    <ui:VisualElement name="colmax" class="colmax">
+      <ui:VisualElement name="maxw" class="maxw" />
+    </ui:VisualElement>
+    <!-- focusable on wrapped controls targets the native -->
+    <ui:Slider name="nofocus" label="NoFocus" focusable="false" />
+    <ui:Slider name="yesfocus" label="YesFocus" focusable="true" class="fstyle" />
+    <ui:TextField name="focusfield" label="FF" focusable="true" class="fstyle" />
+    <ui:DropdownField name="focusdd" label="FD" focusable="true" choices="a,b" class="fstyle" />
+    <!-- focusable on UNWRAPPED elements: no extra wrapper tab stop -->
+    <ui:VisualElement name="focusve" focusable="true" class="fstyle" />
+    <ui:Label name="focuslabel" text="FL" focusable="true" class="fstyle" />
+    <ui:Label name="unfocuslabel" text="UL" />
+    <!-- readonly survives restyles -->
+    <ui:TextField name="readonlyf" label="RO" value="fixed" readonly="true" />
+    <ui:TextField name="mlro" label="ML" value="multi" readonly="true" multiline="true" />
+    <ui:TextField name="editablef" label="ED" value="open" />
+    <!-- dropdown value is choice text; index is positional -->
+    <ui:DropdownField name="res" label="Res" choices="720,1080" value="1080" />
+    <ui:DropdownField name="byindex" label="Idx" choices="720,1080" index="0" />
+    <!-- authored insets reach internal chrome -->
+    <ui:TextField name="padded" label="Padded" value="x" class="padded" />
+    <ui:Slider name="padslider" label="PS" class="padded" />
+    <ui:DropdownField name="paddd" label="PD" choices="a,b" class="padded" />
+    <ui:Label name="padlabel" text="T" class="padlabel" />
+    <ui:Image name="padimg" src="icon.png" class="padimg" />
+    <!-- style restoration + stable font base -->
+    <ui:Button name="hoverfont" class="hoverfont" text="H" />
+    <ui:TextField name="caprestore" label="Cap" class="capfont" />
+    <!-- CSS green is #008000 -->
+    <ui:Label name="greenlbl" text="G" class="greened" />
+    <!-- percentage padding must reach native text margins too -->
+    <ui:VisualElement name="pctrow" class="pctrow">
+      <ui:Label name="pctlabel" text="P" class="pctpad" />
+      <ui:Button name="pctbtn" text="B" class="pctpad" />
+      <ui:Button name="bgbtn" text="B" class="bgpad" />
+    </ui:VisualElement>
+    <!-- padding+border floor: shrink stops at the inset total -->
+    <ui:VisualElement name="floorrow" class="floorrow">
+      <ui:VisualElement name="padfloor" class="padfloor" />
+    </ui:VisualElement>
+    <!-- font source transitions: url font -> default+bold -> normal -->
+    <ui:Button name="fontswap" class="fonturl" text="F" />
+    <ui:Label name="alignreset" text="A" class="alignstate" />
+    <!-- smaller-authored native controls vs native minimum sizes -->
+    <ui:Image name="smallimg" src="icon.png" class="smalldim" />
+    <ui:Slider name="smallsl" label="SmallCaption" class="smalldim" />
+    <!-- missing asset for diagnostic dedupe -->
+    <ui:VisualElement name="missingbg" class="missingbg" />
+  </ui:VisualElement>
+</ui:UXML>

@@ -1,0 +1,6 @@
+@import url("../../inside-root.uss");
+@import url("../../../escape.uss");
+
+.v {
+  color: red;
+}

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:acme="Acme.Widgets">
+  <Style src="Unsupported.uss" />
+  <acme:UnknownPanel name="unknown-panel" class="unknown-panel" mystery-mode="orbital">
+    <ui:Label name="preserved-label" class="unsupported-child" text="Preserved child" />
+    <ui:Button name="preserved-button" text="Still editable" />
+  </acme:UnknownPanel>
+</ui:UXML>

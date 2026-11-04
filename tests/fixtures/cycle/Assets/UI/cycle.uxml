@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="a.uss" />
+  <ui:VisualElement name="v" class="x y" />
+</ui:UXML>

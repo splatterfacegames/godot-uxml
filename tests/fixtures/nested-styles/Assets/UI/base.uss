@@ -1,0 +1,11 @@
+@import url("./components/buttons.uss");
+
+.nested-shell {
+  padding: 20px;
+  background-color: #e7eef6;
+}
+
+.nested-action {
+  color: #16324f;
+  padding-left: 12px;
+}

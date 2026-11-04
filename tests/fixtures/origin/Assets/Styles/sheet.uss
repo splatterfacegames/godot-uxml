@@ -1,0 +1,4 @@
+/* Declares -unity-font relative to THIS sheet (Assets/Styles/), not the
+   UXML directory (Assets/UI/). Descendants inherit the declaration and its
+   url() must still resolve against the declaring stylesheet. */
+.fonted { -unity-font: url("Fonts/CourierPrime-Regular.ttf"); }

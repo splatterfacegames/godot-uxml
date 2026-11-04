@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="outside" class="item" />
+  <ui:VisualElement name="inner" class="inner">
+    <Style src="scoped.uss" />
+    <ui:VisualElement name="inside" class="item" />
+  </ui:VisualElement>
+</ui:UXML>

@@ -1,0 +1,8 @@
+.unknown-panel:focus-visible > .unsupported-child {
+  -unity-unsupported-glow: 7px;
+  color: #b91c1c;
+}
+
+.unknown-panel:visited {
+  opacity: 0.4;
+}

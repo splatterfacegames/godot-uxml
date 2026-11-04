@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui='UnityEngine.UIElements'>
+  <Style src = "Menu.uss" />
+  <ui:VisualElement name="menu-root" class="menu-root">
+    <ui:Label name="menu-title" text="Main Menu" />
+    <ui:Button name = 'play-button' class='menu-button primary' text="Play &amp; Go" tooltip='Press &quot;Enter&quot;' />
+    <!-- Task 17A menu: keep this comment byte-for-byte. -->
+    <!-- keep-between-buttons -->
+    <ui:Button name="quit-button" class = 'menu-button' text='Quit &#x26; Save' />
+  </ui:VisualElement>
+</ui:UXML>
