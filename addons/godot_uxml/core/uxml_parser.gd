@@ -84,6 +84,21 @@ static func _is_name_char(c: int) -> bool:
 	return _is_name_start(c) or (c >= 48 and c <= 57) or c == 46 or c == 58 or c == 45
 
 
+## Index just past the run of name characters starting at `i` (inlined
+## _is_name_char — this runs for every tag and attribute name).
+func _name_end(i: int) -> int:
+	var n := _src.length()
+	while i < n:
+		var c := _src.unicode_at(i)
+		if not (
+			(c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 58)
+			or c == 95 or c == 46 or c == 45
+		):
+			return i
+		i += 1
+	return i
+
+
 func _warn(message: String, start: int, end: int) -> void:
 	var diag := UxmlDiagnostic.make("malformed", message, _src, start, _file)
 	diag["end_offset"] = end
@@ -91,7 +106,11 @@ func _warn(message: String, start: int, end: int) -> void:
 
 
 func _skip_space() -> void:
-	while _is_space(_char(_pos)):
+	var n := _src.length()
+	while _pos < n:
+		var c := _src.unicode_at(_pos)
+		if c != 32 and c != 9 and c != 10 and c != 13:
+			return
 		_pos += 1
 
 
@@ -126,8 +145,7 @@ func _seek_tag() -> void:
 ## Returns {prefix, local}.
 func _read_name() -> Dictionary:
 	var start := _pos
-	while _is_name_char(_char(_pos)):
-		_pos += 1
+	_pos = _name_end(_pos)
 	var raw := _src.substr(start, _pos - start)
 	var colon := raw.find(":")
 	if colon < 0:
@@ -138,8 +156,7 @@ func _read_name() -> Dictionary:
 ## Returns null when _pos is not on an attribute name so the caller recovers.
 func _read_attribute() -> Variant:
 	var start := _pos
-	while _is_name_char(_char(_pos)):
-		_pos += 1
+	_pos = _name_end(_pos)
 	if _pos == start:
 		return null
 	var attr_name := _src.substr(start, _pos - start)
@@ -263,6 +280,8 @@ func _parse_element() -> UxmlElement:
 ## "&lt;", not "<". Numeric references outside the Unicode range (and
 ## surrogate halves) and unknown entity names are left as written.
 static func decode_entities(text: String) -> String:
+	if text.find("&") < 0:
+		return text # nothing to decode — skip the regex scan entirely
 	var out := ""
 	var at := 0
 	while true:

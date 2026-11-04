@@ -105,28 +105,37 @@ static func _find_quote_close(text: String, i: int) -> int:
 
 ## Scan forward to the first character in `stops` that is not inside a string,
 ## a comment, or a bracket pair. Returns source length if none is found.
-func _scan_to(from: int, stops: String) -> int:
+## `limit` (>= 0) bounds the scan: callers that clamp the result with
+## mini(result, end) get the same answer without scanning past `end` — the
+## unbounded scan made selector-group parsing quadratic in the sheet size.
+## Stop characters are matched as code points (no per-char String alloc).
+func _scan_to(from: int, stops: String, limit: int = -1) -> int:
+	var n := _src.length()
+	var lim := n if limit < 0 or limit > n else limit
+	var s0 := stops.unicode_at(0)
+	var s1 := stops.unicode_at(1) if stops.length() > 1 else -2
+	var s2 := stops.unicode_at(2) if stops.length() > 2 else -2
 	var i := from
 	var depth := 0
-	while i < _src.length():
+	while i < lim:
 		var c := _src.unicode_at(i)
-		if c == 34 or c == 39: # '"' or '\''
+		if c == 34 or c == 39: # '"' or '''
 			var close := _find_quote_close(_src, i)
-			i = _src.length() if close < 0 else close
+			i = n if close < 0 else close
 			continue
-		if c == 47 and _char(i + 1) == 42: # '/*'
+		if c == 47 and i + 1 < n and _src.unicode_at(i + 1) == 42: # '/*'
 			var close := _src.find("*/", i + 2)
-			i = _src.length() if close < 0 else close + 2
+			i = n if close < 0 else close + 2
 			continue
 		if c == 40 or c == 91: # '(' or '['
 			depth += 1
 		elif c == 41 or c == 93: # ')' or ']'
 			if depth > 0:
 				depth -= 1
-		elif depth == 0 and stops.find(char(c)) >= 0:
+		elif depth == 0 and (c == s0 or c == s1 or c == s2):
 			return i
 		i += 1
-	return _src.length()
+	return n if lim == n else lim
 
 
 static func _trim_bounds(source: String, start: int, end: int) -> Dictionary:
@@ -306,7 +315,7 @@ func _parse_selector_group(start: int, end: int) -> Array:
 	var selectors: Array = []
 	var from := start
 	while true:
-		var comma := mini(_scan_to(from, ","), end)
+		var comma := mini(_scan_to(from, ",", end), end)
 		selectors.append(_parse_selector(from, comma))
 		if comma >= end:
 			break
@@ -344,7 +353,7 @@ func _parse_declaration_list(start: int, end: int, problems: Array) -> Array:
 			problems.append({"message": "declaration without a value", "start": from, "end": to})
 			pos = to + 1
 			continue
-		var stop := mini(_scan_to(colon + 1, ";}"), end)
+		var stop := mini(_scan_to(colon + 1, ";}", end), end)
 		var value := _trim_bounds(_src, colon + 1, stop)
 
 		declarations.append({
@@ -367,6 +376,10 @@ func _parse_declaration_list(start: int, end: int, problems: Array) -> Array:
 ## "a/**/b" does not fuse into "ab". An unterminated comment truncates the
 ## value and records a problem.
 static func _strip_comments(text: String, problems: Array, base: int) -> String:
+	# No comment opener anywhere: the scan below would copy every character
+	# verbatim (quoted or not), so the result is just the trimmed text.
+	if text.find("/*") < 0:
+		return text.strip_edges()
 	var out := ""
 	var i := 0
 	while i < text.length():

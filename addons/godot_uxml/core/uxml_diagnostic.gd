@@ -45,19 +45,17 @@ static func make(
 
 
 ## 1-based (line, column) of `offset` inside `source`.
+## Native String.count/rfind instead of a per-character GDScript loop: the
+## old scan was O(offset) interpreted steps per diagnostic, which dominated
+## cascades that warn on many elements of a large document.
 static func line_col(source: String, offset: int) -> Vector2i:
-	var line := 1
-	var column := 1
-	var i := 0
 	var limit := mini(offset, source.length())
-	while i < limit:
-		if source.unicode_at(i) == 10:
-			line += 1
-			column = 1
-		else:
-			column += 1
-		i += 1
-	return Vector2i(line, column)
+	if limit <= 0:
+		return Vector2i(1, 1)
+	var nl := source.rfind("\n", limit - 1)
+	if nl < 0:
+		return Vector2i(1, limit + 1)
+	return Vector2i(source.count("\n", 0, limit) + 1, limit - nl)
 
 
 static func format(diag: Dictionary) -> String:
