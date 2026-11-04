@@ -67,6 +67,13 @@ const SUPPORTED := {
 	"color": true, "font-size": true, "white-space": true,
 	"-unity-font": true, "-unity-font-definition": true,
 	"-unity-font-style": true, "-unity-text-align": true,
+	# 9-slice backgrounds, image tint, text outline
+	"-unity-slice-left": true, "-unity-slice-right": true,
+	"-unity-slice-top": true, "-unity-slice-bottom": true,
+	"-unity-slice-scale": true,
+	"-unity-background-image-tint-color": true,
+	"-unity-text-outline": true,
+	"-unity-text-outline-width": true, "-unity-text-outline-color": true,
 }
 
 ## Shorthand -> longhands. Radii run clockwise from the top-left corner,
@@ -185,6 +192,24 @@ static func expand_shorthand(property: String, value: String) -> Array:
 			return []
 		var col: String = parts[1] if parts.size() > 1 else parts[0]
 		return [["row-gap", parts[0]], ["column-gap", col]]
+
+	# -unity-text-outline: <width> <color> (either order, either optional).
+	if property == "-unity-text-outline":
+		var w := ""
+		var c := ""
+		for part in split_value(value):
+			if w.is_empty() and (part.ends_with("px") or _is_number(part)):
+				w = part
+			elif c.is_empty():
+				c = part
+			else:
+				return []
+		var out_o: Array = []
+		if not w.is_empty():
+			out_o.append(["-unity-text-outline-width", w])
+		if not c.is_empty():
+			out_o.append(["-unity-text-outline-color", c])
+		return out_o
 
 	var targets = BOX_SHORTHANDS.get(property)
 	if targets == null:

@@ -165,9 +165,7 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 		var sb := _stylebox(style, el)
 		var tex := _texture(style, "background-image", el)
 		if sb == null and tex != null:
-			var st := StyleBoxTexture.new()
-			st.texture = tex
-			sb = st
+			sb = _texture_stylebox(tex, style, el)
 		elif sb != null and tex != null:
 			# StyleBoxFlat cannot carry a texture; the image wins the fill
 			# and the flat border/background is diagnosed, not silently kept.
@@ -175,9 +173,7 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 				"bg-image-plus-border", el,
 				"background-image combined with border/background styling: the image is drawn, border styling is not"
 			)
-			var st2 := StyleBoxTexture.new()
-			st2.texture = tex
-			sb = st2
+			sb = _texture_stylebox(tex, style, el)
 		for slot in _stylebox_slots(c):
 			if sb != null:
 				c.add_theme_stylebox_override(slot, sb)
@@ -204,6 +200,69 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 		c.remove_theme_font_override("font")
 
 	_apply_text_layout(c, style, el)
+	_apply_text_outline(c, style, el)
+
+
+## USS text outline → Godot font outline. Unity's width is the outline
+## thickness around each glyph; Godot's outline_size is the full stroke
+## width centred on the glyph edge, so it is doubled.
+func _apply_text_outline(c: Control, style: Dictionary, el: UxmlElement) -> void:
+	if not (c is Label or c is Button or c is LineEdit):
+		return
+	var w := _float_px(style, "-unity-text-outline-width", el)
+	var col = _color(style, "-unity-text-outline-color", el)
+	if w > 0.0:
+		c.add_theme_constant_override("outline_size", maxi(1, roundi(w * 2.0)))
+		var oc: Color = col if col != null else Color.BLACK
+		c.add_theme_color_override("font_outline_color", oc)
+	else:
+		if c.has_theme_constant_override("outline_size"):
+			c.remove_theme_constant_override("outline_size")
+		if c.has_theme_color_override("font_outline_color"):
+			c.remove_theme_color_override("font_outline_color")
+
+
+func _float_px(style: Dictionary, name: String, el: UxmlElement) -> float:
+	var e = style.get(name)
+	if e == null:
+		return 0.0
+	var n := UssValues.parse_number(String(e["value"]))
+	if not is_nan(n):
+		return n
+	var p := UssValues.parse_length(String(e["value"]))
+	if p["kind"] == "px":
+		return float(p["value"])
+	_warn(el, name, '%s: "%s" is not a length; ignored' % [name, e["value"]])
+	return 0.0
+
+
+## background-image as a StyleBoxTexture honouring -unity-slice-* (9-slice
+## margins in source pixels) and -unity-background-image-tint-color.
+## -unity-slice-scale other than 1 is diagnosed and treated as 1.
+func _texture_stylebox(tex: Texture2D, style: Dictionary, el: UxmlElement) -> StyleBoxTexture:
+	var st := StyleBoxTexture.new()
+	st.texture = tex
+	st.texture_margin_left = _float_px(style, "-unity-slice-left", el)
+	st.texture_margin_right = _float_px(style, "-unity-slice-right", el)
+	st.texture_margin_top = _float_px(style, "-unity-slice-top", el)
+	st.texture_margin_bottom = _float_px(style, "-unity-slice-bottom", el)
+	var scale_e = style.get("-unity-slice-scale")
+	if scale_e != null:
+		var s := _float_px(style, "-unity-slice-scale", el)
+		if not is_equal_approx(s, 1.0):
+			_warn(el, "-unity-slice-scale", "-unity-slice-scale: only 1 is supported; 1 used")
+	var tint = _color(style, "-unity-background-image-tint-color", el)
+	if tint != null:
+		st.modulate_color = tint
+	return st
+
+
+func _has_slice_or_tint(style: Dictionary) -> bool:
+	for k in ["-unity-slice-left", "-unity-slice-right", "-unity-slice-top",
+			"-unity-slice-bottom", "-unity-background-image-tint-color"]:
+		if style.has(k):
+			return true
+	return false
 
 
 ## Wrapped natives (inside UxmlField) still get the field's box painted on
@@ -212,7 +271,13 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 ## on the native control itself.
 func _apply_box(box: UxmlBox, el: UxmlElement, style: Dictionary) -> void:
 	box.box_style = _stylebox(style, el)
-	box.box_texture = _texture(style, "background-image", el)
+	var tex := _texture(style, "background-image", el)
+	if tex != null and _has_slice_or_tint(style):
+		box.box_texture_style = _texture_stylebox(tex, style, el)
+		box.box_texture = null
+	else:
+		box.box_texture_style = null
+		box.box_texture = tex
 
 
 func _apply_caption(field: UxmlField, style: Dictionary, el: UxmlElement) -> void:
@@ -224,6 +289,7 @@ func _apply_caption(field: UxmlField, style: Dictionary, el: UxmlElement) -> voi
 		color if color != null else Color.WHITE,
 		color != null
 	)
+	_apply_text_outline(field.caption_node(), style, el)
 
 
 # ---------------------------------------------------------------------------

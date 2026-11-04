@@ -913,7 +913,7 @@ func test_escaped_quotes_in_values() -> void:
 # ---------------------------------------------------------------------------
 
 func test_out_of_scope_properties_warn() -> void:
-	var doc := _doc(ONE, '.x { cursor: pointer; -unity-text-outline-width: 1px; letter-spacing: 2px; color: red; }')
+	var doc := _doc(ONE, '.x { cursor: pointer; opacity: 0.5; letter-spacing: 2px; color: red; }')
 	var res := _resolved(doc)
 	eq(_count_kind(res["warnings"], "unsupported-property"), 3, "out-of-scope properties each warn")
 	eq(_val(doc, 'a', 'color'), 'red', "supported property unaffected")

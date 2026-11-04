@@ -158,7 +158,7 @@ UxmlResourceResolver ──────────────▶│ follows <S
   absolute positioning (`position`/`left`/`top`/`right`/`bottom`),
   `overflow`, `opacity`, `cursor`, `picking-mode`,
   `letter-spacing`/`word-spacing`/`-unity-paragraph-spacing`,
-  `-unity-text-outline-*`, transitions, transforms — warn
+  transitions, transforms — warn
   `unsupported-property` once per element/property; the value still
   cascades so the data is not lost.
 
@@ -522,3 +522,18 @@ for d in doc.diagnostics:                 # everything, parse→runtime
    of being silently kept as unknown items.
 9. No Unity theme stylesheet or control-part cascade: native Godot controls
    take those roles from milestone 2.
+
+## Background slicing, image tint, text outline
+
+- `-unity-slice-left/right/top/bottom` (source pixels) turn a
+  `background-image` into a 9-sliced `StyleBoxTexture`; on a
+  VisualElement the sliced image is drawn over any flat background/border.
+  `-unity-slice-scale` other than `1` warns `unsupported-value` and uses 1.
+- `-unity-background-image-tint-color` multiplies the image
+  (`StyleBoxTexture.modulate_color`) — one white panel texture can be
+  recoloured per element/class.
+- `-unity-text-outline-width` / `-unity-text-outline-color` and the
+  `-unity-text-outline: <width> <color>` shorthand map to Godot's
+  `outline_size` (2 × width, Godot strokes are centred) and
+  `font_outline_color` on Label, Button, LineEdit and field captions.
+  Inherited, as in Unity.

@@ -33,10 +33,19 @@ var box_texture: Texture2D = null:
 		box_texture = v
 		queue_redraw()
 
+## 9-sliced and/or tinted background image (USS -unity-slice-* /
+## -unity-background-image-tint-color). Drawn instead of box_texture.
+var box_texture_style: StyleBox = null:
+	set(v):
+		box_texture_style = v
+		queue_redraw()
+
 
 func _draw() -> void:
 	var rect := Rect2(Vector2.ZERO, size)
 	if box_style != null:
 		draw_style_box(box_style, rect)
-	if box_texture != null:
+	if box_texture_style != null:
+		draw_style_box(box_texture_style, rect)
+	elif box_texture != null:
 		draw_texture_rect(box_texture, rect, false)
