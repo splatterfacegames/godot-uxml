@@ -1,46 +1,112 @@
 extends SceneTree
-## Parity against the reference engine: the uxml-preview golden cases
-## (exported with their committed geometry snapshots into
-## bench/parity/reference.json by bench/parity/export_reference.mjs).
+## Parity against the reference engine and against Unity itself.
 ##
-## Each case goes through godot-uxml's own loader, cascade and flex layout
-## with the reference's deterministic text measure (half an em per
-## character, one line, font-size or 12px), then panel-space rects are
-## compared by element name at the reference's 0.1px rounding. Control
-## *parts* (unity-* children Unity builds inside controls) have no godot-uxml
-## counterpart — godot-uxml maps controls to native Godot nodes — so they are
-## reported separately, never as matches.
+## Part 1 — reference engine: the uxml-preview golden cases (exported with
+## their committed geometry snapshots into bench/parity/reference.json by
+## bench/parity/export_reference.mjs). Each case goes through godot-uxml's
+## own loader, default theme (UxmlTheme), control part trees (UxmlParts),
+## cascade and flex layout with the reference's deterministic text measure
+## (half an em per character, one line, font-size or 12px), then panel-space
+## rects are compared by element name at the reference's 0.1px rounding.
+## Parts the reference names (`unity-*`) that godot-uxml does not build yet
+## are reported separately, never as matches.
+##
+## Part 2 — Unity: every case with a Unity dump in bench/parity/unity/
+## (written by tools/unity-dump/run.py from Unity 6000.3 with its default
+## runtime theme) — the reference cases above and the control corpus in
+## bench/parity/cases/. Elements are matched by tree path, parts included,
+## and compared on:
+##   * structure: type, name and classes of every element;
+##   * geometry: panel-space rect at 0.1px, with Unity's own text measure
+##     for every text element (so Unity's font metrics do not count against
+##     the layout) — falls back to half an em when Unity has no measure;
+##   * style: margins, padding, border widths and colours, background and
+##     text colour, font-size, -unity-text-align and opacity.
+## Unity's pseudo-states and control values after the case's actions are
+## applied to the godot-uxml model first, so a state case tests the theme
+## and the cascade for that state.
 ##
 ## Negative cases (after the Slint fork's Compose parity harness): perturbed
 ## results that the comparison must reject, so a broken comparator cannot
 ## report parity.
 ##
-##   Godot --headless --path <project> -s res://bench/parity.gd [-- --md]
+##   Godot --headless --path <project> -s res://bench/parity.gd [-- --verbose]
 
 const REF := "res://bench/parity/reference.json"
+const UNITY_DIR := "res://bench/parity/unity/"
+const CASES_DIR := "res://bench/parity/cases/"
 const SCROLLBAR := 13.0
+const STATES := ["hover", "active", "focus", "checked", "selected"]
 
-var _md := false
+var _verbose := false
 
 
 func _initialize() -> void:
-	_md = OS.get_cmdline_user_args().has("--md")
+	_verbose = OS.get_cmdline_user_args().has("--verbose")
 	var data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(REF))
 	var panel := Vector2(data["panel"]["width"], data["panel"]["height"])
 	var rows: Array = []
 	var counts := {"match": 0, "parts-only": 0, "differs": 0, "no-reference": 0}
 	var negatives_ok := true
+	var unity_cases: Array = []
 	for c in data["cases"]:
 		var r := _run_case(c, panel)
 		counts[r["status"]] += 1
 		rows.append(r)
 		if r["status"] == "match" and not r["ours"].is_empty():
 			negatives_ok = _negative(c, r) and negatives_ok
+		unity_cases.append({"name": c["name"], "uxml": c["uxml"], "uss": c["uss"], "files": c["files"]})
 	_report(data, rows, counts, negatives_ok)
-	quit(0 if negatives_ok else 1)
+	for n in _corpus_names():
+		var uss_path: String = CASES_DIR + n + ".uss"
+		unity_cases.append({"name": n,
+			"uxml": FileAccess.get_file_as_string(CASES_DIR + n + ".uxml"),
+			"uss": FileAccess.get_file_as_string(uss_path) if FileAccess.file_exists(uss_path) else "",
+			"files": {}})
+	var unity_ok := _unity_section(unity_cases)
+	quit(0 if negatives_ok and unity_ok else 1)
+
+
+func _corpus_names() -> Array:
+	var out: Array = []
+	var d := DirAccess.open(CASES_DIR)
+	if d == null:
+		return out
+	for f in d.get_files():
+		if f.ends_with(".uxml"):
+			out.append(f.get_basename())
+	out.sort()
+	return out
 
 
 # ---------------------------------------------------------------------------
+# Shared pipeline
+# ---------------------------------------------------------------------------
+
+## Write a case to user://, load it with the default theme and part trees.
+func _load_case(name: String, uxml: String, uss: String, files: Dictionary, values: Dictionary = {}) -> UxmlDocumentModel:
+	var root := "user://godot_uxml_parity/%s" % name
+	var dir := root + "/Assets/GoldenCases/"
+	DirAccess.make_dir_recursive_absolute(dir)
+	for path in files:
+		# Project-rooted keys (Packages/…, Assets/…) live at the project root,
+		# the rest beside the case — the reference harness's resolveImport.
+		var p: String = path
+		var at := root + "/" + p if (p.begins_with("Packages/") or p.begins_with("Assets/")) else dir + p
+		_write(at, files[path])
+	var uxml_path := dir + name + ".uxml"
+	_write(uxml_path, uxml)
+	var resolver := UxmlResourceResolver.new(root)
+	var doc := UxmlLoader.load_source(uxml, uxml_path, resolver, uss)
+	if not values.is_empty():
+		for el in doc.root.walk():
+			var n = el.get_attribute("name")
+			if n != null and values.has(String(n)):
+				el.set_attribute("value", values[String(n)])
+	UxmlTheme.attach(doc, UxmlTheme.DEFAULT)
+	UxmlParts.expand(doc)
+	return doc
+
 
 func _measure_fixed(el: UxmlElement, style: Dictionary, _hint: float) -> Vector2:
 	var t = el.get_attribute("text")
@@ -55,21 +121,13 @@ func _measure_fixed(el: UxmlElement, style: Dictionary, _hint: float) -> Vector2
 	return Vector2(String(t).length() * fs * 0.5, fs)
 
 
+# ---------------------------------------------------------------------------
+# Part 1: reference engine
+# ---------------------------------------------------------------------------
+
 func _run_case(c: Dictionary, panel: Vector2) -> Dictionary:
 	var name: String = c["name"]
-	var root := "user://godot_uxml_parity/%s" % name
-	var dir := root + "/Assets/GoldenCases/"
-	DirAccess.make_dir_recursive_absolute(dir)
-	for path in c["files"]:
-		# Project-rooted keys (Packages/…, Assets/…) live at the project root,
-		# the rest beside the case — the reference harness's resolveImport.
-		var p: String = path
-		var at := root + "/" + p if (p.begins_with("Packages/") or p.begins_with("Assets/")) else dir + p
-		_write(at, c["files"][path])
-	var uxml_path := dir + name + ".uxml"
-	_write(uxml_path, c["uxml"])
-	var resolver := UxmlResourceResolver.new(root)
-	var doc := UxmlLoader.load_source(c["uxml"], uxml_path, resolver, c["uss"])
+	var doc := _load_case(name, c["uxml"], c["uss"], c["files"])
 	var styles: Dictionary = UssStyleResolver.resolve(doc)["styles"]
 	var warnings: Array = []
 	# Unity's vertical scroller is 13px wide; the runtime uses Godot's own.
@@ -91,8 +149,9 @@ func _run_case(c: Dictionary, panel: Vector2) -> Dictionary:
 	return out
 
 
-## Named elements' panel-space rects, keyed like the reference harness: a
-## name that appears once keeps it, repeats get #1..#n in tree order.
+## Named authored elements' panel-space rects, keyed like the reference
+## harness: a name that appears once keeps it, repeats get #1..#n in tree
+## order. Parts count too (the reference names Unity's parts).
 func _named_rects(root: UxmlElement, rects: Dictionary) -> Dictionary:
 	var collected: Array = []
 	var stack: Array = [[root, Vector2.ZERO]]
@@ -192,3 +251,356 @@ func _report(data: Dictionary, rows: Array, counts: Dictionary, negatives_ok: bo
 	print("PARITY: %d match, %d match except control parts, %d differ, %d without reference; negative cases %s" % [
 		counts["match"], counts["parts-only"], counts["differs"], counts["no-reference"],
 		"detected" if negatives_ok else "NOT DETECTED"])
+
+
+# ---------------------------------------------------------------------------
+# Part 2: Unity
+# ---------------------------------------------------------------------------
+
+## Our elements by Unity-style tree path ("0/1/0"): children indices of
+## visual elements under the document root, parts included.
+func _paths(root: UxmlElement) -> Dictionary:
+	var out := {}
+	var stack: Array = [[root, ""]]
+	while not stack.is_empty():
+		var fr: Array = stack.pop_back()
+		var el: UxmlElement = fr[0]
+		var base: String = fr[1]
+		var k := 0
+		for ch in el.children:
+			if UssControls.is_non_visual(ch.local):
+				continue
+			var p := str(k) if base.is_empty() else base + "/" + str(k)
+			out[p] = ch
+			stack.append([ch, p])
+			k += 1
+	return out
+
+
+func _unity_section(cases: Array) -> bool:
+	var rows: Array = []
+	var tot := {"cases": 0, "match": 0, "elements": 0, "struct_ok": 0,
+		"geo": 0, "geo_ok": 0, "geo_half": 0, "style": 0, "style_ok": 0, "pixel_only": 0}
+	var negatives_ok := true
+	for c in cases:
+		var dpath: String = UNITY_DIR + String(c["name"]) + ".json"
+		if not FileAccess.file_exists(dpath):
+			continue
+		var dump: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(dpath))
+		var r := _run_unity(c, dump)
+		rows.append(r)
+		tot["cases"] += 1
+		for k in ["elements", "struct_ok", "geo", "geo_ok", "geo_half", "style", "style_ok"]:
+			tot[k] += r[k]
+		if (r["status"] != "match" and r["struct_ok"] == r["elements"] and r["style_ok"] == r["style"]
+				and r["geo_ok"] + r["geo_half"] == r["geo"]):
+			tot["pixel_only"] += 1
+		if r["status"] == "match":
+			tot["match"] += 1
+			negatives_ok = _unity_negative(r) and negatives_ok
+	print("")
+	if rows.is_empty():
+		print("UNITY PARITY: no Unity dumps in %s (run tools/unity-dump/run.py)" % UNITY_DIR)
+		return true
+	var meta: Dictionary = {}
+	var d0: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(UNITY_DIR + String(rows[0]["name"]) + ".json"))
+	meta = d0.get("metadata", {})
+	print("parity vs Unity %s (%s), pixelsPerPoint %s" % [
+		meta.get("unityVersion", "?"), meta.get("theme", "?"), meta.get("pixelsPerPoint", "?")])
+	print("| case | status | structure | geometry | style | first differences |")
+	print("| --- | --- | ---: | ---: | ---: | --- |")
+	for r in rows:
+		var notes: Array = r["notes"]
+		var shown := "; ".join(notes.slice(0, 3 if not _verbose else notes.size()))
+		if notes.size() > 3 and not _verbose:
+			shown += " (+%d more)" % (notes.size() - 3)
+		print("| %s | %s | %d/%d | %d/%d | %d/%d | %s |" % [r["name"], r["status"],
+			r["struct_ok"], r["elements"], r["geo_ok"], r["geo"], r["style_ok"], r["style"], shown])
+	print("")
+	# Unity rounds every layout edge to the pixel grid (Yoga's
+	# RoundToPixelGrid); godot-uxml's layout keeps fractions. Differences of
+	# at most half a pixel are counted separately so other causes stand out.
+	print("UNITY PARITY: %d/%d cases match (%d more differ only by pixel-grid rounding); structure %d/%d elements, geometry %d/%d values (%d more within 0.5px), style %d/%d values; negative cases %s" % [
+		tot["match"], tot["cases"], tot["pixel_only"], tot["struct_ok"], tot["elements"], tot["geo_ok"], tot["geo"],
+		tot["geo_half"], tot["style_ok"], tot["style"], "detected" if negatives_ok else "NOT DETECTED"])
+	return negatives_ok
+
+
+func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
+	var name: String = c["name"]
+	var uels: Array = dump["elements"]
+	# Control values after the case's actions (a clicked Toggle, a closed
+	# Foldout) go into the model before the part trees are built.
+	var values := {}
+	for u in uels:
+		var n := String(u["name"])
+		var props: Dictionary = u.get("props", {})
+		if n.is_empty() or values.has(n) or not props.has("value") or not props["value"] is bool:
+			continue
+		if String(u["type"]) in ["Toggle", "Foldout", "RadioButton"]:
+			values[n] = "true" if props["value"] else "false"
+	var doc := _load_case("unity-" + name, c["uxml"], c["uss"], c["files"], values)
+	var ours := _paths(doc.root)
+	# Unity's pseudo-states, applied to the elements at the same paths.
+	var es := {}
+	for u in uels:
+		var el = ours.get(String(u["path"]))
+		if el == null:
+			continue
+		var st: Array = []
+		for s in u["pseudoStates"]:
+			if STATES.has(String(s)):
+				st.append(String(s))
+		if not st.is_empty():
+			es[el] = st
+	var styles: Dictionary = UssStyleResolver.resolve(doc, {"element_states": es})["styles"]
+	var measures := {}
+	for u in uels:
+		var el = ours.get(String(u["path"]))
+		if el != null and u.has("textMeasure"):
+			measures[el] = Vector2(float(u["textMeasure"]["width"]), float(u["textMeasure"]["height"]))
+	# Unity measures text only on elements without children (Yoga leaves).
+	var measurer := func(el: UxmlElement, style: Dictionary, hint: float) -> Vector2:
+		if not el.children.is_empty():
+			return Vector2.ZERO
+		if measures.has(el):
+			return measures[el]
+		return _measure_fixed(el, style, hint)
+	var panel := Vector2(dump["panel"]["width"], dump["panel"]["height"])
+	var res := UxmlFlexLayout.compute(doc.root, styles, panel, measurer, [],
+		{"scroll_bar_width": SCROLLBAR})
+	var abs := _abs_rects(doc.root, res["rects"])
+	var out := {"name": name, "status": "match", "notes": [], "elements": 0, "struct_ok": 0, "geo_half": 0,
+		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0, "pairs": []}
+	var seen := {}
+	# Unity does not resolve styles under display:none; those elements are
+	# compared on structure only.
+	var hidden_under := {}
+	for u in uels:
+		var par := String(u["parent"])
+		if hidden_under.has(par) or (par != "" and _udisplay_none(uels, par)):
+			hidden_under[String(u["path"])] = true
+	for u in uels:
+		var path := String(u["path"])
+		out["elements"] += 1
+		var el = ours.get(path)
+		var label := _ulabel(u)
+		if el == null:
+			out["notes"].append("%s missing" % label)
+			continue
+		seen[el] = true
+		var sd := _structure_diff(u, el)
+		if sd.is_empty():
+			out["struct_ok"] += 1
+		else:
+			out["notes"].append("%s: %s" % [label, sd])
+		var r = abs.get(el)
+		var want := [float(u["rect"]["x"]), float(u["rect"]["y"]),
+			float(u["rect"]["width"]), float(u["rect"]["height"])]
+		var got := [0.0, 0.0, 0.0, 0.0]
+		# Unity keeps stale rects under a display:none ancestor; only the
+		# hidden element itself (0x0) is compared.
+		var hidden := String(u["style"].get("display", "flex")) == "none" or hidden_under.has(path)
+		if r != null:
+			got = [(r as Rect2).position.x, (r as Rect2).position.y, (r as Rect2).size.x, (r as Rect2).size.y]
+		out["pairs"].append([el, want])
+		if not hidden_under.has(path) and (not hidden or r != null):
+			for k in 4:
+				out["geo"] += 1
+				var dv := absf(_r1(got[k]) - _r1(want[k]))
+				if dv <= 0.05:
+					out["geo_ok"] += 1
+				else:
+					if dv <= 0.55:
+						out["geo_half"] += 1
+					out["notes"].append("%s %s: ours %s vs Unity %s" % [label, ["x", "y", "w", "h"][k], _r1(got[k]), _r1(want[k])])
+		var st: Dictionary = styles.get(el, {})
+		# Unity reports layout-derived margins/padding/borders, which are 0 on
+		# a display:none element; its own and its subtree's styles are not
+		# compared.
+		if hidden_under.has(path) or String(u["style"].get("display", "flex")) == "none":
+			continue
+		for diff in _style_diffs(u["style"], st, out):
+			out["notes"].append("%s %s" % [label, diff])
+	for path in ours:
+		if not seen.has(ours[path]):
+			out["notes"].append("extra element %s %s" % [path, ours[path].local])
+			out["elements"] += 1
+	if not out["notes"].is_empty():
+		out["status"] = "differs"
+	out["abs"] = abs
+	return out
+
+
+func _udisplay_none(uels: Array, path: String) -> bool:
+	for u in uels:
+		if String(u["path"]) == path:
+			return String(u["style"].get("display", "flex")) == "none"
+	return false
+
+
+func _ulabel(u: Dictionary) -> String:
+	var n := String(u["name"])
+	return "%s[%s]" % [u["type"], u["path"]] + ("#" + n if not n.is_empty() else "")
+
+
+func _abs_rects(root: UxmlElement, rects: Dictionary) -> Dictionary:
+	var out := {}
+	var stack: Array = [[root, Vector2.ZERO]]
+	while not stack.is_empty():
+		var fr: Array = stack.pop_back()
+		var el: UxmlElement = fr[0]
+		var origin: Vector2 = fr[1]
+		var r = rects.get(el)
+		var p := origin
+		if r != null:
+			p = origin + (r as Rect2).position
+			if el != root:
+				out[el] = Rect2(p, (r as Rect2).size)
+		for ch in el.children:
+			stack.append([ch, p])
+	return out
+
+
+func _structure_diff(u: Dictionary, el: UxmlElement) -> String:
+	var bits: Array = []
+	if String(u["type"]) != el.local:
+		bits.append("type %s vs Unity %s" % [el.local, u["type"]])
+	var nm = el.get_attribute("name")
+	var ours_name := "" if nm == null else String(nm)
+	if ours_name != String(u["name"]):
+		bits.append("name '%s' vs Unity '%s'" % [ours_name, u["name"]])
+	var ours_cls := {}
+	for cl in el.class_list():
+		ours_cls[cl] = true
+	for cl in UssControls.implicit_classes_of(el.local):
+		ours_cls[cl] = true
+	var unity_cls := {}
+	for cl in u["classes"]:
+		unity_cls[String(cl)] = true
+	var missing: Array = []
+	var extra: Array = []
+	for cl in unity_cls:
+		if not ours_cls.has(cl):
+			missing.append(cl)
+	for cl in ours_cls:
+		if not unity_cls.has(cl):
+			extra.append(cl)
+	if not missing.is_empty():
+		bits.append("missing classes " + ",".join(missing))
+	if not extra.is_empty():
+		bits.append("extra classes " + ",".join(extra))
+	return "; ".join(bits)
+
+
+const LENGTHS := ["margin-left", "margin-top", "margin-right", "margin-bottom",
+	"padding-left", "padding-top", "padding-right", "padding-bottom",
+	"border-left-width", "border-top-width", "border-right-width", "border-bottom-width",
+	"border-top-left-radius", "border-top-right-radius",
+	"border-bottom-left-radius", "border-bottom-right-radius"]
+const COLORS := ["background-color", "border-left-color", "border-top-color",
+	"border-right-color", "border-bottom-color", "color", "-unity-background-image-tint-color"]
+
+
+## Unity's resolved values vs ours. Unset properties of ours compare as
+## their initial values (0px, transparent, opacity 1, upper-left). `color`
+## and `font-size` are only compared where ours is set: Godot's own
+## defaults stand in for an unset one.
+func _style_diffs(us: Dictionary, st: Dictionary, out: Dictionary) -> Array:
+	var diffs: Array = []
+	for p in LENGTHS:
+		if not us.has(p):
+			continue
+		out["style"] += 1
+		var want := float(us[p])
+		var got := 0.0
+		var e = st.get(p)
+		if e != null:
+			var pl := UssValues.parse_length(String(e["value"]))
+			if pl["kind"] == "px":
+				got = pl["value"]
+			else:
+				got = NAN
+		if not is_nan(got) and absf(got - want) <= 0.05:
+			out["style_ok"] += 1
+		else:
+			diffs.append("%s: ours %s vs Unity %s" % [p, e["value"] if e != null else "unset", want])
+	for p in COLORS:
+		if not us.has(p):
+			continue
+		var e = st.get(p)
+		if (p == "color") and e == null:
+			continue
+		out["style"] += 1
+		var want := _ucolor(String(us[p]))
+		var got := Color(0, 0, 0, 0) if p != "-unity-background-image-tint-color" else Color.WHITE
+		if e != null:
+			var pc := UssValues.parse_color(String(e["value"]))
+			if pc["ok"]:
+				got = pc["color"]
+		if _color_eq(got, want):
+			out["style_ok"] += 1
+		else:
+			diffs.append("%s: ours %s vs Unity %s" % [p, _fmt(got), us[p]])
+	if us.has("font-size") and st.has("font-size"):
+		out["style"] += 1
+		var pl := UssValues.parse_length(String(st["font-size"]["value"]))
+		if pl["kind"] == "px" and absf(float(pl["value"]) - float(us["font-size"])) <= 0.05:
+			out["style_ok"] += 1
+		else:
+			diffs.append("font-size: ours %s vs Unity %s" % [st["font-size"]["value"], us["font-size"]])
+	if us.has("-unity-text-align"):
+		out["style"] += 1
+		var e = st.get("-unity-text-align")
+		var got := "upper-left" if e == null else String(e["value"])
+		if got == String(us["-unity-text-align"]):
+			out["style_ok"] += 1
+		else:
+			diffs.append("-unity-text-align: ours %s vs Unity %s" % [got, us["-unity-text-align"]])
+	if us.has("opacity"):
+		out["style"] += 1
+		var e = st.get("opacity")
+		var got := 1.0 if e == null else UssValues.parse_number(String(e["value"]))
+		if absf(got - float(us["opacity"])) <= 0.005:
+			out["style_ok"] += 1
+		else:
+			diffs.append("opacity: ours %s vs Unity %s" % [got, us["opacity"]])
+	return diffs
+
+
+func _ucolor(s: String) -> Color:
+	var inner := s.trim_prefix("rgba(").trim_suffix(")")
+	var p := inner.split(",")
+	if p.size() != 4:
+		return Color(0, 0, 0, 0)
+	return Color(float(p[0]) / 255.0, float(p[1]) / 255.0, float(p[2]) / 255.0, float(p[3]))
+
+
+func _color_eq(a: Color, b: Color) -> bool:
+	if a.a < 0.002 and b.a < 0.002:
+		return true
+	return (absf(a.r - b.r) < 0.006 and absf(a.g - b.g) < 0.006
+		and absf(a.b - b.b) < 0.006 and absf(a.a - b.a) < 0.006)
+
+
+func _fmt(c: Color) -> String:
+	return "rgba(%d, %d, %d, %.3f)" % [roundi(c.r * 255), roundi(c.g * 255), roundi(c.b * 255), c.a]
+
+
+## A matching Unity case must stop matching when one rect moves 1px.
+func _unity_negative(r: Dictionary) -> bool:
+	var pairs: Array = r["pairs"]
+	if pairs.is_empty():
+		return true
+	var abs: Dictionary = r["abs"]
+	for pr in pairs:
+		var el: UxmlElement = pr[0]
+		var want: Array = pr[1]
+		if not abs.has(el):
+			continue
+		var moved := (abs[el] as Rect2).position.x + 1.0
+		if absf(_r1(moved) - _r1(want[0])) <= 0.05:
+			print("UNITY NEGATIVE CASE NOT DETECTED in %s" % r["name"])
+			return false
+		return true
+	return true

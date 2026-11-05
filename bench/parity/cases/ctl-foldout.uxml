@@ -1,0 +1,12 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Foldout name="fo" text="Details">
+    <ui:Label name="fo-child" text="Inside" />
+    <ui:Foldout name="fo-nested" text="Nested">
+      <ui:Label name="fo-nested-child" text="Deep" />
+    </ui:Foldout>
+  </ui:Foldout>
+  <ui:Foldout name="fo-closed" text="Closed" value="false">
+    <ui:Label name="fo-closed-child" text="Hidden" />
+  </ui:Foldout>
+  <ui:Foldout name="fo-notext" />
+</ui:UXML>

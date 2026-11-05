@@ -1,0 +1,12 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:GroupBox name="gb" text="Group">
+    <ui:Label name="gb-child" text="Inside" />
+  </ui:GroupBox>
+  <ui:GroupBox name="gb-notext">
+    <ui:VisualElement name="gb-ve" style="height: 10px;" />
+  </ui:GroupBox>
+  <ui:PopupWindow name="pw" text="Window">
+    <ui:Label name="pw-child" text="Body" />
+  </ui:PopupWindow>
+  <ui:PopupWindow name="pw-notext" />
+</ui:UXML>

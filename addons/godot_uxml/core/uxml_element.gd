@@ -29,6 +29,22 @@ var open_tag_start: int = 0
 var open_tag_end: int = 0
 ## End of the whole element (past the close tag, or past `/>`).
 var source_end: int = 0
+## Control parts (see UxmlControls): a part element is one Unity builds
+## inside a control (a Toggle's label, input and checkmark, a Foldout's
+## content, ...). `part_of` is the control element that owns the part,
+## null for authored elements; `part_role` names the part's job inside the
+## control ("label", "input", "checkmark", ...). Parts are ordinary
+## elements for the cascade and layout, but they never enter the
+## document's name index.
+## (Held weakly: the owner holds its parts as children, so a strong
+## back-reference would be a reference cycle.)
+var part_of: UxmlElement:
+	get:
+		return null if _part_of == null else _part_of.get_ref()
+	set(v):
+		_part_of = null if v == null else weakref(v)
+var part_role: String = ""
+var _part_of: WeakRef = null
 
 
 ## Qualified tag exactly as written, e.g. `ui:Button`.

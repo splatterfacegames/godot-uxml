@@ -4,20 +4,30 @@ extends RefCounted
 ##
 ## The mapping (also documented in docs/design.md):
 ##
-##   VisualElement / TemplateContainer / unknown tag
-##                -> UxmlBox (styled rectangle, real Control)
-##   Label        -> Label, or RichTextLabel when its text holds Unity rich
+##   VisualElement / unknown tag -> UxmlBox (styled rectangle, real Control)
+##   Label, TextElement, text parts
+##                -> Label, or RichTextLabel when its text holds Unity rich
 ##                   text tags (enable-rich-text, default true)
-##   Button       -> Button (rich text tags are removed from its text)
+##   Button       -> Button (its look comes from USS: every stylebox slot;
+##                   rich text tags are removed from its text)
+##   RepeatButton -> UxmlRepeatButton (Button that repeats while held)
+##   Toggle, RadioButton (and a Foldout's toggle part) -> UxmlToggle
+##   PopupWindow  -> Label (draws its title; the content part is a child)
+##   GroupBox, HelpBox, Foldout, ProgressBar,
+##   RadioButtonGroup, ToggleButtonGroup, Box, TemplateContainer and every
+##   container part -> UxmlBox
 ##   Image        -> UxmlBox host wrapping a full-rect TextureRect, so
 ##                   background-color/borders still paint behind the image
 ##   Slider       -> UxmlField(Label caption + HSlider)
 ##   SliderInt    -> UxmlField(Label caption + HSlider, step/rounded 1)
 ##   ScrollView   -> UxmlBox host wrapping ScrollContainer + content Control
-##   Toggle       -> CheckBox (its built-in caption is the label)
 ##   TextField    -> UxmlField(Label caption + LineEdit, or TextEdit when
 ##                   multiline="true")
 ##   DropdownField-> UxmlField(Label caption + OptionButton)
+##
+## Control parts (UxmlParts) are ordinary elements here: each gets its own
+## control. Parts never take focus; parts Unity does not pick (checkmarks,
+## text labels) ignore the mouse, the others pass it to their control.
 ##
 ## "Wrapper" elements (UxmlField, Image/ScrollView hosts) are what
 ## UxmlDocument.get_element(name) returns; the interactive native inside is
@@ -66,6 +76,8 @@ func _init(
 ## them (the element itself, or its scroll content).
 func build(el: UxmlElement) -> Control:
 	var c := _create(el)
+	if el.part_of != null:
+		_part_input(el, c)
 	controls[el] = c
 	if not natives.has(el):
 		natives[el] = c
@@ -105,13 +117,7 @@ func _create(el: UxmlElement) -> Control:
 			return l
 		"Button":
 			var b := Button.new()
-			var btext := _text_attr(el)
-			if _bool_attr(el, "enable-rich-text", true):
-				var bpr := UxmlRichText.parse(btext)
-				if bpr["rich"]:
-					_warn(el, "text", "rich text tags on a Button: Godot buttons draw plain text, so the tags are removed")
-					btext = bpr["plain"]
-			b.text = btext
+			b.text = _plain_text_attr(el)
 			b.focus_mode = Control.FOCUS_ALL
 			_text_element_attrs(el, b)
 			return b
@@ -121,13 +127,24 @@ func _create(el: UxmlElement) -> Control:
 			return _create_slider(el, el.local == "SliderInt")
 		"ScrollView", "ListView":
 			return _create_scroll(el)
-		"Toggle":
-			var t := CheckBox.new()
-			var caption := _first_attr(el, ["label", "text"])
-			t.text = caption
-			t.button_pressed = _bool_attr(el, "value", false)
-			t.focus_mode = Control.FOCUS_ALL
+		"Toggle", "RadioButton":
+			var t := UxmlToggle.new()
+			t.radio = el.local == "RadioButton"
+			t.set_pressed_no_signal(_bool_attr(el, "value", false))
 			return t
+		"RepeatButton":
+			var rb := UxmlRepeatButton.new()
+			rb.text = _plain_text_attr(el)
+			_text_element_attrs(el, rb)
+			rb.configure(_num_attr(el, "delay", 0.0), _num_attr(el, "interval", 0.0))
+			return rb
+		"TextElement", "PopupWindow":
+			# PopupWindow is a TextElement: it draws its own title text in
+			# its content box; its content container part is a child.
+			var te := Label.new()
+			te.text = _plain_text_attr(el)
+			_text_element_attrs(el, te)
+			return te
 		"TextField":
 			return _create_text_field(el)
 		"DropdownField":
@@ -146,6 +163,19 @@ func _text_attr(el: UxmlElement) -> String:
 	var t := _attr(el, "text")
 	if t.find("\\") >= 0 and _bool_attr(el, "parse-escape-sequences", false):
 		t = UxmlRichText.unescape(t)
+	return t
+
+
+## The `text` attribute for a control that draws its own plain text (Button,
+## RepeatButton, PopupWindow title): Unity rich text tags are removed, with
+## a diagnostic, because these Godot controls cannot draw styled runs.
+func _plain_text_attr(el: UxmlElement) -> String:
+	var t := _text_attr(el)
+	if _bool_attr(el, "enable-rich-text", true):
+		var pr := UxmlRichText.parse(t)
+		if pr["rich"]:
+			_warn(el, "text", "rich text tags on a %s: the Godot control draws plain text, so the tags are removed" % el.local)
+			t = pr["plain"]
 	return t
 
 
@@ -320,10 +350,25 @@ func _apply_common_attributes(el: UxmlElement, c: Control) -> void:
 			Control.FOCUS_ALL if _attr(el, "focusable") == "true"
 			else Control.FOCUS_NONE
 		)
-	elif c is UxmlBox or c is Label or c is RichTextLabel:
+	elif (c is UxmlBox and not c is UxmlToggle) or c is Label or c is RichTextLabel:
 		c.focus_mode = Control.FOCUS_NONE
 	if target != c:
 		c.focus_mode = Control.FOCUS_NONE
+
+
+## Parts never take focus (Unity delegates it to the control), except the
+## interactive parts that are controls themselves (a Foldout's Toggle).
+## Unity does not pick a Toggle's checkmark or text label; those ignore the
+## mouse so the control under them receives it.
+func _part_input(el: UxmlElement, c: Control) -> void:
+	if c is UxmlToggle or c is BaseButton:
+		return
+	c.focus_mode = Control.FOCUS_NONE
+	match el.part_role:
+		"checkmark", "text", "checkmark-background", "title", "title-container", "progress", "icon":
+			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_:
+			c.mouse_filter = Control.MOUSE_FILTER_PASS
 
 
 func _attr(el: UxmlElement, name: String, default: String = "") -> String:

@@ -463,3 +463,50 @@ func test_all_animates_every_changed_property() -> void:
 		var trace: Array = [_v(doc, "a", "width"), _v(doc, "a", "opacity"), _v(doc, "a", "background-color")]
 		_unload(doc)
 		return trace)
+
+
+# ---------------------------------------------------------------------------
+# Transitions with the default theme and control part trees
+# ---------------------------------------------------------------------------
+
+## A part element (the Toggle checkmark) animates an author state rule; a
+## theme-styled property (the Button hover colour, the `unity-disabled`
+## opacity) animates from the theme value to the new theme value.
+func test_transitions_on_parts_and_theme_values() -> void:
+	await _both(func() -> Array:
+		var doc := _mk("parts", '<ui:Toggle name="t" label="L" /><ui:Button name="b" text="B" />'
+			+ '<ui:Button name="c" text="C" class="fade" />',
+			'.unity-toggle__checkmark { transition: background-color 1s linear; }\n'
+			+ '.unity-toggle__input:checked > .unity-toggle__checkmark { background-color: rgb(255, 0, 0); }\n'
+			+ '.unity-button { transition: background-color 1s linear; }\n'
+			+ '.fade { transition: opacity 1s linear; }')
+		var trace: Array = []
+		var check := UxmlParts.find_part(doc.get_element_model("t"), "checkmark")
+		(doc.get_native("t") as UxmlToggle).button_pressed = true
+		doc._restyle_now()
+		h.check(doc.has_running_transitions(), "a :checked change on a part starts a transition")
+		doc.advance_transitions(0.5)
+		var mid: Color = UssValues.parse_color(String(doc._styles[check]["background-color"]["value"]))["color"]
+		_near(mid.g * 255.0, 120.0, "the checkmark part is half way from the theme rgb(240, 240, 240)", 0.6)
+		trace.append(doc._styles[check]["background-color"]["value"])
+		doc.advance_transitions(0.6)
+		h.eq(doc._styles[check]["background-color"]["value"], "rgb(255, 0, 0)", "the part reaches the end value")
+		# Theme value -> theme value (.unity-button -> .unity-button:hover).
+		h.eq(_v(doc, "b", "background-color"), "rgb(188, 188, 188)", "theme Button colour")
+		doc.set_element_state("b", "hover", true)
+		doc._restyle_now()
+		doc.advance_transitions(0.5)
+		var hc := _color(doc, "b", "background-color")
+		_near(hc.r * 255.0, (188.0 + 209.0) / 2.0, "theme colour half way to the theme hover colour", 0.6)
+		trace.append(_v(doc, "b", "background-color"))
+		# The disabled opacity of the theme animates too.
+		doc.set_enabled("c", false)
+		doc._restyle_now()
+		doc.advance_transitions(0.5)
+		_near(float(_v(doc, "c", "opacity")), 0.75, "unity-disabled opacity half way")
+		_near((doc.get_element("c") as Control).modulate.a, 0.75, "the painted opacity follows")
+		trace.append(_v(doc, "c", "opacity"))
+		doc.advance_transitions(0.6)
+		_near((doc.get_element("c") as Control).modulate.a, 0.5, "end: opacity 0.5")
+		_unload(doc)
+		return trace)

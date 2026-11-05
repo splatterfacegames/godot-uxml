@@ -1,0 +1,14 @@
+# Unity regenerates everything except Assets/Editor, Assets/Theme, Packages
+# and ProjectSettings/ProjectVersion.txt.
+/Library/
+/Temp/
+/Logs/
+/UserSettings/
+/obj/
+/Assets/Cases/
+/Assets/Cases.meta
+/ProjectSettings/*
+!/ProjectSettings/ProjectVersion.txt
+/Packages/packages-lock.json
+*.csproj
+*.sln

@@ -1,0 +1,52 @@
+.unity-toggle__checkmark {
+  width: 20px;
+  height: 20px;
+  background-color: rgb(255, 0, 0);
+}
+#unity-checkmark {
+  border-left-color: rgb(0, 0, 255);
+  border-left-width: 3px;
+}
+.unity-base-field__label {
+  min-width: 50px;
+  color: rgb(255, 0, 0);
+}
+Toggle > .unity-toggle__input {
+  margin-left: 10px;
+}
+.big > .unity-base-field__label {
+  font-size: 20px;
+}
+.unity-toggle__text {
+  margin-left: 7px;
+}
+.unity-foldout > #unity-content {
+  margin-left: 30px;
+}
+.unity-foldout__toggle .unity-foldout__text {
+  color: rgb(0, 255, 0);
+}
+.unity-progress-bar__progress {
+  background-color: rgb(0, 200, 0);
+}
+.unity-progress-bar__title {
+  font-size: 9px;
+}
+Button {
+  margin: 0;
+  padding: 0;
+}
+.flat {
+  margin: 0;
+  border-width: 0;
+}
+#s-id {
+  margin: 5px;
+  padding: 8px;
+}
+.unity-group-box__label {
+  margin-bottom: 4px;
+}
+.unity-help-box__icon {
+  width: 10px;
+}

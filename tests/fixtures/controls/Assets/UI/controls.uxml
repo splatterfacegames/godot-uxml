@@ -1,0 +1,34 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="controls.uss" />
+  <ui:VisualElement name="root-panel" class="panel">
+    <ui:Label name="title" text="Controls" />
+    <ui:TextElement name="te" text="Text element" />
+    <ui:Box name="box">
+      <ui:Image name="img" />
+    </ui:Box>
+    <ui:TemplateContainer name="tc" />
+    <ui:Button name="play" text="Play" />
+    <ui:RepeatButton name="repeat" text="More" delay="200" interval="50" />
+    <ui:Toggle name="sound" label="Sound" value="true" />
+    <ui:Toggle name="music" text="Music" />
+    <ui:RadioButton name="radio-a" label="A" text="Alpha" />
+    <ui:RadioButtonGroup name="quality" label="Quality" choices="Low,Medium,High" value="1" />
+    <ui:ToggleButtonGroup name="mode" label="Mode">
+      <ui:Button name="mode-a" text="A" />
+      <ui:Button name="mode-b" text="B" />
+      <ui:Button name="mode-c" text="C" />
+    </ui:ToggleButtonGroup>
+    <ui:GroupBox name="group" text="Group">
+      <ui:Label name="group-child" text="Inside group" />
+    </ui:GroupBox>
+    <ui:HelpBox name="help" text="Careful" message-type="Warning" />
+    <ui:PopupWindow name="popup" text="Popup">
+      <ui:Label name="popup-child" text="Body" />
+    </ui:PopupWindow>
+    <ui:Foldout name="details" text="Details">
+      <ui:Label name="details-child" text="Hidden detail" />
+      <ui:Button name="details-button" text="Deep" />
+    </ui:Foldout>
+    <ui:ProgressBar name="progress" title="Loading" value="40" />
+  </ui:VisualElement>
+</ui:UXML>

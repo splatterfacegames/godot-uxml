@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Button name="b-hover" text="Hover" />
+  <ui:Button name="b-active" text="Active" />
+  <ui:Button name="b-focus" text="Focus" />
+  <ui:Button name="b-plain" text="Plain" />
+</ui:UXML>

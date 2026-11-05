@@ -94,6 +94,7 @@ Status values:
 | Converter groups (`source-to-ui-converters`, `ui-to-source-converters`) | done: registered Callables, matched by source type |
 | Global converters | done |
 | Element targets (`text`, `value`, `label`, `lowValue`, `highValue`, `choices`, `index`, `tooltip`, `enabledSelf`, `visible`, `focusable`, `tabIndex`, `pickingMode`, `image`, ...) | done |
+| Targets of part-tree controls (Toggle, RadioButton, RadioButtonGroup, ToggleButtonGroup, Foldout, ProgressBar, GroupBox, HelpBox, PopupWindow: `value`, `text`, `label`, `title`, `lowValue`, `highValue`, `messageType`) | done: written through the control behaviors; two-way for the value controls |
 | `style.*` targets | done: written as inline USS |
 | Two-way write-back from user edits | done |
 | `SetBinding`/`ClearBinding` from code | done: `add_binding()`/`remove_binding()` |
@@ -118,19 +119,31 @@ Deviations from Unity:
   view data to game code.
 - Binding failures are `binding-failed` diagnostics, one per element and
   message. Unity logs a console message per failed update.
+- A `label` or `text` binding in `<Bindings>` on a control with an empty
+  attribute gets a hidden text part at load. Unity creates the part when
+  the text becomes non-empty. A text set later by script or by
+  `add_binding()` on a control without the part changes only the
+  attribute.
+- RadioButtonGroup `choices` cannot be bound: the radio buttons are part
+  elements, fixed at load (`binding-failed`).
 
 ## Controls (UnityEngine.UIElements)
 
 Controls are moving to Unity part trees: each control is built from
 elements with Unity's own part names and classes, under a default theme
-measured in Unity 6000.3. Work is on `unity/controls-foundation`.
+measured in Unity 6000.3 (`themes/unity-default.uss`, ranked below every
+author rule). Templates, data binding, transitions, rich text and the
+visual properties work on the part elements as on authored elements.
+`bench/parity.gd` compares the part trees, geometry and resolved styles
+with Unity dumps (`docs/parity.md`).
 
 | Control | Status |
 | --- | --- |
-| VisualElement, TemplateContainer, Label, TextElement, Image, Box | in progress (`unity/controls-foundation`) |
-| Button, RepeatButton | in progress (`unity/controls-foundation`) |
-| Toggle, RadioButton, RadioButtonGroup, ToggleButtonGroup | in progress (`unity/controls-foundation`) |
-| GroupBox, HelpBox, PopupWindow, Foldout, ProgressBar | in progress (`unity/controls-foundation`) |
+| VisualElement, TemplateContainer, Label, TextElement, Image, Box | done (Label: rich text tags give a RichTextLabel) |
+| Button, RepeatButton | done (theme box and states; rich text tags removed) |
+| Toggle, RadioButton, RadioButtonGroup, ToggleButtonGroup | done: part trees, theme, states, values, data binding. Differences to Unity: pixel-grid rounding of centred parts |
+| GroupBox, HelpBox, PopupWindow, Foldout, ProgressBar | done: part trees, theme, values, data binding. HelpBox label width differs (see `docs/parity.md`) |
+| Disabled look (`unity-disabled`, opacity 0.5 on the element) | done |
 | Slider, SliderInt, MinMaxSlider | planned (native mapping works today for Slider/SliderInt) |
 | TextField | planned (native mapping works today) |
 | IntegerField, LongField, FloatField, DoubleField, UnsignedIntegerField, UnsignedLongField, Hash128Field | planned |

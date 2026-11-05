@@ -166,6 +166,9 @@ pub struct Cascade {
     anc_classes: Vec<bool>, // by interned id (grown on demand)
     anc_names: Vec<bool>,
     anc_states: i32,
+    /// Non-rightmost compounds that test a state: (types, names, classes,
+    /// mask). Mirrors UssCascade._anc_state_reqs / _anc_state_mask.
+    anc_state_reqs: Vec<(Vec<u32>, Vec<u32>, Vec<u32>, i32)>,
     inline_origins: Vec<Variant>,
     // element index
     els: Vec<Elem>,
@@ -442,6 +445,7 @@ impl Cascade {
             anc_classes: vec![],
             anc_names: vec![],
             anc_states: 0,
+            anc_state_reqs: vec![],
             inline_origins: vec![],
             els: vec![],
             parent: vec![],
@@ -660,6 +664,19 @@ impl Cascade {
             c.anc_names[id] = true;
         }
         c.anc_states = get("_anc_states").to::<i64>() as i32;
+        let mut reqs: Vec<(Vec<u32>, Vec<u32>, Vec<u32>, i32)> = vec![];
+        for sel in &c.sels {
+            for cp in sel.parts.iter().take(sel.parts.len().saturating_sub(1)) {
+                if cp.mask == 0 {
+                    continue;
+                }
+                let r = (cp.types.clone(), cp.names.clone(), cp.classes.clone(), cp.mask);
+                if !reqs.contains(&r) {
+                    reqs.push(r);
+                }
+            }
+        }
+        c.anc_state_reqs = reqs;
         Some(c)
     }
 
@@ -712,7 +729,19 @@ impl Cascade {
             .collect();
         cl.sort_unstable();
         let name = self.name[i].filter(|&n| self.anc_names.get(n as usize).copied().unwrap_or(false));
-        AncKey { classes: cl, name, bits: self.sig_bits[i] & self.anc_states }
+        let mut m = 0i32;
+        for r in &self.anc_state_reqs {
+            if m & r.3 == r.3 {
+                continue;
+            }
+            if r.0.iter().all(|&t| t == self.els[i].local)
+                && r.1.iter().all(|&n| self.name[i] == Some(n))
+                && r.2.iter().all(|c| self.cls_set[i].contains(c))
+            {
+                m |= r.3;
+            }
+        }
+        AncKey { classes: cl, name, bits: self.sig_bits[i] & m }
     }
 
     fn idx_of(&self, v: &Variant) -> Option<usize> {

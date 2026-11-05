@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ProgressBar name="pb" title="Loading" value="30" />
+  <ui:ProgressBar name="pb-range" low-value="10" high-value="20" value="15" />
+  <ui:ProgressBar name="pb-full" value="100" title="Done" />
+  <ui:ProgressBar name="pb-zero" />
+  <ui:VisualElement name="pb-box" style="width: 200px;">
+    <ui:ProgressBar name="pb-narrow" value="50" title="Half" />
+  </ui:VisualElement>
+</ui:UXML>

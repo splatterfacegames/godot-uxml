@@ -55,6 +55,10 @@ var _resource_dirs: Array = []
 var _resource_dirs_scanned := false
 ## "kind|name" -> resolve() result Dictionary (hits and misses).
 var _resource_cache: Dictionary = {}
+## Built-in theme folders. A reference made FROM a file inside one of these
+## (the default theme's url()s) may resolve inside the same folder even
+## though it lies outside the project root; nothing else is exempt.
+const TRUSTED_DIRS := ["res://addons/godot_uxml/themes/"]
 
 
 func _init(root: String = "res://") -> void:
@@ -113,13 +117,20 @@ func resolve(reference: String, from: String = "", kind: String = "") -> Diction
 			reference,
 			"reference climbs above its root: %s -> %s" % [reference, candidate]
 		)
-	if not _is_within_root(candidate):
+	if not _is_within_root(candidate) and not _trusted(candidate, from):
 		return _fail(
 			"path-outside-root",
 			reference,
 			"reference resolves outside the project root: %s -> %s" % [reference, candidate]
 		)
 	return {"ok": true, "path": candidate, "diagnostic": {}}
+
+
+static func _trusted(candidate: String, from: String) -> bool:
+	for d in TRUSTED_DIRS:
+		if from.begins_with(d) and candidate.begins_with(d):
+			return true
+	return false
 
 
 ## Resolve and read a reference as text. Returns

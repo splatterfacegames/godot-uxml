@@ -1,0 +1,122 @@
+{
+ "actions": [
+  {
+   "op": "force-state",
+   "target": "b-hover",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "b-active",
+   "states": [
+    "hover",
+    "active"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "b-checked",
+   "states": [
+    "checked"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "3",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "3/1",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "4",
+   "states": [
+    "hover",
+    "active"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "4/1",
+   "states": [
+    "hover",
+    "active"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "5",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "5/1",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "6",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "6/1",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "8",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "8/0",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "8/0/0",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "path": "11",
+   "states": [
+    "hover",
+    "active"
+   ]
+  },
+  {
+   "op": "focus",
+   "target": "r-focus"
+  },
+  {
+   "op": "focus",
+   "path": "10/0"
+  }
+ ],
+ "height": 600
+}

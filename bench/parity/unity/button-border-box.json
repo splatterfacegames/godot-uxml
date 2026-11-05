@@ -1,0 +1,164 @@
+{
+ "case": "button-border-box",
+ "metadata": {
+  "unityVersion": "6000.3.24f1",
+  "theme": "unity-theme://default (runtime)",
+  "pixelsPerPoint": 1,
+  "contextType": "Player",
+  "dumpedAtUtc": "2026-11-05T14:44:50.0387622Z"
+ },
+ "panel": {
+  "width": 400,
+  "height": 300
+ },
+ "actions": [],
+ "focused": null,
+ "elements": [
+  {
+   "path": "0",
+   "type": "Button",
+   "fullType": "UnityEngine.UIElements.Button",
+   "name": "button-border-box-btn",
+   "classes": [
+    "unity-text-element",
+    "unity-button"
+   ],
+   "parent": "",
+   "parentChain": [],
+   "contentContainer": "0",
+   "isContentContainer": false,
+   "logicalChildren": 0,
+   "hierarchyChildren": 0,
+   "rect": {
+    "x": 4,
+    "y": 2,
+    "width": 160,
+    "height": 80
+   },
+   "layout": {
+    "x": 4,
+    "y": 2,
+    "width": 160,
+    "height": 80
+   },
+   "contentRect": {
+    "x": 30,
+    "y": 30,
+    "width": 100,
+    "height": 20
+   },
+   "pseudoStates": [],
+   "focusable": true,
+   "canGrabFocus": true,
+   "tabIndex": 0,
+   "delegatesFocus": false,
+   "pickingMode": "Position",
+   "enabledSelf": true,
+   "enabledInHierarchy": true,
+   "visible": true,
+   "text": "OK",
+   "textMeasure": {
+    "width": 20,
+    "height": 17
+   },
+   "props": {
+    "text": "OK"
+   },
+   "style": {
+    "align-content": "flex-start",
+    "align-items": "stretch",
+    "align-self": "auto",
+    "aspect-ratio": "auto",
+    "background-color": "rgba(188, 188, 188, 1)",
+    "background-image": null,
+    "background-position-x": "(type:Center x:0)",
+    "background-position-y": "(type:Center x:0)",
+    "background-repeat": "(x:NoRepeat, y:NoRepeat)",
+    "background-size": "(sizeType:Length x:100%, y:100%)",
+    "border-bottom-color": "rgba(149, 149, 149, 1)",
+    "border-bottom-left-radius": 0,
+    "border-bottom-right-radius": 0,
+    "border-bottom-width": 10,
+    "border-left-color": "rgba(149, 149, 149, 1)",
+    "border-left-width": 10,
+    "border-right-color": "rgba(149, 149, 149, 1)",
+    "border-right-width": 10,
+    "border-top-color": "rgba(149, 149, 149, 1)",
+    "border-top-left-radius": 0,
+    "border-top-right-radius": 0,
+    "border-top-width": 10,
+    "bottom": 2,
+    "color": "rgba(27, 27, 27, 1)",
+    "display": "flex",
+    "filter": [],
+    "flex-basis": 80,
+    "flex-direction": "column",
+    "flex-grow": 0,
+    "flex-shrink": 0,
+    "flex-wrap": "no-wrap",
+    "font-size": 14,
+    "height": 80,
+    "justify-content": "flex-start",
+    "left": 4,
+    "letter-spacing": 0,
+    "margin-bottom": 2,
+    "margin-left": 4,
+    "margin-right": 4,
+    "margin-top": 2,
+    "max-height": "none",
+    "max-width": "none",
+    "min-height": "auto",
+    "min-width": "auto",
+    "opacity": 1,
+    "padding-bottom": 20,
+    "padding-left": 20,
+    "padding-right": 20,
+    "padding-top": 20,
+    "position": "relative",
+    "right": 4,
+    "rotate": "0 (0.00, 0.00, 1.00)",
+    "scale": "(1.00, 1.00, 1.00)",
+    "text-overflow": "clip",
+    "top": 2,
+    "transform-origin": "(80.00, 40.00, 0.00)",
+    "transition-delay": [
+     "0s"
+    ],
+    "transition-duration": [
+     "0s"
+    ],
+    "transition-property": [
+     "all"
+    ],
+    "transition-timing-function": [
+     "Ease"
+    ],
+    "translate": "(0.00, 0.00, 0.00)",
+    "-unity-background-image-tint-color": "rgba(255, 255, 255, 1)",
+    "-unity-background-scale-mode": "StretchToFill",
+    "-unity-editor-text-rendering-mode": "s-d-f",
+    "-unity-font": null,
+    "-unity-font-definition": "Font:NotInter-Regular",
+    "-unity-font-style-and-weight": "normal",
+    "-unity-material": "null",
+    "-unity-paragraph-spacing": 0,
+    "-unity-slice-bottom": 0,
+    "-unity-slice-left": 0,
+    "-unity-slice-right": 0,
+    "-unity-slice-scale": 1,
+    "-unity-slice-top": 0,
+    "-unity-slice-type": "sliced",
+    "-unity-text-align": "middle-center",
+    "-unity-text-generator": "standard",
+    "-unity-text-outline-color": "rgba(0, 0, 0, 0)",
+    "-unity-text-outline-width": 0,
+    "-unity-text-overflow-position": "end",
+    "visibility": "visible",
+    "white-space": "no-wrap",
+    "width": 160,
+    "word-spacing": 0
+   },
+   "children": []
+  }
+ ]
+}

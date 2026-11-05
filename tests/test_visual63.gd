@@ -30,10 +30,12 @@ func _png(path: String, color: Color, size := 4) -> void:
 	img.save_png(path)
 
 
-func _doc(root: String, uxml: String, size := Vector2(400, 300), native := true) -> UxmlDocument:
+func _doc(root: String, uxml: String, size := Vector2(400, 300), native := true, theme := true) -> UxmlDocument:
 	UssCascade.use_native = native
 	var doc := UxmlDocument.new()
 	doc.transitions_manual = true
+	if not theme:
+		doc.theme_path = ""  # geometry pinned to authored USS only
 	h.root.add_child(doc)
 	doc.size = size
 	doc.load_document(uxml, root)
@@ -391,7 +393,9 @@ func _autosize_doc(native: bool) -> UxmlDocument:
 		+ '.t { -unity-text-generator: advanced; }\n'
 		+ '.a { -unity-text-auto-size: best-fit 10px 40px; }\n')
 	UxmlDocument.use_native_layout = native
-	var doc := _doc(dir, "Assets/UI/main.uxml", Vector2(400, 600), native)
+	# Sizes below are pinned to authored USS: the default theme adds Label
+	# margins and padding that change the fitted widths.
+	var doc := _doc(dir, "Assets/UI/main.uxml", Vector2(400, 600), native, false)
 	UxmlDocument.use_native_layout = true
 	return doc
 

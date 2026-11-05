@@ -1,7 +1,7 @@
 extends SceneTree
 ## godot-uxml benchmark harness (headless).
 ##
-##   Godot --headless --path <project> -s res://bench/bench.gd [-- --quick] [-- --only=<substr>]
+##   Godot --headless --path <project> -s res://bench/bench.gd [-- --quick] [-- --only=<substr>] [-- --no-theme]
 ##
 ## Generates a large synthetic document (nested flex rows/columns, many
 ## classes, three stylesheets with @import, descendant/child selectors,
@@ -144,6 +144,8 @@ func _run() -> void:
 		UssStyleResolver.resolve(model, {"states": {"#card-3": ["hover"]}}), 10, 4000.0)
 	_time("load_document(big) full", func():
 		var d := UxmlDocument.new()
+		if OS.get_cmdline_user_args().has("--no-theme"):
+			d.set("theme_path", "")  # default theme off (A/B cost of the theme)
 		root.add_child(d)
 		d.size = Vector2(1280, 800)
 		d.load_document(big_path, BENCH_ROOT)
@@ -161,6 +163,8 @@ func _run() -> void:
 		var fx_path: String = fx[1]
 		_time("load_document(%s)" % fx_path.get_file(), func():
 			var d := UxmlDocument.new()
+			if OS.get_cmdline_user_args().has("--no-theme"):
+				d.set("theme_path", "")  # default theme off (A/B cost of the theme)
 			root.add_child(d)
 			d.size = Vector2(400, 600)
 			d.load_document(fx_path, fx_root)
@@ -169,6 +173,8 @@ func _run() -> void:
 
 	print("[steady state, big document]")
 	var doc := UxmlDocument.new()
+	if OS.get_cmdline_user_args().has("--no-theme"):
+		doc.set("theme_path", "")  # default theme off (A/B cost of the theme)
 	root.add_child(doc)
 	doc.size = Vector2(1280, 800)
 	doc.load_document(big_path, BENCH_ROOT)
@@ -179,6 +185,8 @@ func _run() -> void:
 
 	print("[HUD per-frame]")
 	var hud := UxmlDocument.new()
+	if OS.get_cmdline_user_args().has("--no-theme"):
+		hud.set("theme_path", "")  # default theme off (A/B cost of the theme)
 	root.add_child(hud)
 	hud.size = Vector2(640, 360)
 	hud.load_document("Assets/UI/hud.uxml", BENCH_ROOT)
