@@ -28,6 +28,20 @@ sheet or control parts (native Godot controls replace both).
 
 The Apache-2.0 license text is in `licenses/uxml-preview.LICENSE`.
 
+## Design inspiration (no code)
+
+The runtime architecture — observable model with change-driven updates,
+native data ownership, lazy re-layout, virtualized collections and the
+parity harness with negative cases — is inspired by Slint
+(https://github.com/slint-ui/slint) and the Material parity work in
+https://github.com/jethac/slint. No Slint source code is included in this
+addon.
+
+## godot-rust (native core)
+
+`native/` builds against the `godot` crate (godot-rust, MPL-2.0) — linked
+into the `godot_uxml_native` GDExtension binary, not vendored.
+
 ## Test fixtures (Apache-2.0)
 
 Files under `tests/fixtures/` are copied verbatim from the uxml-editor

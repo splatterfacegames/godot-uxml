@@ -1,5 +1,9 @@
 # godot-uxml performance
 
+> Two generations of numbers below: the GDScript optimization pass
+> (`perf/max`) and the native core (`rust/core`, Rust GDExtension). The
+> native section is at the end.
+
 ## Method
 
 - Machine: Intel Xeon W-2135 @ 3.70 GHz, Windows 11 Enterprise, Godot
@@ -164,11 +168,63 @@ or children's minimum sizes changed).
 | hover-style recolor | 0.034 ms | 10.04 ms (incl. O(n) cascade input scan) |
 | resize relayout | 6.67 ms | 56.4 ms (validated cached layout) |
 | one Label text change + relayout | 1.26 ms | 64.2 ms (`relayout()`) |
-| engine idle frame, same tree size | 10.7 ms | 6.9 ms |
 
 Native containers are C++ and incremental by construction — a recolor is a
 property write, a text change re-sorts one container chain. godot-uxml pays
 GDScript for the USS cascade and the Yoga-semantics flex pass, plus an O(n)
 scan per restyle that keeps direct model edits visible. On small documents
 (the 37-element HUD: hover 0.49 ms, per-frame `relayout()` 1.6 ms) the gap
-is affordable; on 1500-element screens it is ~10 ms per state change.
+is affordable; on 1500-element screens it is ~10 ms per state change. (An earlier version
+of this table listed headless "idle frame" times; those are headless frame
+pacing, not engine cost — see the windowed `bench/render_cost.gd` numbers in
+the native-core section.)
+
+
+## Native core (`rust/core`)
+
+Same machine and method; `-- --quick` runs of `bench/bench.gd`,
+`bench/workloads.gd`, `bench/native_compare.gd`; windowed
+`bench/render_cost.gd`. "GDScript" is the optimized pure-GDScript runtime
+(the fallback when the extension binary is absent).
+
+| op (big document, 1,531 elements) | original | GDScript | native core |
+| --- | ---: | ---: | ---: |
+| hover toggle (button) | 8,479 ms | 8.6 ms | 1.0 ms |
+| idle restyle | 8,396 ms | 7.4 ms | 0.58 ms |
+| resize relayout | 2,183 ms | 56 ms | 10.5 ms |
+| Label text + `relayout()` | — | 63 ms | 10.5 ms |
+| `set_class` (card, border change) | 8,991 ms | 93 ms | 11.2 ms |
+| `load_document` | 9,839 ms | 836 ms | 446 ms |
+| cascade resolve (static API) | 5,935 ms | 186 ms | 85 ms |
+| HUD frame, 8 labels + `relayout()` | — | 1.6 ms | 0.54 ms |
+| HUD hover | 36.7 ms | 0.49 ms | 0.21 ms |
+
+Representative screens (`bench/workloads.gd`, native core):
+
+| workload | op | median |
+| --- | --- | ---: |
+| settings (4 tabs × 12 rows) | load / switch tab / hover row | 61 / 7.7 / 0.30 ms |
+| inventory (80 slots) | load / hover / select / count change | 127 / 0.69 / 1.9 / 1.5 ms |
+| dialog | typewriter char + relayout / hover choice | 0.31 / 0.12 ms |
+| 1,000 rows, not virtualized | load / update one row | 1,126 / 18 ms |
+| `ListView`, 10,000 items | load / scroll 3 rows / hover / rebind visible | 57 / 2.0 / 0.18 / 2.1 ms |
+
+Versus the same screen hand-built from native Godot containers
+(`bench/native_compare.gd`; native re-sort forced on every container, an
+upper bound): build 279 ms (`.tscn` 267) vs load 890 ms incl. settle;
+recolor 0.03 vs hover 1.3 ms; resize 6.4 vs 11.1 ms; text change 1.1 vs
+10.4 ms.
+
+Per-frame cost with a real renderer (`bench/render_cost.gd`, Vulkan,
+RTX 5060 Ti, vsync off): empty scene 0.34 ms/frame; godot-uxml big document
+0.99 ms (render CPU 0.50, GPU 0.03); native containers 0.88 ms (0.47 /
+0.03). Node overhead is small and on par with native UI — which is why a
+batched/GPU box renderer was not built: it would save at most a few tenths
+of a millisecond per frame on this document.
+
+Where load time goes (big document, native core): parse UXML + sheets 93
+ms (GDScript), build 1,530 controls 72 ms, wire signals 21 ms, cascade
+setup 19 ms, full native cascade 58 ms, apply 82 ms. Node creation is
+engine-bound (the native `.tscn` instantiation itself is ~270 ms), so the
+remaining removable cost is parsing.
+

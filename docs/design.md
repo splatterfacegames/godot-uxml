@@ -1,10 +1,16 @@
 # godot-uxml design
 
-A pure-GDScript Godot 4 addon at `addons/godot_uxml`. It loads Unity UXML
-documents and USS stylesheets, resolves the USS cascade, and — from milestone
-2 — instantiates native Godot controls under a dedicated flex-subset layout.
-No compiled extension, Node, Unity, or browser is involved at runtime, and
-document content is never executed.
+A Godot 4 addon at `addons/godot_uxml`. It loads Unity UXML documents and
+USS stylesheets, resolves the USS cascade, and instantiates native Godot
+controls under a dedicated flex-subset layout. The whole pipeline is
+implemented in GDScript; an optional native core (`native/`, Rust via
+godot-rust, shipped as the `godot_uxml_native` GDExtension) accelerates the
+cascade and layout and is used automatically when its binary is present —
+without it the GDScript implementation runs unchanged. No Node, Unity, or
+browser is involved at runtime, and document content is never executed.
+
+The runtime's architecture is inspired by [Slint](https://slint.dev)
+(see "Runtime architecture" below).
 
 Reference semantics are ported from `vendor/uxml-preview` inside
 `splatterfacegames/uxml-editor` @ `819d9c8d11bd6c50e326797055b80fd8b0cf250d`
@@ -431,6 +437,47 @@ under the root that load actually used — an explicit `root` passed to
 `load_document` survives reload. Repeated loads were verified stable:
 100 loads keep `OBJECT_NODE_COUNT` flat.
 
+## Runtime architecture (inspired by Slint)
+
+godot-uxml's runtime borrows its shape from Slint's (internal/core in
+slint-ui/slint, and the Material parity work in jethac/slint). Only ideas
+are borrowed — no Slint code is included.
+
+- **Observable model, change-driven updates** (Slint's dependency-tracked
+  properties): `UxmlElement.set_attribute()` notifies the document, which
+  marks just that element dirty; the cascade re-reads only dirty elements'
+  inputs and recomputes only elements whose inputs, inherited values, or
+  ancestor features used by descendant/child selectors changed. Direct
+  edits of `UxmlElement.attributes` are picked up by `refresh()`.
+- **Data stays native** (Slint's compiled item tree): with the native core,
+  computed layout values live in Rust; the flex pass reads them directly,
+  measures leaves through engine calls, keeps results in native vectors
+  and places controls itself — Dictionaries are only built for GDScript
+  consumers that ask (`get_computed_style()`).
+- **Lazy, minimal re-layout**: paint-only restyles skip layout once the
+  document has settled; layout is re-run on geometry-affecting changes,
+  resizes, `relayout()` and `refresh()`.
+- **Parity testing against a reference** (jethac/slint's Compose parity
+  harness, including its deliberately broken negative cases):
+  `bench/parity.gd`, results in `docs/parity.md`.
+- **Virtualized collections** (Slint's ListView/model rows): `ListView`
+  instantiates only enough template rows to cover the viewport and
+  recycles them while scrolling.
+
+### Native core
+
+`native/` is a Rust crate (godot-rust `godot` 0.5, `api-4-7`). Build and
+install the Windows x64 binary with `python native/build.py` (release; the
+`.gdextension` maps both editor and export builds to the optimized
+library). `UssCascade` delegates to `UxmlNativeCascade` when
+`ClassDB.class_exists("UxmlNativeCascade")`; `UssCascade.use_native` and
+`UxmlDocument.use_native_layout` force the GDScript path. Rule compilation
+and its diagnostics, `var()` substitution, shorthand expansion and inline
+style parsing stay in GDScript (the native core calls back and memoizes),
+so those semantics are shared by construction. `bench/equiv*.gd` (with
+`-- --gdscript` for the fallback) check the two paths against the
+original implementation.
+
 ## Public API (runtime)
 
 ```gdscript
@@ -448,9 +495,32 @@ doc.set_enabled("advanced-panel", false)  # subtree disable + :disabled
 doc.set_class("item", "row selected")     # re-resolve with new classes
 doc.refresh()                             # after unseen mutations
 doc.relayout()                            # per-frame text updates (no re-apply)
+doc.get_element_model("hint").set_attribute("class", "hint visible")  # observable
+
+# Virtualized list: <ui:ListView name="items" fixed-item-height="24"
+#                                item-template="row.uxml" />
+doc.set_list_source("items", items.size(), func(row: UxmlListRow, i: int):
+    row.get_native("title").text = items[i].name)
+doc.refresh_list("items")                 # item data changed in place
 for d in doc.diagnostics:                 # everything, parse→runtime
     print(UxmlDiagnostic.format(d))
 ```
+
+### ListView
+
+`<ui:ListView fixed-item-height="N" item-template="row.uxml"
+show-alternating-row-backgrounds="ContentOnly|All">` (Unity 2023.2+
+attribute names; `virtualization-method` other than `FixedHeight` is
+diagnosed). The template's visual top-level elements are copied into a pool
+of rows — enough to cover the tallest viewport the document can get (its
+height, the window or the screen, at least 1080px) — appended under the
+ListView before the cascade runs, so they are ordinary elements: author
+selectors, `var()` and pseudo-states reach them; their `name`s do not enter
+the document's name index. Template `<Style>` sheets are attached scoped to
+the ListView. Rows carry Unity's `unity-collection-view__item` /
+`unity-list-view__item` classes (and `--alternative-background` on odd
+items). Item `i` lives in pool slot `i % pool`, so scrolling re-binds only
+rows that scrolled out; slots past the item count are `display: none`.
 
 ## Unsupported / out of scope (diagnosed, not silent)
 

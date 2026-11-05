@@ -6,8 +6,9 @@ extends SceneTree
 ##
 ##   Godot --headless --path <project> -s res://bench/native_compare.gd
 ##
-## Native containers re-sort in a deferred pass, so layout-triggering ops are
-## timed as (frame with the change) - (median idle frame).
+## Ops are timed synchronously (native: forced container re-sort, an upper
+## bound). Per-frame engine/render cost needs a real renderer — headless
+## frame times are frame pacing — see bench/render_cost.gd.
 
 const CARDS := 150
 const ITEMS := 60
@@ -255,13 +256,11 @@ func _native() -> void:
 		bodyl.text = "short" if i % 2 == 0 else "a much longer body text that wraps over lines"
 		for c in chain:
 			c.notification(Container.NOTIFICATION_SORT_CHILDREN))
-	var frame := await _frame_only_ms()
 	_rows.append(["build in code + first layout (big)", "%.1f ms" % _median(builds), ""])
 	_rows.append(["instantiate .tscn + first layout (big)", "%.1f ms" % _median(insts), ""])
 	_rows.append(["hover-like recolor", "%.3f ms" % hover, ""])
 	_rows.append(["resize relayout (native: all containers forced)", "%.2f ms" % resize, ""])
 	_rows.append(["one Label text change + relayout", "%.3f ms" % text, ""])
-	_rows.append(["engine idle frame, same tree size", "%.1f ms" % frame, ""])
 	root.remove_child(host)
 	host.free()
 
@@ -297,11 +296,9 @@ func _uxml() -> void:
 		bodyl.text = "short" if i % 2 == 0 else "a much longer body text that wraps over lines"
 		d.relayout()
 		d._restyle_now())
-	var frame := await _frame_only_ms()
 	var u := [
 		"%.1f ms" % _median(loads), "— (loads .uxml/.uss: %.1f ms)" % _median(loads),
 		"%.3f ms" % hover, "%.2f ms" % resize, "%.3f ms (relayout())" % text,
-		"%.1f ms" % frame,
 	]
 	for k in u.size():
 		_rows[k][2] = u[k]
