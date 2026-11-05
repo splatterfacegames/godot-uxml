@@ -67,15 +67,15 @@ on structure only.
 
 ### Unity
 
-**36 of 64 cases match exactly. 11 more differ only by pixel-grid
+**41 of 64 cases match exactly. 13 more differ only by pixel-grid
 rounding. Structure: 572/719 elements. Geometry: 2137/2268 values, and
-74 more within 0.5px. Style: 14653/14690 values.**
+74 more within 0.5px. Style: 14663/14690 values.** Before the theme had
+the disabled opacity: 36 and 11.
 
 | difference | cases | cause |
 | --- | --- | --- |
 | up to 0.5px | most `ctl-*` cases with centred parts (checkmarks, help box labels, progress titles) | Unity rounds every layout edge to the pixel grid (Yoga's RoundToPixelGrid). godot-uxml keeps fractions. |
 | ScrollView parts (`unity-content-and-vertical-scroll-container`, `unity-content-viewport`, ...) | `scrollview-*`, `child-combinator-through-parts`, `inventory` | ScrollView still maps to a native `ScrollContainer`; the ScrollView part tree is the next task. |
-| `opacity: 0.5` | `states-disabled`, `disabled-inherits`, `state-vs-*`, `ctl-button`, `ctl-disabled` | measured (`.unity-disabled`, only the element with `enabled="false"`), but the runtime does not paint `opacity` yet, so the theme leaves it out. |
 | help box label width | `ctl-helpbox` | deliberate theme deviation: the label grows, because godot-uxml measures a wrapping Label without a max-content width. |
 | narrow field | `ctl-basefield` (150px container) | Unity clamps a text measure to the available width, so a long field label shrinks to its 150px minimum and the input collapses. godot-uxml measures the full text. |
 | `/Assets/…` image size | `absolute-import-assets`, `absolute-import-project` | resource resolution, not controls (unchanged from before). |
@@ -121,8 +121,6 @@ Unity.
 
 - Pixel-grid rounding of the layout output (Yoga's rounding rule), in the
   GDScript and the native layout alike.
-- `opacity` painting in the runtime; then `.unity-disabled { opacity: 0.5 }`
-  can join the theme.
 - A max-content width for wrapping Labels, and Unity's clamp of a text
   measure to the available width.
 - ScrollView, ListView, TreeView, TabView and the field controls as part

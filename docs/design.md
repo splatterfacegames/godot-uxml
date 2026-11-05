@@ -364,6 +364,29 @@ UxmlDocument (Control)
                                applied as Control position/size
 ```
 
+### Load order
+
+`UxmlDocument.load_document()` runs these steps in this order. Each step
+sees the result of the steps before it.
+
+1. `UxmlLoader`: parse, then template expansion (`UxmlTemplates`), then
+   `<Bindings>` extraction (`UxmlBindings.extract`), then the sheets.
+   Template clones are ordinary elements from here on, and
+   `UxmlDocumentModel.element_paths` records the source file of each clone.
+2. `UxmlTheme.attach`: the theme sheet goes first in cascade order.
+3. `_expand_lists`: ListView rows from the item templates. The `<Bindings>`
+   of the rows are extracted next.
+4. `UxmlParts.expand`: control part trees. The author children of a
+   control, template instances included, move into the content container
+   of the control. A `<Bindings>` text attribute (`label`, `text`) gets
+   its part at this step (see "Control parts").
+5. Name index, controls (`UxmlControlFactory`), signal wiring.
+6. `UxmlBehaviors.attach_all`, then `UxmlCommonAttributes.setup`, then
+   `UxmlBinding.setup`. The bindings write the first values through the
+   behaviors, before the first restyle.
+7. The first restyle (cascade, transitions bookkeeping, applier, layout),
+   then the restore of view data.
+
 | file | class | role |
 | --- | --- | --- |
 | `uxml_document.gd` | `UxmlDocument` | public `Control`; orchestrates load→build→style→layout, owns runtime states and signals |
@@ -391,9 +414,9 @@ Every element gets one Godot control, part elements included (see
 | element | control | `get_native` |
 | --- | --- | --- |
 | `VisualElement`, `TemplateContainer`, `Box`, unknown tag, container parts | `UxmlBox` | same |
-| `Label`, `TextElement`, text parts | `Label` | same |
-| `Button` | `Button`, styled on every stylebox slot by USS | same |
-| `RepeatButton` | `UxmlRepeatButton` | same |
+| `Label`, `TextElement`, text parts | `Label`; `RichTextLabel` when the text holds Unity rich text tags (see "Rich text") | same |
+| `Button` | `Button`, styled on every stylebox slot by USS; rich text tags are removed (diagnostic) | same |
+| `RepeatButton` | `UxmlRepeatButton` (tags removed as for `Button`) | same |
 | `Toggle`, `RadioButton` | `UxmlToggle` | same |
 | `Foldout` | `UxmlBox`; its Toggle part is a `UxmlToggle` | the Toggle part |
 | `PopupWindow` | `Label` (draws the title; the content part is a child) | same |
@@ -498,10 +521,12 @@ Targets. `property` accepts the Unity C# name or the UXML attribute name:
 
 | property | target |
 | --- | --- |
-| `text` | Label / Button / Toggle text; TextField value |
-| `value` | Slider / SliderInt value, Toggle state, TextField text, DropdownField selected choice |
-| `label` | field caption, Toggle text |
-| `lowValue`, `highValue` (`low-value`, `high-value`) | Slider range |
+| `text` | Label / Button / TextElement text; the text part of Toggle, RadioButton and Foldout; GroupBox, HelpBox and PopupWindow text; TextField value |
+| `value` | Slider / SliderInt value; Toggle, RadioButton and Foldout state; RadioButtonGroup index; ToggleButtonGroup selected indices (an Array, or one int); ProgressBar value; TextField text; DropdownField selected choice |
+| `label` | field caption; the label part of Toggle, RadioButton, RadioButtonGroup and ToggleButtonGroup |
+| `lowValue`, `highValue`, `title` | ProgressBar range and title |
+| `messageType` (`message-type`) | HelpBox icon variant (`None`, `Info`, `Warning`, `Error` or the enum index) |
+| `lowValue`, `highValue` (`low-value`, `high-value`) | Slider range (ProgressBar: see above) |
 | `choices`, `index` | DropdownField items and selection |
 | `tooltip` | `tooltip_text` |
 | `enabledSelf` (`enabled`) | the `set_enabled()` override |
@@ -513,7 +538,16 @@ Targets. `property` accepts the Unity C# name or the UXML attribute name:
 | `usageHints` | accepted, no effect |
 | `style.<name>` | inline USS property; `<name>` is the IStyle C# name (`backgroundColor`, `unityFontStyleAndWeight`) or the USS name |
 
-- Element targets write through the control and update the model
+- A control with a part tree (see "Control parts") takes the write
+  through its behavior: `Behavior.bind_write(property, value)` sets the
+  model attribute (`value`, `label`, `text`, `title`, ...), and the
+  behavior, the cascade and the layout react as to an author change. The
+  Toggle `value` write thus sets `:checked` on the Toggle and its input
+  part, a Foldout `value` write opens or closes `#unity-content`, and a
+  ProgressBar `value` write moves the progress part. A RadioButtonGroup
+  `choices` write gives `binding-failed`: the radio buttons are parts, and
+  part trees are fixed after load.
+- Other element targets write through the control and update the model
   attribute (`set_attribute`). A text, label, choices or image change asks
   for a relayout. A `style.*` target rewrites the `style` attribute as the
   authored inline style plus the bound declarations, so the incremental
@@ -526,6 +560,17 @@ Targets. `property` accepts the Unity C# name or the UXML attribute name:
   `display`/`visibility`; a Resource with a path becomes `url()`.
 - A text value is written as C# `ToString()` writes it: an integral float
   has no `.0`.
+- A text write to a `RichTextLabel` parses the Unity rich text tags again
+  (`UxmlDocument._set_control_text`, the path of `set_text`). A text
+  write to a Button removes the tags.
+- A `label` or `text` binding in `<Bindings>` on a control whose
+  attribute is empty at load gets a hidden text part (`display: none`).
+  A later non-empty value shows the part and removes
+  `unity-base-field--no-label`; an empty value hides the part again.
+  Unity creates the label element at that moment instead; the resolved
+  styles and the layout are the same.
+- `enabledSelf` writes act as `set_enabled()`: the override plus the
+  `unity-disabled` class on the element.
 - A focused LineEdit or TextEdit is not overwritten from the source
   (Unity `DataBinding.UpdateUI`).
 - An unknown property, an unresolved path, a target that the control does
@@ -537,10 +582,12 @@ Two-way:
 
 - For `TwoWay` and `ToSource` bindings of `value` (and of `text` on a
   TextField, `index` on a DropdownField), a user edit writes the UI value
-  to the source: HSlider `value_changed` (int for SliderInt), CheckBox
-  `toggled`, LineEdit/TextEdit `text_changed`, OptionButton
-  `item_selected`. The same edits emit the document `value_changed`
-  signal.
+  to the source: HSlider `value_changed` (int for SliderInt),
+  LineEdit/TextEdit `text_changed`, OptionButton `item_selected`, and the
+  `ui_changed` signal of a part-tree behavior (Toggle, RadioButton,
+  Foldout, RadioButtonGroup, ToggleButtonGroup).
+  `Behavior.bind_read(property)` gives the UI value. The same edits emit
+  the document `value_changed` signal.
 - After the write, the other bindings of that source and path update.
 - A UI write from the source does not echo back to the source.
 
@@ -560,12 +607,13 @@ Converters (Unity `ConverterGroups`):
 `binding-path`: Unity binds `binding-path` to a SerializedObject in the
 Editor only. The runtime maps `binding-path="p"` on a BindableElement to a
 `TwoWay`, `OnSourceChanged` DataBinding with `data-source-path="p"`. The
-target is `text` on Label, Button and TextElement, `itemsSource` on
+target is `text` on Label, Button, RepeatButton, TextElement and
+PopupWindow, `itemsSource` on
 ListView and `value` on every other field. The path is relative to the
 element data source context, so `data-source` and `data-source-path` on
 ancestors apply. The `binding-path` values of parent elements do not
 compose. `binding-path` on an element that is not a BindableElement
-(VisualElement, TemplateContainer, ScrollView, Image, Box) gives
+(VisualElement, TemplateContainer, ScrollView, Image, Box, HelpBox) gives
 `binding-failed`. A DataBinding of the same property replaces the
 `binding-path` binding.
 
@@ -663,7 +711,16 @@ Rules for every part tree:
   attribute and records the control classes, and `UxmlDocument.set_class`
   keeps the control classes.
 - The part tree is fixed after load. Attribute changes update part text,
-  inline styles and classes; parts are not added or removed.
+  inline styles and classes; parts are not added or removed. One
+  exception is prepared at load: a text attribute (`label`, `text`) that a
+  `<Bindings>` DataBinding writes gets its part even when the attribute
+  is empty, hidden with `display: none` (`UxmlParts.META_LIVE`).
+  `Behavior.sync_text` shows and hides the part with the text. A
+  `label`/`text` set later by script or by `add_binding()` on a control
+  that had no such part at load changes the attribute only.
+- A text part with Unity rich text tags is a `RichTextLabel`, as an
+  authored Label is. A Button, RepeatButton and PopupWindow draw their
+  own text, so their tags are removed with a diagnostic.
 
 Measured part trees (Unity 6000.3, `bench/parity/unity/ctl-*.json`):
 
@@ -692,7 +749,9 @@ created after the controls exist. A behavior reads input from the control
 `UxmlElement.set_attribute`, and emits `value_changed`. The incremental
 cascade and layout do the rest. `Behavior.on_model_changed()` runs when an
 attribute of the control changes; `Behavior.native()` is the control that
-`get_native` returns.
+`get_native` returns. `bind_write()`, `bind_read()` and the `ui_changed`
+signal connect the behavior to data binding (see "Data binding
+(runtime)").
 
 Pseudo-states follow the measured Unity placement:
 
@@ -759,11 +818,18 @@ USS file (replaces the theme), or `""` (no theme). The theme folder is in
 inside that folder even outside the project root. Parsed themes are
 cached per path (`UxmlTheme.clear_cache()` drops the cache).
 
-Measured values that the theme does not apply yet, because the runtime
-does not paint the property: `.unity-disabled { opacity: 0.5 }` (only the
-element with `enabled="false"` dims, not its subtree),
-`.unity-base-field__label { text-overflow: ellipsis }`, and the help box
-icon's scale mode.
+The theme also has the measured values of painted properties (see
+"Visual properties"):
+
+- `.unity-disabled { opacity: 0.5 }`. `enabled="false"`, `set_enabled(false)`
+  and an `enabledSelf` binding add `unity-disabled` to the element itself.
+  Only that element resolves opacity 0.5 (`ctl-disabled`,
+  `states-disabled`); its subtree is `:disabled` with opacity 1. The
+  applier paints opacity as `modulate.a` on the element's control, so the
+  subtree dims once with the element, as in Unity.
+- `.unity-base-field__label { text-overflow: ellipsis }`. The label elides
+  only when an author rule also sets `overflow: hidden`, as in Unity.
+- `.unity-help-box__icon { -unity-background-scale-mode: scale-to-fit }`.
 
 ### Layout
 
@@ -1163,6 +1229,20 @@ source: `StylePropertyAnimationSystem`, `ComputedTransitions`,
 `VisualTreeStyleUpdater`, `StylePropertyAnimation` and `Easing`
 (UnityCsReference, branch `6000.0`).
 
+Transitions see the cascade output, so the default theme and the control
+part trees need no special case:
+
+- A part element (a Toggle checkmark, a Foldout content container) is an
+  ordinary cascade element. An author rule such as
+  `.unity-toggle__checkmark { transition: background-color 1s }` animates
+  the part when a state on the control or on the input part changes.
+- A value from the theme is a cascade value. A transition starts from the
+  theme value and ends at the new theme or author value: an author
+  `.unity-button { transition: background-color 1s }` animates the theme
+  hover colour, and `transition: opacity 1s` animates the theme
+  `.unity-disabled` opacity after `set_enabled(false)`.
+- The theme itself declares no transitions, as Unity's runtime theme.
+
 ### Properties and lists
 
 - `transition-property`: `all` (initial), `none`, or a comma-separated
@@ -1215,7 +1295,9 @@ Unity's initial value (for example `rgba(0, 0, 0, 0)` for
 `background-color`, `0px` for margins). `color`, `font-size`, `-unity-font`
 and `-unity-font-definition` are exceptions: without a USS value, the
 runtime paints the Godot theme value. A change from or to an unset value
-of these four properties applies immediately.
+of these four properties applies immediately. With the default theme,
+`color` and `font-size` always have a value (the theme's `UXML` root rule,
+inherited), so the exception applies to them only with `theme_path = ""`.
 
 ### Starting, retargeting, cancelling
 
@@ -1421,6 +1503,9 @@ contain the same steps.
   item (a RenderingServer item). The element's own background and border
   stay on the element's canvas item and draw in full. The content-box
   inset follows the resolved padding (`apply_resolved_insets`).
+- The default theme gives `.unity-disabled` opacity 0.5 (see "Default
+  theme"). Only the element with the class resolves 0.5; its subtree dims
+  through the element's `modulate`.
 - Limit: Unity clips children to rounded corners when the element has a
   `border-radius`. The runtime clips to a rectangle.
 - Limit: input clipping uses the border box: a child area inside the
@@ -1522,8 +1607,16 @@ contain the same steps.
   parse Unity tags.
 - `parse-escape-sequences="true"` decodes `\n`, `\t`, `\r`, `\\`,
   `\uXXXX` and `\UXXXXXXXX` in the `text` attribute.
-- A Button has no Godot rich text: the factory removes the tags from the
-  Button text and warns `unsupported-value`.
+- Text parts of controls (the label and text of a Toggle or RadioButton,
+  a GroupBox label, a HelpBox label, a ProgressBar title) are Label
+  elements, so a part with tags is a `RichTextLabel` too. A text part
+  passes or ignores the mouse by its role (see "Control parts"), also as a
+  `RichTextLabel`.
+- A text binding and a behavior text update parse the tags again through
+  the same path as `set_text`. A text without tags in a `RichTextLabel`
+  draws as one plain run.
+- A Button, RepeatButton and PopupWindow have no Godot rich text: the
+  factory removes the tags from the text and warns `unsupported-value`.
 - Limit: `text-overflow: ellipsis` does not apply to rich text. The text
   is clipped and the applier warns.
 
