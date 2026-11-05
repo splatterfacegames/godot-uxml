@@ -1,0 +1,4 @@
+{"actions": [
+  {"op": "click", "path": "0/0/2"},
+  {"op": "click", "target": "r2"}
+]}

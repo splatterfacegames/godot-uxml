@@ -1,0 +1,14 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Button name="b-text" text="Play" />
+  <ui:Button name="b-empty" />
+  <ui:Button name="b-child" text="Has child">
+    <ui:VisualElement name="b-child-ve" style="width: 10px; height: 10px;" />
+  </ui:Button>
+  <ui:VisualElement name="row" style="flex-direction: row;">
+    <ui:Button name="b-row1" text="One" />
+    <ui:Button name="b-row2" text="Two" />
+  </ui:VisualElement>
+  <ui:RepeatButton name="rb" text="Repeat" delay="300" interval="50" />
+  <ui:RepeatButton name="rb-default" text="R" />
+  <ui:Button name="b-disabled" text="Off" enabled="false" />
+</ui:UXML>

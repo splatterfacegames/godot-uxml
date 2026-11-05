@@ -1,0 +1,13 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Toggle name="s-toggle" label="Styled" text="Text" />
+  <ui:Toggle name="s-toggle2" class="big" label="Big" />
+  <ui:Foldout name="s-foldout" text="Fold">
+    <ui:Label name="s-foldout-child" text="Child" />
+  </ui:Foldout>
+  <ui:ProgressBar name="s-pb" value="25" title="T" />
+  <ui:Button name="s-type" text="Type" />
+  <ui:Button name="s-class" class="flat" text="Class" />
+  <ui:Button name="s-id" text="Id" />
+  <ui:GroupBox name="s-gb" text="G" />
+  <ui:HelpBox name="s-hb" text="H" message-type="Warning" />
+</ui:UXML>

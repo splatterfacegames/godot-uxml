@@ -83,6 +83,22 @@ func _text(doc: UxmlDocument, n: String) -> String:
 	return String(doc.get_native(n).text)
 
 
+## The drawn text of a control part (UxmlParts role) of element `n`.
+func _part_text(doc: UxmlDocument, n: String, role: String) -> String:
+	var p := UxmlParts.find_part(doc.get_element_model(n), role)
+	if p == null:
+		return "<no part>"
+	var c: Control = doc._controls.get(p)
+	if c is RichTextLabel:
+		return String(c.get_meta("uxml_rich_src", ""))
+	return String(c.get("text"))
+
+
+func _part_shown(doc: UxmlDocument, n: String, role: String) -> bool:
+	var p := UxmlParts.find_part(doc.get_element_model(n), role)
+	return p != null and (doc._controls.get(p) as Control).visible
+
+
 # ---------------------------------------------------------------------------
 # Model: <Bindings> extraction and PropertyPath
 # ---------------------------------------------------------------------------
@@ -339,7 +355,7 @@ func test_two_way_write_back() -> void:
 	h.eq(p.volume, 25.0, "slider -> source")
 	(doc.get_native("score") as HSlider).value = 42
 	h.eq(p.score, 42, "slider int -> int source")
-	(doc.get_native("mute") as CheckBox).button_pressed = true
+	(doc.get_native("mute") as UxmlToggle).button_pressed = true
 	h.eq(p.muted, true, "toggle -> source")
 	var le := doc.get_native("nick") as LineEdit
 	le.text = "zed"
@@ -425,7 +441,7 @@ func test_element_property_targets() -> void:
 	var ob := doc.get_native("d") as OptionButton
 	h.eq(ob.item_count, 2, "choices")
 	h.eq(ob.get_item_text(ob.selected), "High", "dropdown value selects by text")
-	h.eq(_text(doc, "t"), "Caption", "toggle label")
+	h.eq(_part_text(doc, "t", "label"), "Caption", "toggle label")
 	data["on"] = true
 	data["shown"] = true
 	doc.notify_changed(data)
@@ -527,6 +543,151 @@ func test_bindings_inside_templates() -> void:
 	labels.sort()
 	h.eq(labels, ["A", "B"], "each instance binds through its own data-source-path")
 	h.eq(_kinds(doc.diagnostics).count("unsupported-control"), 0, "no binding tags left: %s" % [doc.diagnostics])
+	_close(doc)
+
+
+# ---------------------------------------------------------------------------
+# Part-tree controls (runtime/controls/): bindings write through behaviors
+# ---------------------------------------------------------------------------
+
+func test_part_tree_control_targets() -> void:
+	var data := {"on": true, "cap": "", "txt": "Mute", "radio": true,
+		"open": false, "ftext": "Section", "pv": 25, "plo": 0, "phi": 50, "ptitle": "Half",
+		"gtext": "Group", "htext": "Careful", "htype": "Warning", "ptext": "Popup",
+		"pick": 2, "sel": [1]}
+	var doc := _open("parts", '<ui:Toggle name="t"><Bindings>' \
+		+ '<ui:DataBinding property="value" data-source-path="on"/>' \
+		+ '<ui:DataBinding property="label" data-source-path="cap"/>' \
+		+ '<ui:DataBinding property="text" data-source-path="txt"/></Bindings></ui:Toggle>' \
+		+ '<ui:RadioButton name="r"><Bindings><ui:DataBinding property="value" data-source-path="radio"/></Bindings></ui:RadioButton>' \
+		+ '<ui:Foldout name="f"><Bindings><ui:DataBinding property="value" data-source-path="open"/>' \
+		+ '<ui:DataBinding property="text" data-source-path="ftext"/></Bindings><ui:Label name="inner" text="in"/></ui:Foldout>' \
+		+ '<ui:ProgressBar name="p"><Bindings><ui:DataBinding property="value" data-source-path="pv"/>' \
+		+ '<ui:DataBinding property="lowValue" data-source-path="plo"/>' \
+		+ '<ui:DataBinding property="highValue" data-source-path="phi"/>' \
+		+ '<ui:DataBinding property="title" data-source-path="ptitle"/></Bindings></ui:ProgressBar>' \
+		+ '<ui:GroupBox name="g"><Bindings><ui:DataBinding property="text" data-source-path="gtext"/></Bindings></ui:GroupBox>' \
+		+ '<ui:HelpBox name="hb" message-type="Info"><Bindings><ui:DataBinding property="text" data-source-path="htext"/>' \
+		+ '<ui:DataBinding property="messageType" data-source-path="htype"/></Bindings></ui:HelpBox>' \
+		+ '<ui:PopupWindow name="pw"><Bindings><ui:DataBinding property="text" data-source-path="ptext"/></Bindings></ui:PopupWindow>' \
+		+ '<ui:RadioButtonGroup name="rg" choices="a,b,c"><Bindings><ui:DataBinding property="value" data-source-path="pick"/></Bindings></ui:RadioButtonGroup>' \
+		+ '<ui:ToggleButtonGroup name="tg"><Bindings><ui:DataBinding property="value" data-source-path="sel"/></Bindings>' \
+		+ '<ui:Button text="x"/><ui:Button text="y"/><ui:Button text="z"/></ui:ToggleButtonGroup>', {}, data)
+	await h.process_frame
+	await h.process_frame
+	var t := doc.get_native("t") as UxmlToggle
+	h.check(t.button_pressed, "Toggle value from the source")
+	h.check("checked" in doc._states.get(doc.get_element_model("t"), {}), "a bound Toggle value sets :checked")
+	h.eq(_part_text(doc, "t", "text"), "Mute", "Toggle text part")
+	h.check(not _part_shown(doc, "t", "label"), "an empty bound label keeps the label part hidden")
+	h.check("unity-base-field--no-label" in doc.get_element_model("t").class_list(), "empty bound label: --no-label")
+	h.check((doc.get_native("r") as UxmlToggle).button_pressed, "RadioButton value")
+	var f := doc.get_element_model("f")
+	var content := UxmlParts.content_container(f)
+	h.eq(content.get_attribute("style"), "display: none;", "Foldout value false closes #unity-content")
+	h.check(doc.get_element_model("inner") in content.children, "author children stay in the content container")
+	h.eq(_part_text_of(doc, UxmlParts.find_part(f, "toggle"), "text"), "Section", "Foldout text reaches the Toggle part")
+	var pe := doc.get_element_model("p")
+	h.eq(UxmlParts.find_part(pe, "progress").get_attribute("style"), "right: 50%;", "ProgressBar value / high-value")
+	h.eq(_part_text(doc, "p", "title"), "Half", "ProgressBar title")
+	h.eq(_part_text(doc, "g", "label"), "Group", "GroupBox text label part (hidden placeholder shown)")
+	h.check(_part_shown(doc, "g", "label"), "a non-empty bound GroupBox text shows the label")
+	h.eq(_part_text(doc, "hb", "label"), "Careful", "HelpBox text")
+	h.check("unity-help-box__icon--warning" in UxmlParts.find_part(doc.get_element_model("hb"), "icon").class_list(), "HelpBox messageType")
+	h.eq(_text(doc, "pw"), "Popup", "PopupWindow text")
+	var rg := doc.get_element_model("rg")
+	var radios: Array = UxmlParts.find_part(rg, "choices").children
+	h.check((doc._controls[radios[2]] as UxmlToggle).button_pressed, "RadioButtonGroup value selects the radio")
+	h.eq(doc._behaviors[doc.get_element_model("tg")].selected_indices(), [1], "ToggleButtonGroup value")
+	h.eq(_kinds(doc.diagnostics).count("binding-failed"), 0, "no failures: %s" % [doc.diagnostics])
+
+	# Source changes after load.
+	data["cap"] = "Sound"
+	data["on"] = false
+	data["open"] = true
+	data["pick"] = 0
+	doc.notify_changed(data)
+	await h.process_frame
+	await h.process_frame
+	h.eq(_part_text(doc, "t", "label"), "Sound", "a bound label part shows its text")
+	h.check(_part_shown(doc, "t", "label"), "the label part shows once not empty")
+	h.check(not ("unity-base-field--no-label" in doc.get_element_model("t").class_list()), "--no-label leaves")
+	h.check(not t.button_pressed, "Toggle value false")
+	h.check(not doc._styles.get(UxmlParts.find_part(doc.get_element_model("t"), "input"), {}).is_empty(), "parts restyle")
+	h.check(content.get_attribute("style") == null or content.get_attribute("style") == "", "Foldout opens from the source")
+	h.check((doc._controls[radios[0]] as UxmlToggle).button_pressed and not (doc._controls[radios[2]] as UxmlToggle).button_pressed, "RadioButtonGroup reselects")
+
+	# Two-way: user edits write the source back.
+	t.button_pressed = true
+	h.eq(data["on"], true, "Toggle -> source")
+	(doc._controls[UxmlParts.find_part(f, "toggle")] as UxmlToggle).button_pressed = false
+	h.eq(data["open"], false, "Foldout -> source")
+	(doc._controls[radios[1]] as UxmlToggle).button_pressed = true
+	h.eq(data["pick"], 1, "RadioButtonGroup -> source")
+	var tg_b: Array = UxmlParts.content_container(doc.get_element_model("tg")).children
+	(doc._controls[tg_b[2]] as Button).pressed.emit()
+	h.eq(data["sel"], [2], "ToggleButtonGroup -> source")
+	_close(doc)
+
+
+func _part_text_of(doc: UxmlDocument, owner: UxmlElement, role: String) -> String:
+	var p := UxmlParts.find_part(owner, role)
+	if p == null:
+		return "<no part>"
+	return String((doc._controls.get(p) as Control).get("text"))
+
+
+## Template instances inside part-tree controls: the Instance becomes an
+## author child of the control and moves into its content container; the
+## bindings inside the template still bind.
+func test_bindings_in_templates_inside_controls() -> void:
+	var data := {"rows": {"v": "Row text", "on": true}}
+	var doc := _open("tmplctl", '<ui:Template name="Row" src="row.uxml"/>' \
+		+ '<ui:Foldout name="f" text="F"><ui:Instance template="Row" data-source-path="rows"/></ui:Foldout>' \
+		+ '<ui:GroupBox name="g" text="G"><ui:Instance template="Row" data-source-path="rows"/></ui:GroupBox>',
+		{"Assets/UI/row.uxml": '<ui:Label name="v"><Bindings><ui:DataBinding property="text" data-source-path="v"/></Bindings></ui:Label>' \
+			+ '<ui:Toggle name="tt"><Bindings><ui:DataBinding property="value" data-source-path="on"/></Bindings></ui:Toggle>'},
+		data)
+	await h.process_frame
+	var f := doc.get_element_model("f")
+	var content := UxmlParts.content_container(f)
+	h.eq(content.children.size(), 1, "the instance is in #unity-content")
+	h.eq(content.children[0].local, "TemplateContainer", "as a TemplateContainer")
+	var labels: Array = []
+	var toggles := 0
+	for el in doc._controls:
+		if el.local == "Label" and el.part_of == null:
+			labels.append(_shown(doc._controls[el]))
+		if el.local == "Toggle" and el.part_of == null and (doc._controls[el] as UxmlToggle).button_pressed:
+			toggles += 1
+	h.eq(labels, ["Row text", "Row text"], "template bindings inside Foldout and GroupBox")
+	h.eq(toggles, 2, "template Toggle values bind")
+	_close(doc)
+
+
+func _shown(c: Control) -> String:
+	if c is RichTextLabel:
+		return String(c.get_meta("uxml_rich_src", ""))
+	return String(c.get("text"))
+
+
+## Rich text survives the merge of bindings and part trees: a bound Label
+## with Unity tags is a RichTextLabel, and a text binding re-parses it.
+func test_rich_text_binding() -> void:
+	var data := {"t": "<b>bold</b> plain"}
+	var doc := _open("rich", '<ui:Label name="l" text="&lt;b&gt;x&lt;/b&gt;"><Bindings><ui:DataBinding property="text" data-source-path="t"/></Bindings></ui:Label>', {}, data)
+	await h.process_frame
+	var c := doc.get_native("l")
+	h.check(c is RichTextLabel, "a Label with rich text tags is a RichTextLabel")
+	h.eq(String(c.get_meta("uxml_rich_src")), "<b>bold</b> plain", "the binding writes the rich source")
+	h.eq((c.get_meta("uxml_rich") as Dictionary)["plain"], "bold plain", "and re-parses the tags")
+	h.eq((c as RichTextLabel).get_parsed_text(), "bold plain", "the styled runs render")
+	data["t"] = "no tags"
+	doc.notify_changed(data)
+	await h.process_frame
+	await h.process_frame
+	h.eq((c as RichTextLabel).get_parsed_text(), "no tags", "text without tags still renders in a RichTextLabel")
+	h.eq(_kinds(doc.diagnostics).count("binding-failed"), 0, "no failures: %s" % [doc.diagnostics])
 	_close(doc)
 
 

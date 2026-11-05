@@ -59,6 +59,11 @@ signal link_clicked(element_name, link_id)
 ## Load `uxml_path` automatically when the node is ready.
 @export var auto_load: bool = true
 
+## The default theme stylesheet, spliced ahead of every author sheet (see
+## UxmlTheme). Empty disables the theme; another path replaces it. Read at
+## load time.
+@export var theme_path: String = UxmlTheme.DEFAULT
+
 ## Every diagnostic produced by the last load: parse/cascade warnings plus
 ## runtime `unsupported-value`/`duplicate-name`/`missing-file` entries.
 var diagnostics: Array = []
@@ -113,6 +118,7 @@ var _placed_force: Array = []         # elements re-applied this restyle (inset 
 # bind, first, applied, alt}. Rows are pooled copies of the item template.
 var _lists: Dictionary = {}
 var _pooled: Dictionary = {}          # UxmlElement -> true (inside a pooled row)
+var _behaviors: Dictionary = {}       # control UxmlElement -> UxmlBehaviors.Behavior
 
 ## Unity's default ListView fixed-item-height.
 const LIST_DEFAULT_ITEM_HEIGHT := 22.0
@@ -233,6 +239,7 @@ func load_document(path: String, root: String = "") -> int:
 		return ERR_FILE_CANT_OPEN
 
 	_effective_root = effective_root
+	UxmlTheme.attach(_doc, theme_path)
 	_index()
 	_restyle_now()
 	_attrs.restore_view_data()
@@ -301,6 +308,7 @@ func _clear() -> void:
 	set_process(false)
 	_binding.clear()
 	_attrs.clear()
+	_behaviors = {}
 	_doc = null
 	diagnostics = []
 
@@ -311,6 +319,9 @@ func _index() -> void:
 	_expand_lists()
 	if not _lists.is_empty():
 		_rt_warnings.append_array(UxmlBindings.extract(_doc))  # item templates
+	# Control part trees (Toggle label/input/checkmark, Foldout content, ...)
+	# become real model elements before anything indexes the tree.
+	UxmlParts.expand(_doc)
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
@@ -318,8 +329,8 @@ func _index() -> void:
 			_parents[child] = el
 			stack.append(child)
 	for el in _doc.root.walk():
-		if _pooled.has(el):
-			continue  # pooled list rows repeat their template's names
+		if _pooled.has(el) or el.part_of != null:
+			continue  # pooled list rows repeat their template's names; parts are internal
 		var n = el.get_attribute("name")
 		if n == null:
 			continue
@@ -358,6 +369,7 @@ func _index() -> void:
 		if el == _doc.root:
 			continue
 		_wire(el, _controls[el])
+	_behaviors = UxmlBehaviors.attach_all(self)
 	_attrs.setup()
 	_binding.setup()
 
@@ -386,19 +398,12 @@ func _wire(el: UxmlElement, c: Control) -> void:
 		native.gui_input.connect(_on_gui_input.bind(el))
 
 	var el_name := _el_names.get(el, "")
-	if el.local == "Button" and native is Button:
+	if native is Button and (el.local == "Button" or el.local == "RepeatButton"):
 		native.pressed.connect(func(): button_pressed.emit(el_name))
 		native.button_down.connect(_set_state.bind(el, "active", true))
 		native.button_up.connect(_set_state.bind(el, "active", false))
-	elif native is CheckBox:
-		native.toggled.connect(func(on: bool):
-			_set_state(el, "checked", on)
-			value_changed.emit(el_name, on))
-		# button_pressed was assigned before this connect — sync :checked.
-		if native.button_pressed:
-			_set_state(el, "checked", true)
-		native.button_down.connect(_set_state.bind(el, "active", true))
-		native.button_up.connect(_set_state.bind(el, "active", false))
+	elif native is UxmlToggle:
+		pass  # value, :checked and value_changed: UxmlBehaviors.ToggleBehavior
 	elif native is HSlider:
 		native.value_changed.connect(func(v: float):
 			if el.local == "SliderInt":
@@ -429,7 +434,11 @@ func _wire(el: UxmlElement, c: Control) -> void:
 func _on_gui_input(ev: InputEvent, el: UxmlElement) -> void:
 	var mb := ev as InputEventMouseButton
 	if mb != null and mb.button_index == MOUSE_BUTTON_LEFT:
-		_set_state(el, "active", mb.pressed)
+		# Unity sets :active on the clickable control, not on its parts: a
+		# part passes the press on to its control, which takes the state.
+		var pc = _controls.get(el)
+		if el.part_of == null or pc is UxmlToggle or pc is BaseButton:
+			_set_state(el, "active", mb.pressed)
 		return
 	var sc := _natives.get(el) as ScrollContainer
 	if sc == null:
@@ -608,6 +617,8 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		var ci: int = cindex[el]
 		_applier.apply(el, c, _natives.get(el, c), st,
 			_dis[ci] == 1, _gone[ci] == 1)
+		if c is UxmlToggle:
+			(c as UxmlToggle).disabled = _dis[ci] == 1 or _gone[ci] == 1
 	_full_apply = false
 	_force_layout = false
 	if need_layout:
@@ -942,7 +953,12 @@ func get_element_by_name(element_name: String) -> Control:
 ## Same as get_element for unwrapped controls.
 func get_native(element_name: String) -> Control:
 	var el: UxmlElement = _by_name.get(element_name)
-	return null if el == null else _natives.get(el)
+	if el == null:
+		return null
+	var b = _behaviors.get(el)
+	if b != null:
+		return b.native()
+	return _natives.get(el)
 
 
 ## The semantic element, for attribute/structure access.
@@ -965,6 +981,8 @@ func set_enabled(element_name: String, enabled: bool) -> void:
 	if el == null:
 		return
 	_disabled_rt[el] = not enabled
+	# Unity's SetEnabled also adds/removes `unity-disabled` on the element.
+	UxmlParts.toggle_control_class(el, "unity-disabled", not enabled)
 	_queue_restyle()
 
 
@@ -985,20 +1003,33 @@ func set_text(element_name: String, text: String) -> void:
 	var el: UxmlElement = _by_name.get(element_name)
 	if el == null:
 		return
-	var c: Control = _natives.get(el)
+	_set_control_text(_natives.get(el), text)
+
+
+## Write `text` into a text control (Label, RichTextLabel, Button): the
+## path set_text, text parts of controls (UxmlBehaviors.sync_text) and
+## text bindings share. Rich text tags are parsed for a RichTextLabel.
+## Returns false for a control without text.
+func _set_control_text(c: Control, text: String) -> bool:
 	if c is RichTextLabel:
 		var pr := UxmlRichText.parse(text)
+		if not pr["rich"]:
+			# Text without tags is one plain run (parse() leaves ops empty).
+			pr = {"rich": false, "ops": [["t", text]] if not text.is_empty() else [],
+				"plain": text, "dropped": PackedStringArray()}
 		c.set_meta("uxml_rich", pr)
 		c.set_meta("uxml_rich_src", text)
 		c.remove_meta("uxml_rich_key")
 		refresh()
-		return
+		return true
 	if c is Label or c is Button:
 		if c.has_meta("uxml_full_text"):
 			c.remove_meta("uxml_full_text")
 			c.remove_meta("uxml_elided")
 		c.set("text", text)
 		relayout()
+		return true
+	return false
 
 
 ## Replace the element's `class` attribute and re-resolve. Runtime class
@@ -1008,13 +1039,17 @@ func set_class(element_name: String, class_string: String) -> void:
 	if el == null:
 		return
 	# Through the observable model: notifies _on_model_changed (which
-	# queues the restyle) only if the value actually changed.
-	el.set_attribute("class", class_string)
+	# queues the restyle) only if the value actually changed. Classes the
+	# control itself added (UxmlParts.control_classes) are kept.
+	el.set_attribute("class", UxmlParts.merged_class(el, class_string))
 
 
 func _on_model_changed(el: UxmlElement) -> void:
 	_attr_dirty[el] = true
 	_queue_restyle()
+	var b = _behaviors.get(el)
+	if b != null:
+		b.on_model_changed()
 
 
 ## Re-resolve and re-lay out after changes the runtime cannot see — e.g.

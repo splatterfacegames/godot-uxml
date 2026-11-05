@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Foldout name="fo" text="Details">
+    <ui:Label name="fo-child" text="Inside" />
+  </ui:Foldout>
+  <ui:Label name="after" text="After" />
+</ui:UXML>

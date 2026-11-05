@@ -150,7 +150,29 @@ godot --path . --script res://examples/minimal/minimal.gd
 godot-uxml targets full support for Unity UI Toolkit 6000.3: every UXML
 element and attribute, every USS property, templates, transitions and
 data binding. [docs/unity-coverage.md](docs/unity-coverage.md) gives the
-status of each item.
+status of each item. A summary:
+
+- **Templates, transitions and data binding:** `<Template>`/`<Instance>`
+  with attribute overrides and slots, USS `transition-*`, `<Bindings>`
+  and `binding-path`.
+- **Controls (Unity part trees and default theme):** `VisualElement`,
+  `TemplateContainer`, `Box`, `Label`, `TextElement`, `Image`, `Button`,
+  `RepeatButton`, `Toggle`, `RadioButton`, `RadioButtonGroup`,
+  `ToggleButtonGroup`, `GroupBox`, `HelpBox`, `PopupWindow`, `Foldout`,
+  `ProgressBar`.
+- **Controls (native Godot widgets):** `Slider`, `SliderInt`,
+  `TextField`, `DropdownField`, `ScrollView`, `ListView`.
+- **Selectors:** type, `.class`, `#name`, `*`, compounds, descendant and
+  `>` child combinators, comma groups.
+- **Pseudo-classes:** `:hover`, `:active`, `:inactive`, `:focus`,
+  `:checked`, `:disabled`, `:enabled`, `:selected`, `:root`.
+- **Values:** `var()` custom properties, `@import`, inline `style`,
+  inheritance, shorthands.
+- **Layout:** flexbox (direction, wrap, grow, shrink, basis, alignment,
+  justification, gap), margins, padding, borders, `px` and `%` lengths.
+- **Paint:** background color and image, 9-slice backgrounds, image tint,
+  border colors and radii, fonts, text color and text outline, opacity,
+  overflow clipping, transforms, text spacing and shadow, rich text tags.
 
 Some CSS features do not exist in USS: `@media`, `em`/`rem`/`vh` units,
 `+` and `~` combinators, attribute selectors and `::` pseudo-elements.
@@ -159,19 +181,18 @@ diagnostic.
 
 ## Fidelity
 
-godot-uxml layout agrees with the reference engine in 31 of 44 golden
-cases. In 4 more cases, layout agrees except for Unity internal control
-parts. All 9 differences have a known cause:
+godot-uxml compares itself with Unity 6000.3 directly:
+`tools/unity-dump` runs UXML/USS cases through Unity's default runtime
+theme and records every element, control parts included.
+`bench/parity.gd` compares structure, geometry and resolved style.
+Controls in the first part-tree set (Button, Toggle, RadioButton, Foldout,
+ProgressBar, HelpBox and more) build Unity's own part elements and use a
+default theme written from the measured values. Most remaining
+differences are Unity's pixel-grid rounding (at most half a pixel). The
+numbers and every known cause are in [docs/parity.md](docs/parity.md).
 
-- godot-uxml does not yet apply the Unity default control theme. The
-  Button margins of the theme cause 6 differences.
-- In one case, the reference engine is incorrect and godot-uxml agrees
-  with Unity.
-- One case uses Unity internal control parts.
-- One case uses an import rule that Unity has not confirmed.
-
-Unity part trees and the default theme are in progress. Details are in
-[docs/parity.md](docs/parity.md).
+Slider, TextField, DropdownField, ScrollView and ListView still use
+native Godot widgets.
 
 ## Tests and benchmarks
 

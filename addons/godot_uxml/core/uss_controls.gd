@@ -12,21 +12,30 @@ extends RefCounted
 ## Implicit `unity-*` classes per element local name.
 const IMPLICIT_CLASSES := {
 	"VisualElement": [],
-	"Label": ["unity-label"],
-	"Button": ["unity-button"],
+	"TemplateContainer": [],
+	"Box": ["unity-box"],
+	"TextElement": ["unity-text-element"],
+	"Label": ["unity-text-element", "unity-label"],
+	"Button": ["unity-text-element", "unity-button"],
+	"RepeatButton": ["unity-text-element", "unity-repeat-button"],
 	"Image": ["unity-image"],
 	"ScrollView": ["unity-scroll-view"],
 	"ListView": ["unity-list-view", "unity-collection-view"],
-	"Toggle": ["unity-toggle", "unity-base-field"],
+	"Toggle": ["unity-base-field", "unity-toggle"],
+	"RadioButton": ["unity-base-field", "unity-radio-button"],
+	"RadioButtonGroup": ["unity-base-field", "unity-radio-button-group"],
+	"ToggleButtonGroup": ["unity-base-field", "unity-toggle-button-group"],
+	"GroupBox": ["unity-group-box"],
+	"HelpBox": ["unity-help-box"],
+	"PopupWindow": ["unity-text-element", "unity-popup-window"],
+	"Foldout": ["unity-foldout"],
+	"ProgressBar": ["unity-progress-bar"],
 	"DropdownField": ["unity-dropdown-field", "unity-base-popup-field", "unity-base-field"],
 	"TextField": ["unity-text-field", "unity-base-text-field", "unity-base-field"],
 	"IntegerField": ["unity-integer-field", "unity-base-text-field", "unity-base-field"],
 	"FloatField": ["unity-float-field", "unity-base-text-field", "unity-base-field"],
 	"Slider": ["unity-slider", "unity-base-slider", "unity-base-slider--horizontal", "unity-base-field"],
 	"SliderInt": ["unity-slider-int", "unity-base-slider", "unity-base-slider--horizontal", "unity-base-field"],
-	"Foldout": ["unity-foldout"],
-	# What an expanded <ui:Instance> becomes: a plain box, no implicit class.
-	"TemplateContainer": [],
 }
 
 ## Tags that carry no pixels but are part of the document model, not
@@ -48,7 +57,7 @@ const UNSUPPORTED_FEATURE_TAGS := {}
 ## they have no runtime mapping yet, so they diagnose `unsupported-control`
 ## like any unmapped tag and fall back to a plain container. Remove a name
 ## from this list once a milestone actually maps it to a native control.
-const RECOGNIZED_UNMAPPED := ["IntegerField", "FloatField", "Foldout"]
+const RECOGNIZED_UNMAPPED := ["IntegerField", "FloatField"]
 
 ## UXML attributes the addon consumes or accepts as part of the document
 ## grammar. Namespace declarations (`xmlns:*`) and any namespaced attribute
@@ -84,6 +93,9 @@ const KNOWN_ATTRIBUTES := {
 	# TextElement (Label, Button): rich text, escapes, elided tooltips.
 	"enable-rich-text": true, "parse-escape-sequences": true,
 	"display-tooltip-when-elided": true,
+	# Controls built as Unity part trees (runtime/controls/)
+	"delay": true, "interval": true, "title": true, "message-type": true,
+	"is-multiple-selection": true, "allow-empty-selection": true,
 }
 
 

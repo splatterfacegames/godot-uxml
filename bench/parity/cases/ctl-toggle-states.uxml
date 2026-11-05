@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Toggle name="t-hover" label="Hover" />
+  <ui:Toggle name="t-active" label="Active" />
+  <ui:Toggle name="t-focus" label="Focus" />
+  <ui:Toggle name="t-click" label="Click" />
+  <ui:Toggle name="t-key" label="Key" />
+</ui:UXML>

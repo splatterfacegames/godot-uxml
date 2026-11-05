@@ -1,0 +1,4 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Button name="b" text="Press" />
+  <ui:Toggle name="t" label="Press" />
+</ui:UXML>

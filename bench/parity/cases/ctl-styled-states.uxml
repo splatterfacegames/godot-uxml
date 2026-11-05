@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="scope" class="accent">
+    <ui:Toggle name="ss-on" label="On" value="true" />
+    <ui:Toggle name="ss-off" label="Off" />
+    <ui:Button name="ss-hover" text="Hover me" />
+    <ui:Toggle name="ss-hover-toggle" label="Hover toggle" />
+  </ui:VisualElement>
+</ui:UXML>

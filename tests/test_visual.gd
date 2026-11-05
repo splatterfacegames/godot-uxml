@@ -355,7 +355,7 @@ func test_background_styles() -> void:
 	var btn := doc.get_element("bgbtn") as Button
 	var sb := btn.get_theme_stylebox("normal")
 	h.check(sb is UxmlBackgroundStyle, "themed control gets the placement stylebox")
-	h.eq(sb.content_margin_left, 6.0, "padding still insets the text")
+	h.eq(sb.content_margin_left, 7.0, "padding (6px) plus the theme border (1px) still insets the text")
 	h.check(sb.has_meta("uxml_margins"), "margins meta for the measurer")
 	var plain := doc.get_element("plainbg") as UxmlBox
 	h.check(plain.box_texture != null and plain.box_texture_style == null, "no placement -> unchanged stretch path")

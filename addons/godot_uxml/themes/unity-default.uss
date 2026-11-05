@@ -1,0 +1,375 @@
+/*
+ * godot-uxml default theme.
+ *
+ * Written by godot-uxml from values measured in Unity 6000.3.24f1 with its
+ * default runtime theme (unity-theme://default) at pixelsPerPoint 1, using
+ * tools/unity-dump. The dumps are bench/parity/unity/ctl-*.json. This is
+ * not Unity's stylesheet: only the measured resolved values are recorded
+ * here, as rules on Unity's documented class and part names.
+ *
+ * UxmlTheme splices this sheet ahead of every author sheet and ranks it
+ * below every author rule, as Unity ranks its theme (measured:
+ * states-disabled, ctl-styled-parts).
+ *
+ * Measured but not applied, because the runtime does not paint the
+ * property yet (each would warn unsupported-property on every element):
+ *   .unity-disabled { opacity: 0.5 }            (only the element whose
+ *                                                enabled is false dims)
+ *   .unity-base-field__label { text-overflow: ellipsis }
+ *   .unity-help-box__icon { -unity-background-scale-mode: scale-to-fit }
+ *
+ * Deliberate deviation: .unity-help-box__label also grows (see there).
+ *
+ * The images (check, arrows, help box icons) are godot-uxml's own SVGs.
+ */
+
+/* Root: Unity's panel root gives every document its text colour and size. */
+UXML {
+  color: rgb(27, 27, 27);
+  font-size: 14px;
+}
+
+/* ---- Label, Box ------------------------------------------------------ */
+
+.unity-label {
+  margin: 4px 4px 2px 2px;
+  padding: 4px 2px 4px 1px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.unity-box {
+  background-color: rgb(222, 222, 222);
+  border-width: 1px;
+  border-color: rgb(85, 85, 85);
+}
+
+/* ---- Button ---------------------------------------------------------- */
+
+.unity-button {
+  margin: 2px 4px;
+  padding: 10px 12px;
+  border-width: 1px;
+  border-color: rgb(149, 149, 149);
+  background-color: rgb(188, 188, 188);
+  flex-shrink: 0;
+  -unity-text-align: middle-center;
+  white-space: nowrap;
+}
+
+.unity-button:hover {
+  border-color: rgb(128, 128, 128);
+  background-color: rgb(209, 209, 209);
+}
+
+.unity-button:active {
+  border-color: rgb(100, 100, 100);
+  background-color: rgb(149, 149, 149);
+}
+
+/* Measured with :hover:active:focus: the focus border wins. */
+.unity-button:focus {
+  border-color: rgb(0, 106, 166);
+}
+
+.unity-button:disabled {
+  border-color: rgb(126, 126, 126);
+  background-color: rgb(149, 149, 149);
+}
+
+/* ---- BaseField: label beside input ----------------------------------- */
+
+.unity-base-field {
+  margin: 2px 4px;
+  flex-direction: row;
+  flex-shrink: 0;
+}
+
+/* Label width rule: at least 150px, wider for longer text; it never
+   shrinks (a narrow field lets the label overflow). */
+.unity-base-field__label {
+  min-width: 150px;
+}
+
+.unity-base-field__input {
+  flex-grow: 1;
+  flex-shrink: 0;
+}
+
+.unity-base-field:focus > .unity-base-field__label {
+  color: rgb(0, 82, 106);
+}
+
+/* ---- Toggle ---------------------------------------------------------- */
+
+.unity-toggle__input {
+  flex-direction: row;
+}
+
+.unity-toggle__checkmark {
+  width: 24px;
+  height: 24px;
+  border-width: 1px;
+  border-color: rgb(100, 100, 100);
+  background-color: rgb(240, 240, 240);
+  align-self: center;
+  flex-shrink: 0;
+  -unity-background-image-tint-color: rgb(50, 50, 50);
+}
+
+.unity-toggle__input:checked > .unity-toggle__checkmark {
+  background-image: url("check.svg");
+}
+
+.unity-toggle__input:hover > .unity-toggle__checkmark {
+  border-color: rgb(50, 50, 50);
+}
+
+.unity-toggle:focus > .unity-toggle__input > .unity-toggle__checkmark {
+  border-color: rgb(0, 106, 166);
+}
+
+.unity-toggle:disabled > .unity-toggle__input > .unity-toggle__checkmark {
+  border-color: rgb(126, 126, 126);
+  background-color: rgb(149, 149, 149);
+}
+
+.unity-toggle__text,
+.unity-radio-button__text {
+  margin: 0 4px 2px 1px;
+  align-self: center;
+}
+
+.unity-foldout__toggle:focus .unity-foldout__text {
+  color: rgb(0, 82, 106);
+}
+
+/* ---- RadioButton ----------------------------------------------------- */
+
+.unity-radio-button {
+  margin-bottom: 3px;
+}
+
+.unity-radio-button__input {
+  flex-direction: row;
+}
+
+.unity-radio-button__label {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.unity-radio-button__checkmark-background {
+  width: 24px;
+  height: 24px;
+  padding-top: 5px;
+  border-width: 1px;
+  border-color: rgb(100, 100, 100);
+  border-radius: 12px;
+  background-color: rgb(240, 240, 240);
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.unity-radio-button__input:hover > .unity-radio-button__checkmark-background {
+  border-color: rgb(50, 50, 50);
+}
+
+.unity-radio-button:focus > .unity-radio-button__input > .unity-radio-button__checkmark-background {
+  border-color: rgb(0, 106, 166);
+}
+
+.unity-radio-button__checkmark {
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background-color: rgb(50, 50, 50);
+  align-self: center;
+  flex-shrink: 0;
+  display: none;
+}
+
+.unity-radio-button__input:checked > .unity-radio-button__checkmark-background > .unity-radio-button__checkmark {
+  display: flex;
+}
+
+/* ---- ToggleButtonGroup ----------------------------------------------- */
+
+.unity-toggle-button-group {
+  align-items: center;
+}
+
+.unity-button-group {
+  flex-direction: row;
+  flex-grow: 1;
+  flex-shrink: 1;
+}
+
+.unity-button-group__button {
+  margin-left: 0;
+  margin-right: 0;
+  border-right-width: 0;
+}
+
+.unity-button-group__button--right {
+  margin-right: 4px;
+  border-right-width: 1px;
+}
+
+.unity-button-group__button--standalone {
+  margin-left: 4px;
+  margin-right: 4px;
+  border-right-width: 1px;
+}
+
+.unity-button-group__button:checked {
+  border-left-color: rgb(149, 149, 149);
+  background-color: rgb(149, 149, 149);
+}
+
+.unity-button-group__button:checked:hover {
+  background-color: rgb(162, 162, 162);
+}
+
+/* ---- GroupBox -------------------------------------------------------- */
+
+.unity-group-box {
+  margin: 6px 4px 2px 4px;
+  padding: 5px 0 5px 3px;
+  flex-shrink: 0;
+}
+
+.unity-group-box__label {
+  margin: -5px 4px 5px 2px;
+}
+
+/* ---- HelpBox --------------------------------------------------------- */
+
+.unity-help-box {
+  margin: 1px 3px;
+  padding: 2px;
+  border-width: 1px;
+  border-color: rgb(154, 154, 154);
+  border-radius: 3px;
+  background-color: rgb(202, 202, 202);
+  flex-direction: row;
+  align-items: center;
+}
+
+.unity-help-box__label {
+  padding: 4px 1px 4px 0;
+  flex-shrink: 1;
+  white-space: normal;
+  /* Not Unity's value (Unity: no grow; the label is as wide as its text).
+     godot-uxml measures a wrapping Label without a max-content width, so
+     without grow the label would collapse to one character per line. */
+  flex-grow: 1;
+}
+
+.unity-help-box__icon {
+  min-width: 34px;
+  max-width: 34px;
+  min-height: 32px;
+  max-height: 32px;
+}
+
+.unity-help-box__icon--info {
+  background-image: url("info.svg");
+}
+
+.unity-help-box__icon--warning {
+  background-image: url("warning.svg");
+}
+
+.unity-help-box__icon--error {
+  background-image: url("error.svg");
+}
+
+/* ---- PopupWindow ----------------------------------------------------- */
+
+.unity-popup-window {
+  padding-top: 3px;
+  border-width: 1px;
+  border-color: rgb(102, 102, 102);
+  border-radius: 8px 8px 0 0;
+  background-color: rgba(179, 179, 179, 0.95);
+  -unity-text-align: upper-center;
+}
+
+.unity-popup-window__content-container {
+  padding: 24px 4px 4px 4px;
+  -unity-text-align: upper-left;
+}
+
+/* ---- Foldout --------------------------------------------------------- */
+
+.unity-foldout__content {
+  margin-left: 30px;
+}
+
+.unity-foldout__checkmark {
+  width: 22px;
+  height: 22px;
+  margin: 0 4px;
+  border-width: 0;
+  border-color: rgba(0, 0, 0, 0);
+  background-color: rgba(0, 0, 0, 0);
+  background-image: url("arrow-right.svg");
+}
+
+.unity-foldout__input:checked > .unity-foldout__checkmark {
+  border-color: rgb(100, 100, 100);
+  background-image: url("arrow-down.svg");
+}
+
+.unity-foldout__input:hover > .unity-foldout__checkmark {
+  border-color: rgb(50, 50, 50);
+}
+
+.unity-foldout__toggle:focus > .unity-foldout__input > .unity-foldout__checkmark {
+  border-color: rgb(0, 106, 166);
+}
+
+.unity-foldout__toggle:disabled > .unity-foldout__input > .unity-foldout__checkmark {
+  background-color: rgba(0, 0, 0, 0);
+}
+
+/* ---- ProgressBar ----------------------------------------------------- */
+
+.unity-progress-bar {
+  margin: 4px;
+  flex-shrink: 0;
+}
+
+.unity-progress-bar__container {
+  min-height: 24px;
+  max-height: 24px;
+}
+
+.unity-progress-bar__background {
+  border-width: 1px;
+  border-color: rgb(128, 128, 128);
+  background-color: rgb(188, 188, 188);
+  flex-grow: 1;
+}
+
+.unity-progress-bar__progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  margin: 2px;
+  background-color: rgb(231, 231, 231);
+}
+
+.unity-progress-bar__title-container {
+  flex-direction: row;
+  flex-grow: 1;
+  justify-content: center;
+}
+
+.unity-progress-bar__title {
+  margin: 0;
+  padding: 10px 12px;
+  -unity-text-align: middle-center;
+}

@@ -1,0 +1,12 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Toggle name="f-short" label="A" />
+  <ui:Toggle name="f-mid" label="Medium label" />
+  <ui:Toggle name="f-long" label="A rather long label for a field control" />
+  <ui:VisualElement name="narrow" style="width: 150px;">
+    <ui:Toggle name="f-narrow" label="Medium label" />
+    <ui:Toggle name="f-narrow-long" label="A rather long label for a field control" />
+  </ui:VisualElement>
+  <ui:VisualElement name="wide-row" style="flex-direction: row;">
+    <ui:Toggle name="f-row" label="In a row" />
+  </ui:VisualElement>
+</ui:UXML>

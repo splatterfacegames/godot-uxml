@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="panel" enabled="false">
+    <ui:Button name="d-button" text="Button" />
+    <ui:Toggle name="d-toggle" label="Toggle" value="true" />
+    <ui:Label name="d-label" text="Label" />
+  </ui:VisualElement>
+  <ui:Foldout name="d-foldout" text="Foldout" enabled="false" />
+  <ui:ProgressBar name="d-pb" value="40" enabled="false" />
+</ui:UXML>

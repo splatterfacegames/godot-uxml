@@ -11,7 +11,7 @@ extends SceneTree
 ##   list1k     1000-row list in a ScrollView (no virtualization yet):
 ##              load, hover a row, update one row's text
 ##
-##   Godot --headless --path <project> -s res://bench/workloads.gd [-- --quick]
+##   Godot --headless --path <project> -s res://bench/workloads.gd [-- --quick] [-- --no-theme]
 ## Reports median / p95 ms; same timing helpers as bench.gd.
 
 const ROOT := "user://godot_uxml_bench"
@@ -61,6 +61,8 @@ func _time_load(name: String, path: String, host: Vector2) -> UxmlDocument:
 	for i in _iters(15):
 		var t0 := Time.get_ticks_usec()
 		d = UxmlDocument.new()
+		if OS.get_cmdline_user_args().has("--no-theme"):
+			d.set("theme_path", "")  # default theme off (A/B cost of the theme)
 		root.add_child(d)
 		d.size = host
 		d.load_document(path, ROOT)
@@ -153,6 +155,8 @@ func _listview() -> void:
 	for i in _iters(15):
 		var t0 := Time.get_ticks_usec()
 		d = UxmlDocument.new()
+		if OS.get_cmdline_user_args().has("--no-theme"):
+			d.set("theme_path", "")  # default theme off (A/B cost of the theme)
 		root.add_child(d)
 		d.size = Vector2(1280, 720)
 		d.load_document("Assets/UI/wl_listview.uxml", ROOT)

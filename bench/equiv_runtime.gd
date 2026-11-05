@@ -1,16 +1,35 @@
 extends SceneTree
 @warning_ignore_start("inference_on_variant", "unsafe_method_access", "untyped_declaration")
-## Runtime equivalence: the optimized UxmlDocument against the original one
-## (bench/ref/ref_uxml_document.gd, wired to the original resolver, layout,
-## applier and value parser) driven through the same random sequence of
-## state changes, class churn, set_enabled, refresh and resizes. After each
-## step both documents are flushed and every control is snapshotted —
-## geometry, visibility, input filters, disabled/editable, every theme
+## Runtime equivalence of the optimized UxmlDocument against itself, three
+## ways, driven through the same random sequence of state changes, class
+## churn, set_enabled, refresh, resizes, text edits and control input:
+##
+##   a  — the same document with refresh() before every flush: full cascade
+##        (scan_all), every control re-applied, full layout. The reference
+##        for the optimization invariants (incremental cascade, partial
+##        re-apply, paint-only layout skip, layout cache).
+##   b  — the normal incremental document (native core when loaded).
+##   c  — the incremental document on the GDScript cascade and layout.
+##
+## b must equal a (incremental == full) and c (native == GDScript). After
+## each step all are flushed and every control is snapshotted — geometry,
+## visibility, input filters, disabled/editable/pressed, every theme
 ## override (stylebox internals included), fonts, alignment/autowrap,
 ## UxmlBox/UxmlField chrome, image offsets, scroll content size — and the
 ## diagnostics arrays are compared.
 ##
-##   Godot --headless --path <project> -s res://bench/equiv_runtime.gd
+## Change history: until the Unity part trees (unity/controls-foundation)
+## `a` was bench/ref/ref_uxml_document.gd, the pre-optimization runtime.
+## That runtime has no default theme, no control parts and maps Toggle to a
+## CheckBox, so its control trees can no longer be compared; the full-
+## restyle document took its place as the reference for the optimization
+## invariants, and the GDScript document was added for native/GDScript
+## equality. Cascade and layout keep their comparisons with bench/ref in
+## bench/equiv.gd and bench/equiv_layout.gd.
+##
+##   Godot --headless --path <project> -s res://bench/equiv_runtime.gd [-- --gdscript]
+##
+## `--gdscript` runs every document on the GDScript path.
 
 const SLOTS := ["normal", "hover", "pressed", "disabled", "focus", "read_only", "slider"]
 const COLORS := ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color",
@@ -33,7 +52,14 @@ func _initialize() -> void:
 		["res://tests/fixtures/origin", "Assets/UI/panel.uxml", 40],
 		["user://godot_uxml_bench", "Assets/UI/hud.uxml", 80],
 		["user://godot_uxml_bench", "Assets/UI/big.uxml", 12],
+		["res://tests/fixtures/controls", "Assets/UI/controls.uxml", 120],
 	]:
+		var only := ""
+		for arg in OS.get_cmdline_user_args():
+			if arg.begins_with("--only="):
+				only = arg.substr(7)
+		if not only.is_empty() and String(pair[1]).find(only) < 0:
+			continue
 		await _run(pair[0], pair[1], pair[2], rng)
 	print("EQUIV_RUNTIME %s: %d checks, %d failures, %d settled-earlier load transients" % [
 		"OK" if _fails == 0 else "FAIL", _checks, _fails, _transients])
@@ -41,79 +67,70 @@ func _initialize() -> void:
 
 
 func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator) -> void:
-	var a := RefUxmlDocument.new()
+	var a := UxmlDocument.new()
 	var b := UxmlDocument.new()
-	for d in [a, b]:
+	var c := UxmlDocument.new()
+	var all := [a, b, c]
+	for d in all:
 		root.add_child(d)
 		d.size = Vector2(640, 480)
+		var was := UssCascade.use_native
+		if d == c:
+			UssCascade.use_native = false  # GDScript cascade => GDScript layout
 		d.load_document(path, project)
+		UssCascade.use_native = was
 	await process_frame
-	if OS.get_cmdline_user_args().has("--trace"):
-		var wa: Array = a._doc.root.walk()
-		var wb: Array = b._doc.root.walk()
-		for k in 4:
-			var diffs := 0
-			for i in wa.size():
-				var ca = a._controls.get(wa[i])
-				if ca != null and ca.size != b._controls[wb[i]].size:
-					diffs += 1
-			print("  trace %s: pass %d, %d size diffs" % [path, k, diffs])
-			for d in [a, b]:
-				d._restyle_now()
-			await process_frame
-	# Known, intentional deviation (UxmlStyleApplier.BULK_THEME_OVERRIDES):
-	# the new runtime's first layout after load can already be settled where
-	# the original showed stale minimum sizes until its next restyle. One
-	# restyle on both must converge them; that is reported, not failed.
-	if not _same(a, b):
-		for d in [a, b]:
+	if not _same(a, b) or not _same(a, c):
+		for d in all:
+			d.refresh()
 			d._restyle_now()
 		await process_frame
-		print("NOTE %s: load geometry differed until one restyle (bulk theme overrides settle earlier)" % path)
+		print("NOTE %s: load geometry differed until one restyle" % path)
 		_transients += 1
 	_cmp("%s load" % path, a, b)
+	_cmp("%s load (GDScript)" % path, b, c)
 	var names: Array = a._by_name.keys()
 	var vocab: Array = []
 	for el in a._doc.root.walk():
-		for c in el.class_list():
-			if not vocab.has(c):
-				vocab.append(c)
+		for cl in el.class_list():
+			if not vocab.has(cl):
+				vocab.append(cl)
 	vocab.append_array(["card--selected", "selected", "hot", "big"])
 	if names.is_empty():
 		names = [""]
 	for step in steps:
 		var nm: String = names[rng.randi() % names.size()]
-		var op := rng.randi() % 11
+		var op := rng.randi() % 13
 		var args: Array = []
 		match op:
 			0, 1, 2:
 				args = [nm, ["hover", "focus", "active", "checked", "selected"][rng.randi() % 5], rng.randi() % 2 == 0]
-				for d in [a, b]:
+				for d in all:
 					d.set_element_state(args[0], args[1], args[2])
 			3:
 				var cls := PackedStringArray()
 				for _j in rng.randi() % 3:
 					cls.append(vocab[rng.randi() % vocab.size()])
 				args = [nm, " ".join(cls)]
-				for d in [a, b]:
+				for d in all:
 					d.set_class(args[0], args[1])
 			4:
 				args = [nm, rng.randi() % 2 == 0]
-				for d in [a, b]:
+				for d in all:
 					d.set_enabled(args[0], args[1])
 			5:
-				for d in [a, b]:
+				for d in all:
 					d.refresh()
 			6:
 				var sz := Vector2(200 + rng.randi() % 900, 150 + rng.randi() % 700)
 				args = [sz]
-				for d in [a, b]:
+				for d in all:
 					d.size = sz
 			7:
 				# Label text change + refresh (HUD pattern).
 				var t := str(rng.randi() % 100000)
 				args = [nm, t]
-				for d in [a, b]:
+				for d in all:
 					var n = d.get_native(nm)
 					if n is Label or n is Button:
 						n.text = t
@@ -124,7 +141,7 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 				var t2 := "x".repeat(1 + rng.randi() % 40)
 				var sz2 := Vector2(200 + rng.randi() % 900, 150 + rng.randi() % 700)
 				args = [nm, t2, sz2]
-				for d in [a, b]:
+				for d in all:
 					var n2 = d.get_native(nm)
 					if n2 is Label or n2 is Button:
 						n2.text = t2
@@ -134,25 +151,50 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 				# the original's refresh() does.
 				var t3 := str(rng.randi() % 1000000)
 				args = [nm, t3]
-				for d in [a, b]:
+				for d in all:
 					var n3 = d.get_native(nm)
 					if n3 is Label or n3 is Button:
 						n3.text = t3
-				a.refresh()
-				b.relayout()
+				for d in all:
+					d.relayout()
+			11:
+				# Control input: a Toggle/RadioButton/Foldout flips, a
+				# Button (ToggleButtonGroup option) is pressed.
+				args = [nm]
+				for d in all:
+					var n4 = d.get_native(nm)
+					if n4 is UxmlToggle:
+						(n4 as UxmlToggle)._activate()
+					elif n4 is BaseButton:
+						(n4 as BaseButton).pressed.emit()
+			12:
+				# Model attribute writes controls react to (ProgressBar
+				# value, labels and texts).
+				var attr_name: String = ["value", "text", "label", "title"][rng.randi() % 4]
+				var v := str(rng.randi() % 100) if attr_name == "value" else "t%d" % (rng.randi() % 1000)
+				args = [nm, attr_name, v]
+				for d in all:
+					var m = d.get_element_model(nm)
+					if m != null and m.local in ["ProgressBar", "Foldout", "Toggle", "HelpBox", "GroupBox", "Label"]:
+						if attr_name == "value" and m.local in ["Foldout", "Toggle"]:
+							m.set_attribute("value", "true" if int(v) % 2 == 0 else "false")
+						else:
+							m.set_attribute(attr_name, v)
 			8:
 				# Several changes coalesced into one flush.
 				var nm2: String = names[rng.randi() % names.size()]
 				args = [nm, nm2]
-				for d in [a, b]:
+				for d in all:
 					d.set_element_state(nm, "hover", true)
 					d.set_element_state(nm2, "focus", true)
 					d.set_element_state(nm, "hover", false)
-		for d in [a, b]:
+		a.refresh()
+		for d in all:
 			d._restyle_now()
 		await process_frame
 		_cmp("%s step %d op %d %s" % [path, step, op, args], a, b)
-	for d in [a, b]:
+		_cmp("%s step %d op %d %s (GDScript)" % [path, step, op, args], b, c)
+	for d in all:
 		root.remove_child(d)
 		d.free()
 
@@ -254,11 +296,16 @@ func _norm(v, idx: Dictionary):
 
 func _ctl(c: Control) -> Dictionary:
 	var e := {
-		"pos": c.position, "size": c.size, "visible": c.visible,
+		# Rounded to 1e-3 px: Control.size round-trips through anchors and
+		# offsets, so equal layouts written in a different order can differ
+		# by ~1e-5 (seen on UxmlField inner natives).
+		"pos": c.position.snappedf(0.001), "size": c.size.snappedf(0.001), "visible": c.visible,
 		"mouse": c.mouse_filter, "focus": c.focus_mode,
 	}
 	if c is BaseButton:
 		e["disabled"] = c.disabled
+	if c is UxmlToggle:
+		e["toggle"] = [c.button_pressed, c.disabled]
 	if c is LineEdit or c is TextEdit or c is Range:
 		e["editable"] = c.editable
 	if c is Label:

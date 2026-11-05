@@ -1,0 +1,11 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Toggle name="t-bare" />
+  <ui:Toggle name="t-label" label="Sound" />
+  <ui:Toggle name="t-text" text="Enable" />
+  <ui:Toggle name="t-both" label="Music" text="On" value="true" />
+  <ui:Toggle name="t-on" value="true" />
+  <ui:Toggle name="t-disabled" label="Off" enabled="false" />
+  <ui:Toggle name="t-child" label="Child">
+    <ui:VisualElement name="t-child-ve" style="width: 10px; height: 10px;" />
+  </ui:Toggle>
+</ui:UXML>

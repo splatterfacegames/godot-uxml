@@ -32,6 +32,11 @@ const BIT_DISABLED := 32
 const BIT_ENABLED := 64
 ## Inline declarations outrank every selector: above any packed rule key.
 const INLINE_SPEC := 1 << 62
+## Author rules outrank every theme rule (a sheet with "theme": true, see
+## UxmlTheme), whatever the specificity — Unity sorts default-theme matches
+## below author matches. Packed into the specificity key, so the native
+## cascade (which reads `_sel_spec`) agrees by construction.
+const AUTHOR_LAYER := 1 << 61
 
 const F_CUSTOM := 1
 const F_VAR := 2
@@ -63,6 +68,12 @@ var _b_any := PackedInt32Array()
 var _anc_classes := {}
 var _anc_names := {}
 var _anc_states := 0
+# Non-rightmost compounds that test a pseudo-state: [types, names, classes,
+# state mask]. A state of an element is an ancestor feature only when the
+# element matches the rest of such a compound, so hovering an element that
+# no `X:hover Y` rule can reach does not re-cascade its subtree.
+var _anc_state_reqs: Array = []
+var _anc_state_seen := {}
 var _rule_warnings: Array = []
 
 # --- element index --------------------------------------------------------
@@ -268,6 +279,7 @@ func _add_rule(f: Dictionary) -> void:
 	_rule_dflag.append(df)
 	_rule_dexp.append(de)
 
+	var layer := 0 if bool(doc.sheets[f["sheet"]].get("theme", false)) else AUTHOR_LAYER
 	for sel in rule["selectors"]:
 		var s := _sel_rule.size()
 		_sel_rule.append(r)
@@ -308,6 +320,11 @@ func _add_rule(f: Dictionary) -> void:
 				for nm in pnames:
 					_anc_names[nm] = true
 				_anc_states |= mask
+				if mask != 0:
+					var rk := "%s|%s|%s|%d" % [",".join(ptypes), ",".join(pnames), ",".join(pclasses), mask]
+					if not _anc_state_seen.has(rk):
+						_anc_state_seen[rk] = true
+						_anc_state_reqs.append([ptypes, pnames, pclasses, mask])
 		_sel_parts.append(parts)
 		var need := 0
 		for pi2 in parts.size() - 1:
@@ -320,7 +337,7 @@ func _add_rule(f: Dictionary) -> void:
 				need |= _fbits("." + x)
 		_sel_need.append(need)
 		_sel_entries.append(null)
-		_sel_spec.append((names << 40) | (classes << 20) | types)
+		_sel_spec.append((names << 40) | (classes << 20) | types | layer)
 		_sel_states.append(UssSelector.states_required_by(sel))
 		_sel_origins.append(null)
 		var right: Array = parts[parts.size() - 1]
@@ -845,7 +862,36 @@ func _anc_key_of(i: int) -> Array:
 			cl.append(c)
 	cl.sort()
 	var nm = _name[i]
-	return [cl, nm if nm != null and _anc_names.has(nm) else null, _sig_bits[i] & _anc_states]
+	return [cl, nm if nm != null and _anc_names.has(nm) else null, _sig_bits[i] & _anc_state_mask(i)]
+
+
+## The state bits of element i that some non-rightmost compound can test:
+## those of compounds whose type/name/class parts the element matches.
+func _anc_state_mask(i: int) -> int:
+	var m := 0
+	var set: Dictionary = _cls_set[i]
+	for r in _anc_state_reqs:
+		var rm: int = r[3]
+		if (m & rm) == rm:
+			continue
+		var ok := true
+		for x in (r[0] as PackedStringArray):
+			if _local[i] != x:
+				ok = false
+				break
+		if ok:
+			for x in (r[1] as PackedStringArray):
+				if _name[i] != x:
+					ok = false
+					break
+		if ok:
+			for x in (r[2] as PackedStringArray):
+				if not set.has(x):
+					ok = false
+					break
+		if ok:
+			m |= rm
+	return m
 
 
 ## Every diagnostic of the last update, in the original resolver's order:

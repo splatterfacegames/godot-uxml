@@ -1,0 +1,22 @@
+.panel {
+  padding: 4px;
+  --accent: rgb(40, 120, 220);
+}
+.unity-toggle__checkmark {
+  border-color: var(--accent);
+}
+.unity-toggle:checked > .unity-toggle__input > .unity-toggle__checkmark {
+  background-color: var(--accent);
+}
+#details > #unity-content {
+  margin-left: 12px;
+}
+.unity-progress-bar__progress {
+  background-color: rgb(30, 160, 60);
+}
+.unity-button:hover {
+  background-color: rgb(90, 90, 90);
+}
+.hot .unity-base-field__label {
+  color: rgb(255, 80, 0);
+}

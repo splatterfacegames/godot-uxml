@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:RadioButtonGroup name="rg" choices="Alpha,Beta,Gamma" value="0" />
+  <ui:VisualElement name="loose">
+    <ui:RadioButton name="r1" text="One" value="true" />
+    <ui:RadioButton name="r2" text="Two" />
+  </ui:VisualElement>
+</ui:UXML>

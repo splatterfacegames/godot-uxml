@@ -74,6 +74,7 @@ const PROPERTIES := {
 	"isReadOnly": "readonly", "readOnly": "readonly", "readonly": "readonly",
 	"maxLength": "max-length", "max-length": "max-length",
 	"itemsSource": "items-source",
+	"title": "title", "messageType": "message-type", "message-type": "message-type",
 }
 
 ## Style properties that take a plain number (all other numbers get px).
@@ -571,11 +572,11 @@ func _add(el: UxmlElement, desc: Dictionary, origin: String) -> Variant:
 func _add_binding_path(el: UxmlElement, path: String) -> void:
 	var prop := "value"
 	match el.local:
-		"Label", "Button", "TextElement", "RepeatButton":
+		"Label", "Button", "TextElement", "RepeatButton", "PopupWindow":
 			prop = "text"
 		"ListView":
 			prop = "itemsSource"
-		"VisualElement", "TemplateContainer", "ScrollView", "Image", "Box":
+		"VisualElement", "TemplateContainer", "ScrollView", "Image", "Box", "HelpBox":
 			_warn(el, "binding-failed", '<%s> is not a BindableElement; binding-path="%s" has no effect' % [el.tag(), path])
 			return
 	var parts = UxmlBindings.parse_path(path)
@@ -839,6 +840,13 @@ func _write(rec: Dictionary, v: Variant) -> int:
 	var c: Control = _doc._controls.get(el)
 	if c == null:
 		return -1
+	# Controls built as part trees (Toggle, Foldout, ProgressBar, ...) take
+	# their values through their behavior (runtime/controls/).
+	var beh = _doc._behaviors.get(el)
+	if beh != null:
+		var r: int = beh.bind_write(prop, v)
+		if r != UxmlBehaviors.Behavior.UNHANDLED:
+			return r
 	var native: Control = _doc._natives.get(el, c)
 	match prop:
 		"text":
@@ -847,10 +855,15 @@ func _write(rec: Dictionary, v: Variant) -> int:
 				_set_edit_text(native, s)
 				el.set_attribute("value", s)
 				return 1
-			if native is Label or native is Button:
-				if native.text == s:
+			if native is Label or native is Button or native is RichTextLabel:
+				if _shown_text(native) == s:
 					return 0
-				native.text = s
+				var shown := s
+				if native is Button and _rich_enabled(el):
+					var pr := UxmlRichText.parse(s)
+					if pr["rich"]:
+						shown = pr["plain"]  # Buttons draw plain text
+				_doc._set_control_text(native, shown)
 				el.set_attribute("text", s)
 				return 2
 			return -1
@@ -866,8 +879,6 @@ func _write(rec: Dictionary, v: Variant) -> int:
 				cap.visible = not s.is_empty()
 				(c as UxmlField)._update_min_size()
 				(c as UxmlField)._relayout()
-			elif native is CheckBox:
-				native.text = s
 			else:
 				return -1
 			el.set_attribute("label", s)
@@ -916,7 +927,10 @@ func _write(rec: Dictionary, v: Variant) -> int:
 			el.set_attribute("tooltip", _str(v))
 			return 1
 		"enabled":
+			# As set_enabled: the runtime override plus Unity's
+			# `unity-disabled` class on the element itself.
 			_doc._disabled_rt[el] = not _bool(v)
+			UxmlParts.toggle_control_class(el, "unity-disabled", not _bool(v))
 			_doc._queue_restyle()
 			return 1
 		"visible":
@@ -1000,13 +1014,6 @@ func _write_value(el: UxmlElement, _c: Control, native: Control, v: Variant) -> 
 		native.value = f
 		el.set_attribute("value", str(int(f)) if el.local == "SliderInt" else str(f))
 		return 1
-	if native is CheckBox:
-		var on := _bool(v)
-		if native.button_pressed == on:
-			return 0
-		native.button_pressed = on
-		el.set_attribute("value", "true" if on else "false")
-		return 1
 	if native is LineEdit or native is TextEdit:
 		_set_edit_text(native, _str(v))
 		el.set_attribute("value", _str(v))
@@ -1025,6 +1032,20 @@ func _write_value(el: UxmlElement, _c: Control, native: Control, v: Variant) -> 
 		el.set_attribute("value", s)
 		return 1
 	return -1
+
+
+## The authored text of a text control (before elision and rich text).
+static func _shown_text(c: Control) -> String:
+	if c is RichTextLabel:
+		return String(c.get_meta("uxml_rich_src", ""))
+	if c.has_meta("uxml_full_text"):
+		return String(c.get_meta("uxml_full_text"))
+	return String(c.get("text"))
+
+
+static func _rich_enabled(el: UxmlElement) -> bool:
+	var v = el.get_attribute("enable-rich-text")
+	return v == null or String(v).to_lower() in ["true", "1"]
 
 
 func _set_edit_text(native: Control, s: String) -> void:
@@ -1194,10 +1215,11 @@ func _wire_write_back(el: UxmlElement) -> void:
 		return
 	var native: Control = _doc._natives.get(el, c)
 	_wired[el] = true
-	if native is Range:
+	var beh = _doc._behaviors.get(el)
+	if beh != null:
+		beh.ui_changed.connect(func(): _on_ui_changed(el))
+	elif native is Range:
 		native.value_changed.connect(func(_v): _on_ui_changed(el))
-	elif native is CheckBox:
-		native.toggled.connect(func(_on): _on_ui_changed(el))
 	elif native is LineEdit:
 		native.text_changed.connect(func(_t): _on_ui_changed(el))
 	elif native is TextEdit:
@@ -1212,13 +1234,14 @@ func _read_ui(rec: Dictionary) -> Array:
 	var c: Control = _doc._controls.get(el)
 	if c == null:
 		return [false, null]
+	var beh = _doc._behaviors.get(el)
+	if beh != null:
+		return beh.bind_read(rec["prop"])
 	var native: Control = _doc._natives.get(el, c)
 	match rec["prop"]:
 		"value":
 			if native is Range:
 				return [true, int(native.value) if el.local == "SliderInt" else float(native.value)]
-			if native is CheckBox:
-				return [true, native.button_pressed]
 			if native is LineEdit or native is TextEdit:
 				return [true, native.text]
 			if native is OptionButton:
