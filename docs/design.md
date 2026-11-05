@@ -324,8 +324,9 @@ Rules for every part tree:
 - Classes that a control adds to itself or to an authored child
   (`unity-base-field--no-label`, `unity-foldout--depth-1`,
   `unity-button-group__button--left`, `unity-disabled`) are "control
-  classes": `UxmlParts` merges them into the `class` attribute and records
-  them, and `UxmlDocument.set_class` keeps them.
+  classes": `UxmlParts` merges the control classes into the `class`
+  attribute and records the control classes, and `UxmlDocument.set_class`
+  keeps the control classes.
 - The part tree is fixed after load. Attribute changes update part text,
   inline styles and classes; parts are not added or removed.
 
@@ -370,7 +371,7 @@ Pseudo-states follow the measured Unity placement:
 
 Values: Toggle/RadioButton `value` (bool); RadioButtonGroup `value`
 (index, `-1` for none; `value_changed` sends the index); loose
-RadioButtons are exclusive inside their nearest GroupBox, else inside the
+RadioButtons are exclusive inside the nearest GroupBox, else inside the
 document; ToggleButtonGroup selection (`value_changed` sends an Array of
 selected indices; without `allow-empty-selection` the first Button starts
 selected); Foldout `value` (open; a closed Foldout sets `display: none` on
@@ -391,7 +392,8 @@ To add a control (field and container controls next):
    class names. Use only properties in `UssProperties.SUPPORTED`.
 4. Runtime: map the tag in `UxmlControlFactory._create` (a `UxmlBox` for a
    container, a Godot control for an interactive part), add a `Behavior`
-   in `UxmlBehaviors._create`, and set states where Unity sets them.
+   in `UxmlBehaviors._create`, and set each state on the elements where
+   Unity sets the state.
 5. Check: `bench/parity.gd` (Unity section), tests in
    `tests/test_controls.gd`, `bench/equiv*.gd`.
 
@@ -403,7 +405,7 @@ control moves to parts, its `UxmlField` mapping goes.
 
 `themes/unity-default.uss` holds Unity 6000.3's default runtime theme as
 measured values on Unity's class names (`tools/unity-dump`, default runtime
-theme, panel 400x300 at pixelsPerPoint 1). godot-uxml wrote the file; it is
+theme, panel 400x300 at pixelsPerPoint 1). godot-uxml wrote the file; the file is
 not Unity's stylesheet, and the check, arrow and help box images are
 godot-uxml's own SVGs.
 

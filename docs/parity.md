@@ -74,7 +74,7 @@ rounding. Structure: 572/719 elements. Geometry: 2137/2268 values, and
 | difference | cases | cause |
 | --- | --- | --- |
 | up to 0.5px | most `ctl-*` cases with centred parts (checkmarks, help box labels, progress titles) | Unity rounds every layout edge to the pixel grid (Yoga's RoundToPixelGrid). godot-uxml keeps fractions. |
-| ScrollView parts (`unity-content-and-vertical-scroll-container`, `unity-content-viewport`, ...) | `scrollview-*`, `child-combinator-through-parts`, `inventory` | ScrollView still maps to a native `ScrollContainer`; its part tree is the next task. |
+| ScrollView parts (`unity-content-and-vertical-scroll-container`, `unity-content-viewport`, ...) | `scrollview-*`, `child-combinator-through-parts`, `inventory` | ScrollView still maps to a native `ScrollContainer`; the ScrollView part tree is the next task. |
 | `opacity: 0.5` | `states-disabled`, `disabled-inherits`, `state-vs-*`, `ctl-button`, `ctl-disabled` | measured (`.unity-disabled`, only the element with `enabled="false"`), but the runtime does not paint `opacity` yet, so the theme leaves it out. |
 | help box label width | `ctl-helpbox` | deliberate theme deviation: the label grows, because godot-uxml measures a wrapping Label without a max-content width. |
 | narrow field | `ctl-basefield` (150px container) | Unity clamps a text measure to the available width, so a long field label shrinks to its 150px minimum and the input collapses. godot-uxml measures the full text. |
@@ -104,14 +104,14 @@ differ.** Before the default theme: 31 / 4 / 9.
 
 | difference | cases | verdict |
 | --- | --- | --- |
-| Unity's Button theme | `button-border-box`, `button-row-margins`, `button-flex-grow`, `button-absolute-in-border`, `button-align-items`, `button-sizes-to-text` | **match Unity 6000.3** (`.unity-button { margin: 2px 4px; padding: 10px 12px }` in the runtime theme). The reference snapshots record Unity 6000.0's editor theme (`margin: 1px 3px`), so these six now differ from the reference. |
+| Unity's Button theme | `button-border-box`, `button-row-margins`, `button-flex-grow`, `button-absolute-in-border`, `button-align-items`, `button-sizes-to-text` | **match Unity 6000.3** (`.unity-button { margin: 2px 4px; padding: 10px 12px }` in the runtime theme). The reference snapshots record Unity 6000.0's editor theme (`margin: 1px 3px`), so the six cases now differ from the reference. |
 | `position: absolute` / offsets | none | in scope since the absolute-positioning change; all match. |
 | percentage against an unsized parent | `percent-without-parent-size` | **reference is wrong**: the reference's own accuracy log confirms that Unity does not resolve the percentage. |
-| `/Packages/…` resolved from the project root vs from each importing sheet | `absolute-import-packages` | unverified against Unity (skipped by the dump tool); godot-uxml follows its documented resolution rule. |
+| `/Packages/…` resolved from the project root vs from each importing sheet | `absolute-import-packages` | unverified against Unity (skipped by the dump tool); godot-uxml follows the documented resolution rule in docs/design.md. |
 | ScrollView parts + absolute layout of an inventory screen | `inventory` | ScrollView parts are not modeled yet. |
 | Label theme | `inherit-vs-direct`, `text-size`, `text-align`, `inventory` | **match Unity 6000.3**: the runtime theme gives `.unity-label` `margin: 4px 4px 2px 2px` and `padding: 4px 2px 4px 1px`. The reference snapshots record the 6000.0 editor theme, where a Label has no margin. |
 
-The reference engine also splices its theme at equal rank with author
+The reference engine also splices the reference theme at equal rank with author
 rules. Unity ranks the theme below every author rule: an author
 `Button { margin: 0 }` beats `.unity-button { margin: 2px 4px }`
 (`states-disabled`, `state-vs-id`, `ctl-styled-parts`). godot-uxml follows
