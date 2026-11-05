@@ -90,9 +90,10 @@ static func _parse_number_uncached(text: String) -> float:
 
 
 ## url("x.png") / url('x.png') / url(x.png) -> the reference text.
-## resource("name") is Unity resource lookup — out of scope, returns a
-## problem so the caller diagnoses instead of guessing. A bare path with no
-## wrapper is accepted for convenience and returned as-is.
+## resource("name") (Unity Resources lookup) returns the whole text as
+## `path`; UxmlResourceResolver.resolve() searches the Resources folders for
+## it. A bare path with no wrapper is accepted for convenience and returned
+## as-is.
 ## Memoized by text: the cascade keeps author strings, so the same few
 ## hundred values are re-read on every layout/apply. Results are shared —
 ## callers treat them as read-only.
@@ -115,10 +116,11 @@ static func _parse_url_uncached(text: String) -> Dictionary:
 	if value.is_empty():
 		return {"ok": false, "path": "", "problem": "empty reference"}
 	if value.begins_with("resource("):
-		return {
-			"ok": false, "path": "",
-			"problem": "resource() lookup is not supported; use url() with a project path",
-		}
+		# Unity Resources lookup: the whole text goes to
+		# UxmlResourceResolver.resolve, which searches the Resources folders.
+		if UxmlResourceResolver.resource_name(value).is_empty():
+			return {"ok": false, "path": "", "problem": 'malformed resource(): "%s"' % value}
+		return {"ok": true, "path": value, "problem": ""}
 	if not value.begins_with("url("):
 		return {"ok": true, "path": value, "problem": ""}
 	var close := value.rfind(")")
@@ -675,3 +677,204 @@ static func spacing_px(text: String, font_size: float) -> float:
 		"auto":
 			return 0.0
 	return NAN
+
+
+# ---------------------------------------------------------------------------
+# filter, -unity-material and -unity-text-auto-size (Unity 6.3)
+# ---------------------------------------------------------------------------
+
+## Unity's built-in filter functions (StyleValueFunction) plus `filter()`,
+## the custom function that names a FilterFunctionDefinition asset.
+const FILTER_FUNCTIONS := [
+	"blur", "grayscale", "contrast", "hue-rotate", "invert", "opacity", "sepia", "tint", "filter",
+]
+
+static var _re_dimension := RegEx.create_from_string(
+	"^([+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)([a-zA-Z%]*)$")
+
+
+## filter (StylePropertyReader.ReadListFilterFunction): `none` or one or
+## more functions -> {ok, funcs: Array, problems: PackedStringArray}.
+## Each function is {name, params: Array, ref: String}; a parameter is a
+## float (StyleProperty.ConvertDimensionToFilterFloat: % / 100, angles in
+## radians, ms / 1000, every other unit as written) or a Color. `ref` is the
+## definition reference of `filter()` (url(), resource() or a quoted path).
+## Unity rejects the whole value for an unknown function or an empty
+## argument list (StyleSheetImportErrorCode.MissingFunctionArgument): ok is
+## false. A built-in function with more than one argument keeps the first
+## (Unity logs an error and the shader reads parameter 0): a problem.
+static func parse_filter(text: String) -> Dictionary:
+	return _memo("filter", text, _filter)
+
+
+static func _filter(v: String) -> Dictionary:
+	var out := {"ok": true, "funcs": [], "problems": PackedStringArray()}
+	var low := v.to_lower()
+	if low == "none" or low == "initial" or v.is_empty():
+		return out
+	var funcs: Array = []
+	for tok in UssProperties.split_value(v):
+		var t := String(tok)
+		var open := t.find("(")
+		if open <= 0 or not t.ends_with(")"):
+			return _bad('filter: "%s" is not a filter function' % t)
+		var name := t.substr(0, open).to_lower()
+		if not FILTER_FUNCTIONS.has(name):
+			return _bad('filter: "%s" is not a Unity filter function' % name)
+		var args := _func_args(t.substr(open + 1, t.length() - open - 2))
+		if args.is_empty():
+			return _bad("filter: %s() needs an argument" % name)
+		var fn := {"name": name, "params": [], "ref": ""}
+		if name == "filter":
+			var first: String = args[0]
+			if first.begins_with("\"") or first.begins_with("'"):
+				first = first.substr(1, first.length() - 2)
+			fn["ref"] = first
+			args.remove_at(0)
+		if args.size() > 4:
+			return _bad("filter: %s() takes at most 4 parameters" % name)
+		for a in args:
+			var p = _filter_param(String(a))
+			if p == null:
+				return _bad('filter: %s(): cannot read "%s"' % [name, a])
+			fn["params"].append(p)
+		if name != "filter" and fn["params"].size() != 1:
+			out["problems"].append("filter: %s() takes 1 parameter, %d given; the first is used" % [name, fn["params"].size()])
+		funcs.append(fn)
+	out["funcs"] = funcs
+	return out
+
+
+## Arguments of a function call: split on top-level commas and white space
+## (Unity tolerates commas between filter arguments).
+static func _func_args(inner: String) -> Array:
+	var out: Array = []
+	var depth := 0
+	var buf := ""
+	for i in inner.length():
+		var c := inner.unicode_at(i)
+		if c == 40:
+			depth += 1
+		elif c == 41:
+			depth = maxi(0, depth - 1)
+		if depth == 0 and (c == 44 or c == 32 or c == 9 or c == 10 or c == 13):
+			if not buf.strip_edges().is_empty():
+				out.append(buf.strip_edges())
+			buf = ""
+		else:
+			buf += inner[i]
+	if not buf.strip_edges().is_empty():
+		out.append(buf.strip_edges())
+	return out
+
+
+## One filter parameter: a color, or a number with an optional unit.
+static func _filter_param(a: String):
+	var m := _re_dimension.search(a)
+	if m != null:
+		var n := m.get_string(1).to_float()
+		match m.get_string(2).to_lower():
+			"%":
+				return n * 0.01
+			"deg":
+				return deg_to_rad(n)
+			"turn":
+				return n * PI * 2.0
+			"grad":
+				return n * PI / 200.0
+			"ms":
+				return n * 0.001
+			"", "px", "rad", "s":
+				return n
+		return null
+	var c := parse_color(a)
+	if c["ok"]:
+		return c["color"]
+	return null
+
+
+## A filter parameter as Unity's FilterParameter.floatValue: a color
+## parameter reads as 0.
+static func filter_float(p) -> float:
+	return float(p) if (p is float or p is int) else 0.0
+
+
+## A filter parameter as FilterParameter.colorValue: a float parameter
+## reads as Color.clear.
+static func filter_color(p) -> Color:
+	return p if p is Color else Color(0, 0, 0, 0)
+
+
+## -unity-material (StyleProperty.TryGetMaterialDefinition):
+## `none` | (url() | resource()) prop("name" value...)* ->
+## {ok, ref: String, props: Array of {name, type, value}}. `type` is
+## "float" (one number), "vector" (2 to 4 numbers, value a 4-float Array),
+## "color" or "texture" (value the url()/resource() text).
+static func parse_material(text: String) -> Dictionary:
+	return _memo("material", text, _material)
+
+
+static func _material(v: String) -> Dictionary:
+	var low := v.to_lower()
+	if low == "none" or low == "initial" or v.is_empty():
+		return {"ok": true, "ref": "", "props": []}
+	var parts := UssProperties.split_value(v)
+	var first := String(parts[0])
+	if not (first.begins_with("url(") or first.begins_with("resource(")):
+		return _bad('-unity-material: "%s" is not url(), resource() or none' % first)
+	var props: Array = []
+	for k in range(1, parts.size()):
+		var t := String(parts[k])
+		if not (t.begins_with("prop(") and t.ends_with(")")):
+			return _bad('-unity-material: "%s" is not prop("name" value)' % t)
+		var args := _func_args(t.substr(5, t.length() - 6))
+		if args.size() < 2:
+			return _bad('-unity-material: %s needs a quoted name and a value' % t)
+		var pname := String(args[0])
+		if pname.length() < 2 or not ((pname.begins_with("\"") and pname.ends_with("\"")) or (pname.begins_with("'") and pname.ends_with("'"))):
+			return _bad('-unity-material: %s: the property name must be quoted' % t)
+		pname = pname.substr(1, pname.length() - 2)
+		var a1 := String(args[1])
+		if a1.begins_with("url(") or a1.begins_with("resource("):
+			props.append({"name": pname, "type": "texture", "value": a1})
+			continue
+		var nums: Array = []
+		for j in range(1, args.size()):
+			var n := parse_number(String(args[j]))
+			if is_nan(n):
+				nums.clear()
+				break
+			nums.append(n)
+		if not nums.is_empty() and nums.size() <= 4:
+			if nums.size() == 1:
+				props.append({"name": pname, "type": "float", "value": float(nums[0])})
+			else:
+				while nums.size() < 4:
+					nums.append(0.0)
+				props.append({"name": pname, "type": "vector", "value": nums})
+			continue
+		var c := parse_color(a1)
+		if c["ok"] and args.size() == 2:
+			props.append({"name": pname, "type": "color", "value": c["color"]})
+			continue
+		return _bad('-unity-material: %s: cannot read the value' % t)
+	return {"ok": true, "ref": first, "props": props}
+
+
+## -unity-text-auto-size (StylePropertyReaderHelper.ReadTextAutoSize):
+## `none` | `best-fit <min> <max>` -> {ok, best_fit: bool, min, max} in px.
+static func parse_text_auto_size(text: String) -> Dictionary:
+	return _memo("autosize", text, _auto_size)
+
+
+static func _auto_size(v: String) -> Dictionary:
+	var parts := UssProperties.split_value(v)
+	if parts.size() == 1 and (String(parts[0]).to_lower() == "none" or String(parts[0]).to_lower() == "initial"):
+		return {"ok": true, "best_fit": false, "min": 10.0, "max": 100.0}
+	if parts.size() != 3 or String(parts[0]).to_lower() != "best-fit":
+		return _bad('-unity-text-auto-size: "%s" is not none or best-fit <min> <max>' % v)
+	var lo := parse_length(String(parts[1]))
+	var hi := parse_length(String(parts[2]))
+	if lo["kind"] != "px" or hi["kind"] != "px":
+		return _bad('-unity-text-auto-size: "%s": the sizes must be px lengths' % v)
+	return {"ok": true, "best_fit": true, "min": float(lo["value"]), "max": float(hi["value"])}

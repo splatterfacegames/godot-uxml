@@ -21,7 +21,7 @@ extends RefCounted
 ## implementation serves both cascade backends, so the native and GDScript
 ## paths animate identically by construction.
 
-enum { K_COLOR, K_LENGTH, K_FLOAT, K_INT, K_DISCRETE, K_TRANSLATE, K_ORIGIN, K_ROTATE, K_SCALE, K_SIZE, K_SHADOW }
+enum { K_COLOR, K_LENGTH, K_FLOAT, K_INT, K_DISCRETE, K_TRANSLATE, K_ORIGIN, K_ROTATE, K_SCALE, K_SIZE, K_SHADOW, K_FILTER, K_MATERIAL }
 
 ## Animatable longhands (the USS property reference's "Fully animatable" and
 ## "Discrete" rows) -> value kind. Order is the order `all` visits them.
@@ -56,6 +56,7 @@ const ANIMATABLE := {
 	"-unity-slice-top": K_INT, "-unity-slice-bottom": K_INT,
 	"-unity-slice-scale": K_FLOAT, "-unity-slice-type": K_DISCRETE,
 	"translate": K_TRANSLATE, "rotate": K_ROTATE, "scale": K_SCALE, "transform-origin": K_ORIGIN,
+	"filter": K_FILTER, "-unity-material": K_MATERIAL,
 }
 
 ## transition-property shorthands -> the longhands they match
@@ -106,6 +107,7 @@ const INITIAL := {
 	"-unity-slice-left": "0", "-unity-slice-right": "0", "-unity-slice-top": "0", "-unity-slice-bottom": "0",
 	"-unity-slice-scale": "1", "-unity-slice-type": "sliced",
 	"translate": "none", "rotate": "none", "scale": "none", "transform-origin": "center",
+	"filter": "none", "-unity-material": "none",
 }
 
 ## Properties whose percentages resolve against the parent's height / width
@@ -137,6 +139,12 @@ var now_ms := 0.0
 ## Resolves a percentage base for unit conversion:
 ## func(index: int, property: String, sub: int) -> float (NAN = unknown).
 var size_of: Callable = Callable()
+
+## The interpolation defaults of a custom filter function (Unity
+## FilterParameterDeclaration.interpolationDefaultValue):
+## func(index: int, ref: String, entry: Dictionary) -> Array of float/Color.
+## Unset or empty: the parameters pad with 0.
+var filter_defaults: Callable = Callable()
 
 var _cascade: UssCascade
 # index -> {property: anim Dictionary}
@@ -436,6 +444,7 @@ func _start(i: int, prop: String, old: Dictionary, tgt: Dictionary,
 			_remove(i, prop, dirty)
 			return
 		var na := _anim(kind, s2, b, an["cur_entry"], b_entry, dur, delay, ef)
+		na["index"] = i
 		if _same(kind, b, an["ras"]):
 			var rsf := clampf(absf(1.0 - (1.0 - float(an["eased"])) * float(an["rsf"])), 0.0, 1.0)
 			na["rsf"] = rsf
@@ -453,6 +462,7 @@ func _start(i: int, prop: String, old: Dictionary, tgt: Dictionary,
 	if _same(kind, start, b):
 		return
 	run[prop] = _anim(kind, start, b, a_entry, b_entry, dur, delay, ef)
+	run[prop]["index"] = i
 	_running[i] = run
 	dirty[i] = true
 	_queue(i, prop, Event.RUN, run[prop])
@@ -540,6 +550,12 @@ func tick() -> bool:
 func _lerp(an: Dictionary) -> void:
 	var t: float = an["eased"]
 	var kind: int = an["kind"]
+	if kind == K_FILTER:
+		an["cur"] = _lerp_filter(an, clampf(t, 0.0, 1.0))
+		return
+	if kind == K_MATERIAL:
+		an["cur"] = _lerp_material(an, t)
+		return
 	if kind == K_DISCRETE:
 		var useb := t >= 0.5
 		an["cur"] = an["b"] if useb else an["a"]
@@ -581,7 +597,7 @@ func _write(i: int) -> void:
 	if run != null:
 		for prop in run:
 			var an: Dictionary = run[prop]
-			var e = an["cur_entry"] if an["kind"] == K_DISCRETE else an["b_entry"]
+			var e = an["cur_entry"] if an["kind"] == K_DISCRETE else an.get("src_entry", an["b_entry"])
 			var origin = {"kind": "transition"} if e == null else e["origin"]
 			ov[prop] = {"value": _serialize(an["kind"], prop, an["cur"], an["cur_entry"]), "origin": origin}
 	var prev = _written.get(i)
@@ -804,6 +820,22 @@ static func _parse(kind: int, s: String):
 			while lens.size() < 3:
 				lens.append([0.0, "px"])
 			return [lens[0], lens[1], lens[2], Color.BLACK if col == null else col]
+		K_FILTER:
+			var fr := UssValues.parse_filter(s)
+			if not fr["ok"]:
+				return null
+			var funcs: Array = []
+			for fn in fr["funcs"]:
+				funcs.append([String(fn["name"]), String(fn["ref"]), (fn["params"] as Array).duplicate()])
+			return [funcs]
+		K_MATERIAL:
+			var mr := UssValues.parse_material(s)
+			if not mr["ok"]:
+				return null
+			var props: Array = []
+			for pr in mr["props"]:
+				props.append([String(pr["name"]), String(pr["type"]), pr["value"]])
+			return [String(mr["ref"]), props]
 	return null
 
 
@@ -865,6 +897,8 @@ static func _angle(s: String):
 ## Value equality (SameFunc): Mathf.Approximately per float component for
 ## colors / lengths / numbers (with equal units), exact for the rest.
 static func _same(kind: int, a: Array, b: Array) -> bool:
+	if kind == K_FILTER or kind == K_MATERIAL:
+		return a == b
 	if a.size() != b.size():
 		return false
 	var exact := kind == K_TRANSLATE or kind == K_ROTATE or kind == K_SCALE or kind == K_ORIGIN or kind == K_SIZE or kind == K_SHADOW
@@ -899,6 +933,26 @@ static func _approx(a: float, b: float) -> bool:
 ## unit converts to 0px. Returns the converted start value, or null when it
 ## is not convertible (the change then applies without a transition).
 func _converted(i: int, prop: String, kind: int, a: Array, b: Array):
+	if kind == K_FILTER:
+		# ValuesListFilterFunction.ConvertUnits: the functions both lists
+		# have must match in type (and, for filter(), in definition).
+		var fa: Array = a[0]
+		var fb: Array = b[0]
+		for k in mini(fa.size(), fb.size()):
+			if fa[k][0] != fb[k][0] or fa[k][1] != fb[k][1]:
+				return null
+		return a
+	if kind == K_MATERIAL:
+		# ValuesMaterialDefinition.ConvertUnits: to or from no material, or
+		# the same material with matching property names and types.
+		if String(a[0]).is_empty() != String(b[0]).is_empty():
+			return a
+		if a[0] != b[0]:
+			return null
+		for k in mini(a[1].size(), b[1].size()):
+			if a[1][k][0] != b[1][k][0] or a[1][k][1] != b[1][k][1]:
+				return null
+		return a
 	if a.size() != b.size():
 		return null
 	var out = null
@@ -938,6 +992,10 @@ func _base(i: int, prop: String, sub: int) -> float:
 func _serialize(kind: int, _prop: String, v: Array, entry) -> String:
 	if kind == K_DISCRETE:
 		return v[0] if entry == null else String(entry["value"])
+	if kind == K_FILTER:
+		return _filter_text(v)
+	if kind == K_MATERIAL:
+		return _material_text(v)
 	var parts := PackedStringArray()
 	match kind:
 		K_TRANSLATE:
@@ -1081,3 +1139,160 @@ static func _out_bounce(t: float) -> float:
 		return 7.5625 * t * t + 0.9375
 	t -= 2.625 / 2.75
 	return 7.5625 * t * t + 0.984375
+
+
+# ---------------------------------------------------------------------------
+# filter and -unity-material (StylePropertyAnimationSystem
+# ValuesListFilterFunction / ValuesMaterialDefinition)
+# ---------------------------------------------------------------------------
+
+## Interpolation default of parameter j of filter function `fn` (Unity
+## FilterParameterDeclaration.interpolationDefaultValue of the built-in
+## definitions; a custom definition's own values).
+func _filter_default(an: Dictionary, fn: Array, j: int):
+	match String(fn[0]):
+		"tint":
+			return Color(1, 1, 1, 1)
+		"opacity":
+			return 1.0
+		"filter":
+			if filter_defaults.is_valid():
+				var entry = an["b_entry"] if an["b_entry"] != null else an["a_entry"]
+				var d: Array = filter_defaults.call(int(an.get("index", -1)), String(fn[1]), entry)
+				if j < d.size():
+					return d[j]
+	return 0.0
+
+
+## GetFunctionOrDefault: the function at k, or the other list's function
+## with interpolation-default parameters.
+func _filter_or_default(an: Dictionary, src: Array, other: Array, k: int) -> Array:
+	if k < src.size():
+		return src[k]
+	var f: Array = other[k]
+	var params: Array = []
+	for j in (f[2] as Array).size():
+		params.append(_filter_default(an, f, j))
+	return [f[0], f[1], params]
+
+
+## Lerp of two filter lists: Mathf.Lerp / Color.Lerp (t clamped) per
+## parameter; a shorter list pads with interpolation defaults.
+func _lerp_filter(an: Dictionary, t: float) -> Array:
+	var fa: Array = an["a"][0]
+	var fb: Array = an["b"][0]
+	var out: Array = []
+	for k in maxi(fa.size(), fb.size()):
+		var x := _filter_or_default(an, fa, fb, k)
+		var y := _filter_or_default(an, fb, fa, k)
+		var params: Array = []
+		var px: Array = x[2]
+		var py: Array = y[2]
+		for j in px.size():
+			var p = px[j]
+			var q = py[j] if j < py.size() else p
+			if p is Color and q is Color:
+				params.append((p as Color).lerp(q, t))
+			elif (p is float or p is int) and (q is float or q is int):
+				params.append(lerpf(float(p), float(q), t))
+			else:
+				params.append(p)
+		out.append([x[0], x[1], params])
+	if fa.size() > fb.size():
+		an["src_entry"] = an["a_entry"]
+	return [out]
+
+
+static func _zero_prop(p: Array) -> Array:
+	match String(p[1]):
+		"float":
+			return [p[0], p[1], 0.0]
+		"vector":
+			return [p[0], p[1], [0.0, 0.0, 0.0, 0.0]]
+		"color":
+			return [p[0], p[1], Color(0, 0, 0, 0)]
+	return [p[0], p[1], ""]
+
+
+## Lerp of two material definitions: the end value itself above an eased
+## progress of 0.999; else the start material (or the end one when there
+## is none) with Vector4.Lerp per property and textures switching at 0.5.
+func _lerp_material(an: Dictionary, t: float) -> Array:
+	var a: Array = an["a"]
+	var b: Array = an["b"]
+	if t > 0.999:
+		an.erase("src_entry")
+		return b
+	var ref: String = a[0] if not String(a[0]).is_empty() else b[0]
+	if ref == String(a[0]) and ref != String(b[0]):
+		an["src_entry"] = an["a_entry"]
+	else:
+		an.erase("src_entry")
+	var tc := clampf(t, 0.0, 1.0)
+	var pa: Array = a[1]
+	var pb: Array = b[1]
+	var props: Array = []
+	for k in maxi(pa.size(), pb.size()):
+		var x: Array = pa[k] if k < pa.size() else _zero_prop(pb[k])
+		var y: Array = pb[k] if k < pb.size() else _zero_prop(pa[k])
+		if x[1] != y[1]:
+			props.append(x)
+			continue
+		match String(x[1]):
+			"float":
+				props.append([x[0], x[1], lerpf(float(x[2]), float(y[2]), tc)])
+			"vector":
+				var v: Array = []
+				for c in 4:
+					v.append(lerpf(float(x[2][c]), float(y[2][c]), tc))
+				props.append([x[0], x[1], v])
+			"color":
+				props.append([x[0], x[1], (x[2] as Color).lerp(y[2], tc)])
+			_:
+				props.append(x if tc < 0.5 else y)
+	return [ref, props]
+
+
+static func _param_text(p) -> String:
+	if p is Color:
+		return _fmt(p)
+	return _n(float(p))
+
+
+static func _filter_text(v: Array) -> String:
+	var funcs: Array = v[0]
+	if funcs.is_empty():
+		return "none"
+	var parts := PackedStringArray()
+	for fn in funcs:
+		var args := PackedStringArray()
+		if fn[0] == "filter":
+			args.append(String(fn[1]))
+		for p in fn[2]:
+			args.append(_param_text(p))
+		parts.append("%s(%s)" % [fn[0], " ".join(args)])
+	return " ".join(parts)
+
+
+static func _material_text(v: Array) -> String:
+	if String(v[0]).is_empty():
+		return "none"
+	var parts := PackedStringArray([String(v[0])])
+	for p in v[1]:
+		var val := ""
+		match String(p[1]):
+			"float":
+				val = _n(float(p[2]))
+			"vector":
+				var nums := PackedStringArray()
+				for c in 4:
+					nums.append(_n(float(p[2][c])))
+				val = " ".join(nums)
+			"color":
+				val = _fmt(p[2])
+			_:
+				val = String(p[2])
+		if val.is_empty():
+			continue  # a texture property with no texture keeps the material's own
+		parts.append('prop("%s" %s)' % [p[0], val])
+	return " ".join(parts)

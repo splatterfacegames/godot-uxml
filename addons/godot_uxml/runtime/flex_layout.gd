@@ -111,6 +111,10 @@ static var _no_state := PackedFloat64Array()
 # a text change or a deferred theme update can never be served stale.
 var _xc = null
 var _hint_free := false      # options["hint_free"]: only volatile measures read the hint
+## options["hinted"]: non-volatile elements whose measure still reads the
+## width hint (best-fit text, -unity-text-auto-size). A column with
+## align stretch also measures them at their stretched width, as Yoga does.
+var _hinted: Dictionary = {}
 # Entries — measure: [kx, ky, kh, out, entry_state, exit_state, calls,
 # kids, ids, eid, el]; layout: [size, cb_width, scroll_bar_width,
 # entry_state, exit_state, sub, calls, kids, ids, eid, el, rects, insets,
@@ -165,6 +169,7 @@ static func compute(
 	if l._shared_recs != null:
 		l._xc = options.get("xcache")
 	l._hint_free = bool(options.get("hint_free", false))
+	l._hinted = options.get("hinted", {})
 	if options.has("warned"):
 		l._warned = options["warned"]
 	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
@@ -693,6 +698,20 @@ func _measure(
 	return out
 
 
+## The border-box width hint of a best-fit text item in a column whose
+## cross axis stretches it (-1: none). Only `hinted` elements get one, so
+## other layouts keep their measures.
+func _stretch_hint(child: UxmlElement, row: bool, align_items: String, ac: float, m: PackedFloat64Array) -> float:
+	if row or _hinted.is_empty() or not _hinted.has(child) or ac < 0.0:
+		return -1.0
+	var al := _str(child, "align-self", "auto")
+	if al == "auto":
+		al = align_items
+	if al != "stretch" or _dim(child, P_W, ac) >= 0.0:
+		return -1.0
+	return maxf(0.0, ac - m[L] - m[R])
+
+
 ## The measurer, with volatile elements emulated. A volatile measure is a
 ## pure function of the control's actual width: a call with a hint >= 0 sets
 ## that width first (the engine may clamp it — the real resulting width is
@@ -773,7 +792,7 @@ func _calls_ok(calls: Array) -> bool:
 		if vol != _volatile.has(el):
 			return false
 		var arg: float = c[2]
-		if not vol and _hint_free:
+		if not vol and _hint_free and not _hinted.has(el):
 			# The caller guarantees non-volatile measures ignore the hint:
 			# one replay per element per pass covers every recorded call.
 			arg = -1.0
@@ -1189,7 +1208,7 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	for k in n:
 		var child: UxmlElement = kids[k]
 		var m := _margins(child, asx)
-		var nat := _measure(child, area.size)
+		var nat := _measure(child, area.size, _stretch_hint(child, row, align_items, ac, m))
 		var hyp: float
 		var basis := _len(child, P_BASIS, am)
 		if not is_nan(basis):

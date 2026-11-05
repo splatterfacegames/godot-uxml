@@ -28,15 +28,17 @@ Status values:
 | `-unity-text-outline*` | done |
 | `opacity`, `overflow`, `-unity-overflow-clip-box` | done (rectangular clip only: no rounded-corner clipping) |
 | `translate`, `rotate`, `scale`, `transform-origin` | done (z rotation only; z components ignored) |
-| `cursor` | done (keywords map to the nearest Godot shape; `resource()` planned) |
+| `cursor` | done (keywords map to the nearest Godot shape) |
 | `letter-spacing`, `word-spacing`, `-unity-paragraph-spacing` | done (em/100 units as in Unity; rounded to whole px) |
-| `text-shadow`, `text-overflow`, `-unity-text-overflow-position`, `white-space` | done (shadow blur not drawn; no ellipsis on rich text) |
+| `text-shadow`, `text-overflow`, `-unity-text-overflow-position`, `white-space` | done (blur is a Gaussian with sigma = blur / 2, Label only; no ellipsis on rich text) |
 | `background-position*`, `background-repeat`, `background-size`, `-unity-background-scale-mode` | done |
 | `-unity-slice-type`, `-unity-slice-scale` | done |
 | `-unity-text-generator`, `-unity-editor-text-rendering-mode` | done (accepted; Godot has one text generator) |
 | `all` | done |
 | `transition`, `transition-*` | done |
-| `filter`, `-unity-material`, `-unity-text-auto-size` | planned |
+| `filter` | done: every built-in function with Unity's math, chains, transitions; custom `filter()` maps to `UxmlFilterDefinition` (see design.md, "Filter" and "Custom filters"). Limits: no nested filters, one pass per custom filter, a custom function draws alone, blurs of one chain combine |
+| `-unity-material` | done: `url()`/`resource()` maps to a Godot `ShaderMaterial` (`.mat` -> `.tres` beside it), `prop()` values bind to uniforms, transitions (see design.md, "Material") |
+| `-unity-text-auto-size` | done: best fit with the advanced text generator, both layout paths (see design.md, "Text auto size"). Whole-pixel font sizes |
 
 ## USS syntax
 
@@ -46,7 +48,8 @@ Status values:
 | Descendant and `>` child combinators | done |
 | `:hover`, `:active`, `:inactive`, `:focus`, `:checked`, `:disabled`, `:enabled`, `:selected`, `:root` | done |
 | `var()` custom properties, `@import`, inline `style` | done |
-| `url()`, `resource()` | done for files; Unity `Resources` folder lookup planned |
+| `url()`, `resource()` | done: `resource()` searches every `Resources` folder under `Assets/` and `Packages/` (see design.md, "`resource()` lookup") |
+| Inline `style` `url()` in template clones | done: resolves against the template file |
 | Rich text tags in Label text (`enable-rich-text`, `parse-escape-sequences`, `display-tooltip-when-elided`) | done (see docs/design.md, "Rich text", for dropped tags) |
 | `@media`, `@supports` | not USS |
 | `+` and `~` combinators, attribute selectors, `::` pseudo-elements, functional pseudo-classes | not USS |

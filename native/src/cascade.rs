@@ -1526,10 +1526,20 @@ impl UxmlNativeCascade {
             labels,
             rich,
             text_clip: false,
+            auto_size: None,
             fields: ks.iter().map(|&b| b & 2 != 0).collect(),
             texrects,
         });
         self.placement = crate::layout::Placement::default();
+    }
+
+    /// The style applier while best-fit text is active, else null (see
+    /// LayoutIn::auto_size).
+    #[func]
+    fn set_auto_size(&mut self, applier: Variant) {
+        if let Some(io) = self.layout_in.as_mut() {
+            io.auto_size = applier.try_to::<Gd<godot::classes::Object>>().ok();
+        }
     }
 
     /// Whether any control carries `uxml_clip_text` (see LayoutIn::text_clip).

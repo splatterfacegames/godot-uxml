@@ -34,6 +34,9 @@ var _resolver: UxmlResourceResolver
 var _uxml_path: String
 var _source: String
 var _warnings: Array
+## Elements cloned from a template file -> that file (UxmlDocumentModel.
+## element_paths). An inline style resolves its url()s against it.
+var element_paths: Dictionary = {}
 var _warned: Dictionary = {}
 # resolved path -> Resource or null (attempted and failed): repeated
 # restyles must not re-hit the filesystem for the same reference, missing
@@ -66,6 +69,23 @@ var _fv_cache: Dictionary = {}
 ## How many controls carry clip_text for overflow: hidden text. While zero
 ## the measurers skip the clip-text check entirely.
 var clip_texts := 0
+## How many Labels/Buttons have an active -unity-text-auto-size. While zero
+## the measurers skip the auto-size check entirely.
+var auto_sizes := 0
+## Canvas groups: filtered controls -> UxmlFilter, Labels with a blurred
+## text shadow -> UxmlTextShadow. Godot does not nest canvas groups, so
+## _resolve_nesting() turns off every group inside a filtered ancestor.
+var _filters: Dictionary = {}
+var _shadows: Dictionary = {}
+## Resolved path -> UxmlFilterDefinition / Material (null: failed).
+var _def_cache: Dictionary = {}
+var _mat_cache: Dictionary = {}
+## Plain Shader / Material -> the UxmlFilterDefinition made around it.
+var _def_wrap: Dictionary = {}
+## Shader named by -unity-material -> the ShaderMaterial made around it.
+var _mat_wrap: Dictionary = {}
+## Shader -> {uniform name: type} (prop() and filter parameter binding).
+var _uniforms: Dictionary = {}
 
 ## The shape a texture cursor takes over while its element is hovered:
 ## Input.set_custom_mouse_cursor replaces one shape's image globally.
@@ -277,6 +297,8 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 	elif c.has_theme_font_size_override(size_name):
 		c.remove_theme_font_size_override(size_name)
 
+	_apply_auto_size(c, style, el)
+
 	var font_name := _font_name(c)
 	var font := _font(c, style, el)
 	if font != null:
@@ -294,6 +316,166 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 			_apply_paragraph_spacing(c, style, el)
 	if c is RichTextLabel:
 		_render_rich(c)
+
+
+## -unity-text-auto-size: best-fit <min> <max> (Unity 6.3). Unity applies it
+## only with the advanced text generator (-unity-text-generator: advanced);
+## with the standard generator Unity logs a warning and ignores it, and so
+## does this runtime. An active Label or Button gets the `uxml_autosize`
+## meta [min, max, authored content height or -1]; both layout measurers
+## then call autosize_measure(), and placement calls autosize_place().
+func _apply_auto_size(c: Control, style: Dictionary, el: UxmlElement) -> void:
+	var e = style.get("-unity-text-auto-size")
+	var had := c.has_meta(_AUTOSIZE)
+	if e == null and not had:
+		return
+	var spec = null
+	if e != null and (c is Label or (c is Button and not c is OptionButton)):
+		var r := UssValues.parse_text_auto_size(String(e["value"]))
+		if not r["ok"]:
+			_warn(el, "-unity-text-auto-size", r["problem"])
+		elif r["best_fit"]:
+			if _str(style, "-unity-text-generator") != "advanced":
+				_warn_once_key("autosize-generator", el,
+					"-unity-text-auto-size needs -unity-text-generator: advanced; Unity ignores it with the standard text generator")
+			else:
+				var ch := -1.0
+				var hp := UssValues.parse_length(_str(style, "height"))
+				if hp["kind"] == "px":
+					var ins := _px_insets(style, true)
+					ch = maxf(0.0, float(hp["value"]) - ins.y - ins.w)
+				spec = [float(r["min"]), float(r["max"]), ch]
+	elif e != null and c is RichTextLabel and String(e["origin"].get("kind", "")) != "inherited":
+		_warn_once_key("autosize-rich", el, "-unity-text-auto-size is not applied to rich text")
+	if spec == null:
+		if had:
+			c.remove_meta(_AUTOSIZE)
+			c.remove_meta(_AUTOSIZE_FS)
+			auto_sizes -= 1
+		return
+	if not had:
+		auto_sizes += 1
+	c.set_meta(_AUTOSIZE, spec)
+	# Until the next placement fits the laid-out box, draw at the last
+	# fitted size (or the maximum).
+	var fs := int(c.get_meta(_AUTOSIZE_FS, int(floorf(spec[1]))))
+	c.add_theme_font_size_override(_font_size_name(c), fs)
+
+
+const _AUTOSIZE := &"uxml_autosize"
+const _AUTOSIZE_FS := &"uxml_autosize_fs"
+
+
+## The measurer for a best-fit text control (both layout paths call it, so
+## they agree by construction): the combined minimum size at the font size
+## that fits `content_w` (< 0: no width limit; the text then does not wrap,
+## as Unity measures with an undefined width) and the authored content
+## height. Leaves the control as it found it.
+static func autosize_measure(c: Control, content_w: float) -> Vector2:
+	var spec: Array = c.get_meta(_AUTOSIZE)
+	var saved := _autosize_save(c)
+	var s := _fit(c, content_w, float(spec[2]), float(spec[0]), float(spec[1]))
+	var ms := _combined_at(c, s, content_w)
+	_autosize_restore(c, saved)
+	return ms
+
+
+## Placement: fits the laid-out content box (width and height) and keeps
+## that font size. Runs before the control gets its laid-out size, so the
+## control's minimum size never holds the size open.
+static func autosize_place(c: Control, content: Vector2) -> void:
+	var spec: Array = c.get_meta(_AUTOSIZE)
+	var saved := _autosize_save(c)
+	var s := _fit(c, maxf(0.0, content.x), maxf(0.0, content.y), float(spec[0]), float(spec[1]))
+	_autosize_restore(c, saved)
+	c.set_meta(_AUTOSIZE_FS, s)
+	var name := _font_size_name(c)
+	if c.get_theme_font_size(name) != s or not c.has_theme_font_size_override(name):
+		c.add_theme_font_size_override(name, s)
+
+
+## The largest whole font size in [min, max] at which the text fits the
+## width (when >= 0) and the height (when >= 0); the minimum when none
+## fits. Unity's advanced generator searches fractional sizes; Godot font
+## sizes are whole pixels.
+static func _fit(c: Control, w: float, h: float, mn: float, mx: float) -> int:
+	var lo := maxi(1, ceili(mn))
+	var hi := maxi(lo, floori(mx))
+	if _fits(c, hi, w, h):
+		return hi
+	var best := lo
+	var a := lo
+	var b := hi - 1
+	while a <= b:
+		var mid := (a + b) >> 1
+		if _fits(c, mid, w, h):
+			best = mid
+			a = mid + 1
+		else:
+			b = mid - 1
+	return best
+
+
+static func _fits(c: Control, s: int, w: float, h: float) -> bool:
+	var t := _combined_at(c, s, w)
+	var m := _uxml_margins(c)
+	return ((w < 0.0 or t.x - m[0] - m[2] <= w + 0.01)
+		and (h < 0.0 or t.y - m[1] - m[3] <= h + 0.01))
+
+
+## Combined minimum size at font size `s`, with the text wrapped at content
+## width `w` when the control wraps (one line when w < 0). Text clipping is
+## off, so the size is the full text's.
+static func _combined_at(c: Control, s: int, w: float) -> Vector2:
+	c.add_theme_font_size_override(_font_size_name(c), s)
+	if c is Label and c.autowrap_mode != TextServer.AUTOWRAP_OFF:
+		var m := _uxml_margins(c)
+		if w < 0.0:
+			c.autowrap_mode = TextServer.AUTOWRAP_OFF
+			var ms := c.get_combined_minimum_size()
+			c.autowrap_mode = int(c.get_meta(&"uxml_autosize_wrap", TextServer.AUTOWRAP_WORD_SMART))
+			return ms
+		c.size = Vector2(w + m[0] + m[2], c.size.y)
+	return c.get_combined_minimum_size()
+
+
+## [l, t, r, b] padding + border the USS stylebox adds to the minimum size.
+static func _uxml_margins(c: Control) -> Array:
+	if c.has_theme_stylebox_override("normal"):
+		var sb: StyleBox = c.get_theme_stylebox("normal")
+		if sb != null and sb.has_meta("uxml_margins"):
+			return sb.get_meta("uxml_margins")
+	return [0.0, 0.0, 0.0, 0.0]
+
+
+static func _autosize_save(c: Control) -> Array:
+	var name := _font_size_name(c)
+	var fs = c.get_theme_font_size(name) if c.has_theme_font_size_override(name) else null
+	var shown = c.get(&"text")
+	var full = shown
+	if c.has_meta(&"uxml_full_text") and shown == c.get_meta(&"uxml_elided"):
+		full = c.get_meta(&"uxml_full_text")
+		c.set(&"text", full)
+	var clip = c.get(&"clip_text")
+	if clip == true:
+		c.set(&"clip_text", false)
+	if c is Label:
+		c.set_meta(&"uxml_autosize_wrap", c.autowrap_mode)
+	return [fs, c.size, shown, full, clip]
+
+
+static func _autosize_restore(c: Control, saved: Array) -> void:
+	var name := _font_size_name(c)
+	if saved[0] == null:
+		c.remove_theme_font_size_override(name)
+	else:
+		c.add_theme_font_size_override(name, int(saved[0]))
+	if saved[4] == true:
+		c.set(&"clip_text", true)
+	if saved[2] != saved[3]:
+		c.set(&"text", saved[2])
+	if c.size != saved[1]:
+		c.size = saved[1]
 
 
 ## USS text outline → Godot font outline. Unity's width is the outline
@@ -512,24 +694,28 @@ func _int(style: Dictionary, name: String, el: UxmlElement) -> int:
 
 
 ## The file a winning declaration came from: the stylesheet for rules, the
-## UXML for inline styles, and for inherited values the sheet the ancestor's
-## declaration came from. Relative url()s resolve against this.
-func _origin_file(entry: Dictionary) -> String:
-	return _origin_dir(entry.get("origin", {}))
+## file that holds the element's `style` attribute for inline styles (the
+## template file for an element cloned from a template), and for inherited
+## values the file of the ancestor's declaration. Relative url()s resolve
+## against this.
+func _origin_file(entry: Dictionary, el: UxmlElement = null) -> String:
+	return _origin_dir(entry.get("origin", {}), el)
 
 
 ## Walks the origin chain itself — {kind: "rule", file} is a stylesheet,
-## {kind: "inherited", origin} wraps the origin the ancestor's declaration
-## carried (nested per inheritance hop), anything else (inline, missing)
-## means the UXML file.
-func _origin_dir(origin: Dictionary) -> String:
+## {kind: "inherited", from, origin} wraps the origin the ancestor `from`'s
+## declaration carried (nested per inheritance hop), anything else (inline,
+## missing) means the file that holds the declaring element's attributes.
+func _origin_dir(origin: Dictionary, el: UxmlElement = null) -> String:
 	match String(origin.get("kind", "")):
 		"rule":
 			var f := String(origin.get("file", ""))
 			return f if not f.is_empty() else _uxml_path
 		"inherited":
-			return _origin_dir(origin.get("origin", {}))
+			return _origin_dir(origin.get("origin", {}), origin.get("from") as UxmlElement)
 		_:
+			if el != null and not element_paths.is_empty():
+				return element_paths.get(el, _uxml_path)
 			return _uxml_path
 
 
@@ -547,7 +733,7 @@ func _texture_ref(ref: String, e: Dictionary, name: String, el: UxmlElement) -> 
 	if not u["ok"]:
 		_warn(el, name, "%s: %s" % [name, u["problem"]])
 		return null
-	var r := _resolver.resolve(u["path"], _origin_file(e))
+	var r := _resolver.resolve(u["path"], _origin_file(e, el), "texture")
 	if not r["ok"]:
 		_report_resolver(r, el, '%s "%s"' % [name, e["value"]])
 		return null
@@ -599,7 +785,7 @@ func _font(c: Control, style: Dictionary, el: UxmlElement) -> Font:
 		var u := UssValues.parse_url(raw)
 		if u["ok"]:
 			path = u["path"]
-			var rr := _resolver.resolve(path, _origin_file(e))
+			var rr := _resolver.resolve(path, _origin_file(e, el), "font")
 			if not rr["ok"]:
 				_report_resolver(rr, el, '%s "%s"' % [prop, raw])
 				path = ""
@@ -1015,7 +1201,7 @@ func _warn_once_key(key: String, el: UxmlElement, message: String) -> void:
 ## restyle without the property can undo what the earlier one wrote.
 const _VISUAL_KEYS := [
 	"opacity", "overflow", "-unity-overflow-clip-box", "translate", "rotate",
-	"scale", "transform-origin", "cursor",
+	"scale", "transform-origin", "cursor", "filter", "-unity-material",
 ]
 const _TEXT_FX_KEYS := [
 	"text-shadow", "text-overflow", "overflow", "-unity-paragraph-spacing",
@@ -1040,6 +1226,8 @@ func _apply_visual(el: UxmlElement, c: Control, native: Control, style: Dictiona
 	_apply_overflow(c, style, el)
 	_apply_transform(c, style, el)
 	_apply_cursor(c, native, style, el)
+	_apply_filter(c, style, el)
+	_apply_material(c, native, style, el)
 
 
 ## opacity -> modulate alpha. Godot multiplies each canvas item of the
@@ -1235,14 +1423,325 @@ static func _cursor_hover(c: Control, on: bool) -> void:
 		Input.set_custom_mouse_cursor(null, _TEXTURE_CURSOR_INPUT)
 
 
+## filter (Unity 6.3) -> UxmlFilter: the element and its subtree draw into
+## a canvas group with Unity's filter math (see UxmlFilter). Only controls
+## whose style has `filter`, or had it, take this path.
+func _apply_filter(c: Control, style: Dictionary, el: UxmlElement) -> void:
+	var e = style.get("filter")
+	var f = c.get_meta(&"uxml_filter") if c.has_meta(&"uxml_filter") else null
+	if e == null and f == null:
+		return
+	var funcs: Array = []
+	if e != null:
+		var r := UssValues.parse_filter(String(e["value"]))
+		if not r["ok"]:
+			_warn(el, "filter", r["problem"])
+		else:
+			funcs = r["funcs"]
+			for p in r["problems"]:
+				_warn(el, "filter", p)
+	if funcs.is_empty():
+		if f != null:
+			f.detach()
+			c.remove_meta(&"uxml_filter")
+			_filters.erase(c)
+			_resolve_nesting()
+		return
+	var fresh := false
+	if f == null:
+		f = UxmlFilter.new(c)
+		c.set_meta(&"uxml_filter", f)
+		c.set_meta(&"uxml_el", el)
+		_filters[c] = f
+		fresh = true
+	var scale := _pixel_scale(c)
+	var custom = null
+	for fn in funcs:
+		if fn["name"] == "filter":
+			custom = fn
+			break
+	if custom != null:
+		if funcs.size() > 1:
+			_warn_once_key("filter-custom-chain", el,
+				"filter: a custom filter() function draws alone; the other functions of the list are not drawn")
+		_apply_custom_filter(f, custom, e, el, scale)
+	else:
+		var ops: Array = []
+		var pre := 0
+		var sig2 := 0.0
+		var margin := 0.0
+		var blurred := false
+		for fn in funcs:
+			var p = fn["params"][0] if not fn["params"].is_empty() else 0.0
+			if fn["name"] == "blur":
+				var sg := maxf(0.0, UssValues.filter_float(p)) * scale
+				sig2 += sg * sg
+				margin += UxmlFilter.blur_margin(sg)
+				blurred = blurred or sg > 0.0
+				continue
+			if ops.size() >= UxmlFilter.MAX_OPS:
+				_warn_once_key("filter-too-many", el,
+					"filter: more than %d color functions; the rest are not drawn" % UxmlFilter.MAX_OPS)
+				break
+			ops.append(UxmlFilter.color_effect(fn["name"], p))
+			if not blurred:
+				pre += 1
+		f.set_builtin(ops, pre, sqrt(sig2), margin)
+	if fresh:
+		_resolve_nesting()
+
+
+## The interpolation defaults of the custom filter function `ref` (the
+## transition system pads a shorter filter list with them).
+func filter_interpolation_defaults(ref: String, e: Dictionary, el: UxmlElement) -> Array:
+	var d := _filter_def(ref, e, el)
+	return [] if d == null else d.interpolation_defaults
+
+
+## Render-target pixels per USS pixel at the control (Unity scales the blur
+## sigma by the panel's pixels per point).
+static func _pixel_scale(c: Control) -> float:
+	if not c.is_inside_tree():
+		return 1.0
+	var t := c.get_viewport().get_final_transform() * c.get_global_transform_with_canvas()
+	var d := absf(t.determinant())
+	return sqrt(d) if d > 0.0 else 1.0
+
+
+## A custom function: its UxmlFilterDefinition's material (one copy per
+## element, so each element binds its own parameters).
+func _apply_custom_filter(f: UxmlFilter, fn: Dictionary, e: Dictionary, el: UxmlElement, scale: float) -> void:
+	var def: UxmlFilterDefinition = _filter_def(String(fn["ref"]), e, el)
+	if def == null or def.material == null:
+		f.set_custom(null, 0.0)
+		f.set_builtin([], 0, 0.0, 0.0)
+		return
+	var inst: Material = f.get_meta(&"uxml_custom_mat") if f.has_meta(&"uxml_custom_mat") else null
+	if inst == null or f.get_meta(&"uxml_custom_def") != def:
+		inst = def.material.duplicate()
+		f.set_meta(&"uxml_custom_mat", inst)
+		f.set_meta(&"uxml_custom_def", def)
+	var params: Array = fn["params"]
+	var n := def.parameter_names.size()
+	if params.size() > n and n > 0:
+		_warn_once_key("filter-extra", el, "filter: %s takes %d parameters; the extra ones are ignored" % [fn["ref"], n])
+	for i in n:
+		var dflt = def.interpolation_defaults[i] if i < def.interpolation_defaults.size() else 0.0
+		var v = params[i] if i < params.size() else dflt
+		# Unity resets a parameter of the wrong type to its default.
+		if (v is Color) != (dflt is Color):
+			v = dflt
+		_set_param(inst, def.parameter_names[i], v)
+	var m := def.margins
+	f.set_custom(inst, maxf(maxf(m.x, m.y), maxf(m.z, m.w)) * scale)
+
+
+## The UxmlFilterDefinition a filter() reference names (see
+## UxmlFilterDefinition for the Unity -> Godot mapping). Cached per path.
+func _filter_def(ref: String, e: Dictionary, el: UxmlElement) -> UxmlFilterDefinition:
+	var res = _load_godot_resource(ref, e, el, "filter", ["tres", "res", "gdshader"], _def_cache)
+	if res == null:
+		return null
+	if res is UxmlFilterDefinition:
+		return res
+	var hit = _def_wrap.get(res)
+	if hit != null:
+		return hit
+	var mat = res
+	if res is Shader:
+		mat = ShaderMaterial.new()
+		mat.shader = res
+	if mat is Material:
+		var d := UxmlFilterDefinition.from_material(mat)
+		_def_wrap[res] = d
+		return d
+	_warn_diag("missing-file", "filterdef:%s:%s" % [ref, el.get_instance_id()], el,
+		'filter: "%s" is not a UxmlFilterDefinition, ShaderMaterial or Shader' % ref)
+	return null
+
+
+## Loads the Godot resource for a Unity asset reference: the resolved file
+## when Godot can load it, else the same path with each extension of
+## `alt` (a Unity .asset or .mat file has a Godot .tres beside it).
+func _load_godot_resource(ref: String, e: Dictionary, el: UxmlElement, kind: String,
+		alt: Array, cache: Dictionary) -> Variant:
+	var u := UssValues.parse_url(ref)
+	if not u["ok"]:
+		_warn(el, kind, '%s "%s": %s' % [kind, ref, u["problem"]])
+		return null
+	var r := _resolver.resolve(u["path"], _origin_file(e, el), kind)
+	if not r["ok"]:
+		_report_resolver(r, el, '%s "%s"' % [kind, ref])
+		return null
+	var path: String = r["path"]
+	if cache.has(path):
+		return cache[path]
+	var cands: Array = [path]
+	for x in alt:
+		var cand: String = path.get_basename() + "." + x
+		if not cands.has(cand):
+			cands.append(cand)
+	var res = null
+	for cand in cands:
+		if ResourceLoader.exists(cand):
+			res = ResourceLoader.load(cand)
+			if res != null:
+				break
+	if res == null:
+		_warn_diag("missing-file", "%s:%s:%s" % [kind, path, el.get_instance_id()], el,
+			'%s "%s" resolved to %s, but no Godot resource is there (tried %s)' % [
+				kind, ref, path, ", ".join(PackedStringArray(cands))])
+	cache[path] = res
+	return res
+
+
+## Sets a shader parameter named after a Unity property: the name as
+## written, else without a leading underscore, else in lower case (Unity
+## shader properties are usually `_Name`). Converts vectors and colors to
+## the uniform's type.
+func _set_param(mat: Material, name: String, value) -> void:
+	var sm := mat as ShaderMaterial
+	if sm == null or sm.shader == null:
+		return
+	var u: Dictionary = _uniforms.get(sm.shader, {})
+	if u.is_empty():
+		for d in sm.shader.get_shader_uniform_list():
+			u[String(d["name"])] = int(d.get("type", TYPE_NIL))
+		_uniforms[sm.shader] = u
+	var key := name
+	if not u.has(key):
+		for cand in [name.trim_prefix("_"), name.trim_prefix("_").to_lower(), name.trim_prefix("_").to_snake_case()]:
+			if u.has(cand):
+				key = cand
+				break
+	var t: int = u.get(key, TYPE_NIL)
+	var v = value
+	if value is Vector4:
+		match t:
+			TYPE_VECTOR2:
+				v = Vector2(value.x, value.y)
+			TYPE_VECTOR3:
+				v = Vector3(value.x, value.y, value.z)
+			TYPE_COLOR:
+				v = Color(value.x, value.y, value.z, value.w)
+			TYPE_FLOAT:
+				v = value.x
+	elif value is Color:
+		match t:
+			TYPE_VECTOR3:
+				v = Vector3(value.r, value.g, value.b)
+			TYPE_VECTOR4:
+				v = Vector4(value.r, value.g, value.b, value.a)
+	elif value is float and t == TYPE_INT:
+		v = int(value)
+	sm.set_shader_parameter(key, v)
+
+
+## Godot does not nest canvas groups: a filter inside a filtered ancestor,
+## and a blurred text shadow inside a filtered element, are turned off (the
+## shadow then draws sharp) and diagnosed.
+func _resolve_nesting() -> void:
+	for c in _filters.keys():
+		if not is_instance_valid(c):
+			_filters.erase(c)
+	for c in _shadows.keys():
+		if not is_instance_valid(c):
+			_shadows.erase(c)
+	for c in _filters:
+		var nested := _filtered_ancestor(c.get_parent())
+		_filters[c].set_enabled(not nested)
+		if nested:
+			_nest_warn(c, "filter: Godot does not nest canvas groups; this filter inside a filtered element is not drawn")
+	for c in _shadows:
+		var nested2 := _filtered_ancestor(c)
+		_shadows[c].set_enabled(not nested2)
+		_sharp_shadow(c, nested2)
+		if nested2:
+			_nest_warn(c, "text-shadow: the blur is not drawn inside a filtered element (Godot does not nest canvas groups); the shadow is drawn sharp")
+
+
+func _filtered_ancestor(n: Node) -> bool:
+	while n != null:
+		if _filters.has(n):
+			return true
+		n = n.get_parent()
+	return false
+
+
+func _nest_warn(c: Control, message: String) -> void:
+	var el = c.get_meta(&"uxml_el") if c.has_meta(&"uxml_el") else null
+	if el != null:
+		_warn_once_key("nest:" + message.substr(0, 12), el, message)
+
+
+## -unity-material (Unity 6.3) -> CanvasItem.material on the element's
+## controls (the value inherits, so descendants get it too, as in Unity).
+## prop() values go to a per-control copy of the material.
+func _apply_material(c: Control, native: Control, style: Dictionary, el: UxmlElement) -> void:
+	var e = style.get("-unity-material")
+	if e == null and not c.has_meta(&"uxml_mat_default"):
+		return
+	if not c.has_meta(&"uxml_mat_default"):
+		c.set_meta(&"uxml_mat_default", [c.material, native.material])
+	var defaults: Array = c.get_meta(&"uxml_mat_default")
+	var mat: Material = null
+	var set_any := false
+	if e != null:
+		var r := UssValues.parse_material(String(e["value"]))
+		if not r["ok"]:
+			_warn(el, "-unity-material", r["problem"])
+		elif not String(r["ref"]).is_empty():
+			var base = _load_godot_resource(String(r["ref"]), e, el, "material",
+				["tres", "res", "material", "gdshader"], _mat_cache)
+			if base is Shader:
+				var sm = _mat_wrap.get(base)
+				if sm == null:
+					sm = ShaderMaterial.new()
+					sm.shader = base
+					_mat_wrap[base] = sm
+				base = sm
+			if base is Material:
+				set_any = true
+				mat = base
+				var props: Array = r["props"]
+				if not props.is_empty():
+					var inst = c.get_meta(&"uxml_mat_inst") if c.has_meta(&"uxml_mat_inst") else null
+					if inst == null or inst[0] != base:
+						inst = [base, base.duplicate()]
+						c.set_meta(&"uxml_mat_inst", inst)
+					mat = inst[1]
+					for pr in props:
+						var v = pr["value"]
+						match String(pr["type"]):
+							"vector":
+								v = Vector4(v[0], v[1], v[2], v[3])
+							"texture":
+								v = _texture_ref(String(v), e, "-unity-material", el)
+						_set_param(mat, String(pr["name"]), v)
+			elif base != null:
+				_warn(el, "-unity-material", '-unity-material: "%s" is not a Godot Material or Shader' % r["ref"])
+	var m0: Material = mat if set_any else defaults[0]
+	var m1: Material = mat if set_any else defaults[1]
+	if c.material != m0:
+		c.material = m0
+	if native != c and native.material != m1:
+		native.material = m1
+	if c is UxmlField:
+		var cap: Control = c.caption_node()
+		if cap != null and cap.use_parent_material != set_any:
+			cap.use_parent_material = set_any
+
+
 # ---------------------------------------------------------------------------
 # Text effects: shadow, paragraph spacing, elision, rich text
 # ---------------------------------------------------------------------------
 
 ## text-shadow -> Label / RichTextLabel font shadow. Godot draws a sharp
-## shadow: a blur radius is diagnosed and not drawn. Other controls have
-## no text shadow; that is diagnosed only where the element declares the
-## property itself (it inherits, so containers pass it down to everything).
+## shadow; a Label with a blur radius gets a UxmlTextShadow (a blurred copy
+## of the text, sigma = blur / 2 as in CSS). A rich text Label draws the
+## shadow sharp and the blur is diagnosed. Other controls have no text
+## shadow; that is diagnosed only where the element declares the property
+## itself (it inherits, so containers pass it down to everything).
 func _apply_text_shadow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	var e = style.get("text-shadow")
 	if not (c is Label or c is RichTextLabel):
@@ -1257,19 +1756,55 @@ func _apply_text_shadow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 			_warn(el, "text-shadow", r["problem"])
 		elif (r["color"] as Color).a > 0.0:
 			sh = r
-			if r["blur"] > 0.0:
-				_warn_once_key("text-shadow-blur", el,
-					"text-shadow blur radius is not supported; the shadow is drawn sharp")
+	var blur := 0.0 if sh == null else float(sh["blur"])
+	var soft = c.get_meta(&"uxml_shadow") if c.has_meta(&"uxml_shadow") else null
+	if blur > 0.0 and c is RichTextLabel:
+		_warn_once_key("text-shadow-blur", el,
+			"text-shadow blur radius is not drawn on rich text; the shadow is drawn sharp")
+	elif blur > 0.0:
+		if soft == null:
+			soft = UxmlTextShadow.new(c)
+			c.set_meta(&"uxml_shadow", soft)
+			c.set_meta(&"uxml_el", el)
+			_shadows[c] = soft
+			_resolve_nesting()
+		soft.set_shadow(sh["color"], sh["offset"], blur * 0.5)
+		c.set_meta(&"uxml_shadow_sharp", [sh["color"], sh["offset"]])
+		_sharp_shadow(c, not soft.enabled)
+		return
+	if soft != null:
+		soft.detach()
+		c.remove_meta(&"uxml_shadow")
+		c.remove_meta(&"uxml_shadow_sharp")
+		_shadows.erase(c)
 	if sh != null:
-		c.add_theme_color_override("font_shadow_color", sh["color"])
-		c.add_theme_constant_override("shadow_offset_x", roundi(sh["offset"].x))
-		c.add_theme_constant_override("shadow_offset_y", roundi(sh["offset"].y))
-		c.add_theme_constant_override("shadow_outline_size", 0)
+		_theme_shadow(c, sh["color"], sh["offset"])
 	elif c.has_theme_color_override("font_shadow_color"):
+		_theme_shadow(c, null, Vector2.ZERO)
+
+
+## Godot's own (sharp) font shadow: color null removes it.
+static func _theme_shadow(c: Control, color, offset: Vector2) -> void:
+	if color != null:
+		c.add_theme_color_override("font_shadow_color", color)
+		c.add_theme_constant_override("shadow_offset_x", roundi(offset.x))
+		c.add_theme_constant_override("shadow_offset_y", roundi(offset.y))
+		c.add_theme_constant_override("shadow_outline_size", 0)
+	else:
 		c.remove_theme_color_override("font_shadow_color")
 		for k in ["shadow_offset_x", "shadow_offset_y", "shadow_outline_size"]:
 			if c.has_theme_constant_override(k):
 				c.remove_theme_constant_override(k)
+
+
+## A blurred-shadow Label draws the theme shadow (sharp) only while its blur
+## group is off (inside a filtered element).
+static func _sharp_shadow(c: Control, on: bool) -> void:
+	var spec = c.get_meta(&"uxml_shadow_sharp") if c.has_meta(&"uxml_shadow_sharp") else null
+	if on and spec != null:
+		_theme_shadow(c, spec[0], spec[1])
+	elif c.has_theme_color_override("font_shadow_color"):
+		_theme_shadow(c, null, Vector2.ZERO)
 
 
 ## -unity-paragraph-spacing (em/100 units, like letter-spacing): extra space

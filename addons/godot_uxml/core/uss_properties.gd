@@ -28,6 +28,9 @@ const INHERITED := {
 	"text-shadow": true,
 	"-unity-text-generator": true,
 	"-unity-editor-text-rendering-mode": true,
+	# Unity 6.3 keeps both in InheritedData.
+	"-unity-material": true,
+	"-unity-text-auto-size": true,
 }
 
 ## Property names inside the planned support envelope — the dedicated flex
@@ -97,6 +100,8 @@ const SUPPORTED := {
 	"background-position-x": true, "background-position-y": true,
 	"background-repeat": true, "background-size": true,
 	"-unity-background-scale-mode": true, "-unity-slice-type": true,
+	# Unity 6.3: filter functions, custom materials, best-fit text
+	"filter": true, "-unity-material": true, "-unity-text-auto-size": true,
 	# other
 	"cursor": true, "all": true,
 }

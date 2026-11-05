@@ -32,6 +32,30 @@ extends RefCounted
 var project_root: String = "res://"
 var _root_abs: String = ""
 
+## resource("name") lookup (Unity Resources.Load): the file extensions tried
+## per asset kind, in order. Unity looks up a Resources path without an
+## extension; the Godot file is the first file with one of these
+## extensions. Godot resource files (.tres, .res) come after the source
+## formats, so a Unity project keeps its own files.
+const RESOURCE_EXTENSIONS := {
+	"texture": ["png", "jpg", "jpeg", "tga", "psd", "gif", "bmp", "tif", "tiff",
+		"exr", "hdr", "webp", "svg", "ktx", "dds", "tres", "res"],
+	"font": ["ttf", "otf", "ttc", "otc", "woff2", "woff", "pfb", "pfm", "fnt", "font",
+		"tres", "res", "fontsettings"],
+	"material": ["tres", "res", "material", "gdshader", "mat"],
+	"filter": ["tres", "res", "gdshader", "asset"],
+	"stylesheet": ["uss", "tss"],
+	"uxml": ["uxml"],
+}
+## Kind "" (any): the union of the lists above, textures first.
+static var _any_extensions: Array = []
+## Every `Resources` folder of the project (canonical paths), found once per
+## resolver on the first resource() lookup.
+var _resource_dirs: Array = []
+var _resource_dirs_scanned := false
+## "kind|name" -> resolve() result Dictionary (hits and misses).
+var _resource_cache: Dictionary = {}
+
 
 func _init(root: String = "res://") -> void:
 	project_root = _normalize_root(root)
@@ -42,8 +66,15 @@ func _init(root: String = "res://") -> void:
 
 ## Resolve a reference to a canonical path. Returns
 ## {ok: bool, path: String, diagnostic: Dictionary}.
-func resolve(reference: String, from: String = "") -> Dictionary:
+## `resource("name")` is a Unity Resources lookup (see resolve_resource);
+## `kind` selects its extension list ("" tries every kind).
+func resolve(reference: String, from: String = "", kind: String = "") -> Dictionary:
 	var ref := reference.strip_edges().replace("\\", "/")
+	if ref.begins_with("resource("):
+		var name := resource_name(ref)
+		if name.is_empty():
+			return _fail("malformed-reference", reference, "resource() needs a quoted Resources path")
+		return resolve_resource(name, kind)
 	# Unity asset references carry a query and a sub-asset fragment
 	# (UI Builder: `x.uss?fileID=7433441132597879392&guid=...&type=3#x`).
 	# The file is the part before them.
@@ -106,6 +137,109 @@ func resolve_text(reference: String, from: String = "") -> Dictionary:
 			"project file does not exist: %s" % r["path"]
 		)
 	return {"ok": true, "path": r["path"], "text": f.get_as_text(), "diagnostic": {}}
+
+
+## The Resources path inside `resource("name")`, `resource('name')` or
+## `resource(name)`; "" when the text is not a well-formed resource().
+static func resource_name(text: String) -> String:
+	var t := text.strip_edges()
+	if not t.begins_with("resource(") or not t.ends_with(")"):
+		return ""
+	var inner := t.substr(9, t.length() - 10).strip_edges()
+	if inner.length() >= 2:
+		var q := inner.unicode_at(0)
+		if (q == 34 or q == 39) and inner.unicode_at(inner.length() - 1) == q:
+			inner = inner.substr(1, inner.length() - 2).strip_edges()
+	return inner.replace("\\", "/")
+
+
+## Unity `Resources.Load(name)`: `name` is a path relative to any folder
+## named `Resources` (under Assets/, at any depth, or inside a package),
+## without a file extension. The first Resources folder (Assets/ before
+## Packages/, then path order) that holds `name` with one of the extensions
+## of `kind` (RESOURCE_EXTENSIONS, in order) wins. When no Resources folder
+## has the file and `name` has an extension, `name` is also tried as a
+## project path, as Unity's stylesheet importer does with
+## AssetDatabase.LoadMainAssetAtPath. Results (and misses) are cached per
+## resolver.
+func resolve_resource(name: String, kind: String = "") -> Dictionary:
+	var key := kind + "|" + name
+	var hit = _resource_cache.get(key)
+	if hit != null:
+		return hit
+	var out := _resolve_resource_uncached(name, kind)
+	_resource_cache[key] = out
+	return out
+
+
+func _resolve_resource_uncached(name: String, kind: String) -> Dictionary:
+	var rel := collapse_path(name)
+	while rel.begins_with("/"):
+		rel = rel.substr(1)
+	if rel.is_empty():
+		return _fail("malformed-reference", 'resource("%s")' % name, "empty Resources path")
+	if rel.split("/").has(".."):
+		return _fail("path-outside-root", 'resource("%s")' % name,
+			"Resources path climbs above its Resources folder: %s" % name)
+	var exts: Array = _extensions(kind)
+	for dir in _resources_dirs():
+		for ext in exts:
+			var cand: String = dir + "/" + rel + "." + ext
+			if FileAccess.file_exists(cand) or ResourceLoader.exists(cand):
+				return {"ok": true, "path": cand, "diagnostic": {}}
+		# An explicit extension (not Resources.Load syntax, but accepted by
+		# Unity's importer through the asset database).
+		if not rel.get_extension().is_empty():
+			var exact: String = dir + "/" + rel
+			if FileAccess.file_exists(exact) or ResourceLoader.exists(exact):
+				return {"ok": true, "path": exact, "diagnostic": {}}
+	if not rel.get_extension().is_empty():
+		var r := resolve(rel)
+		if r["ok"] and (FileAccess.file_exists(r["path"]) or ResourceLoader.exists(r["path"])):
+			return r
+	return _fail("missing-file", 'resource("%s")' % name,
+		'no Resources folder holds "%s" (tried %s)' % [name, ", ".join(PackedStringArray(exts))])
+
+
+static func _extensions(kind: String) -> Array:
+	if RESOURCE_EXTENSIONS.has(kind):
+		return RESOURCE_EXTENSIONS[kind]
+	if _any_extensions.is_empty():
+		for k in ["texture", "font", "material", "filter", "stylesheet", "uxml"]:
+			for e in RESOURCE_EXTENSIONS[k]:
+				if not _any_extensions.has(e):
+					_any_extensions.append(e)
+	return _any_extensions
+
+
+## Every folder named `Resources` under <root>/Assets and <root>/Packages
+## (found once; hidden folders and Godot's .godot cache are skipped).
+func _resources_dirs() -> Array:
+	if _resource_dirs_scanned:
+		return _resource_dirs
+	_resource_dirs_scanned = true
+	for top in ["Assets", "Packages"]:
+		var found: Array = []
+		_scan_resources(project_root + "/" + top if not project_root.ends_with("/") else project_root + top, found, 0)
+		found.sort()
+		_resource_dirs.append_array(found)
+	return _resource_dirs
+
+
+static func _scan_resources(dir: String, found: Array, depth: int) -> void:
+	if depth > 32:
+		return
+	var da := DirAccess.open(dir)
+	if da == null:
+		return
+	da.include_hidden = false
+	for sub in da.get_directories():
+		if sub.begins_with("."):
+			continue
+		var p := dir + "/" + sub
+		if sub == "Resources":
+			found.append(p)
+		_scan_resources(p, found, depth + 1)
 
 
 func _fail(kind: String, reference: String, message: String) -> Dictionary:

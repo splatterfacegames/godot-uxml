@@ -26,6 +26,7 @@ func _initialize() -> void:
 		["res://tests/test_transitions.gd", "transitions"],
 		["res://tests/test_binding.gd", "binding"],
 		["res://tests/test_visual.gd", "visual"],
+		["res://tests/test_visual63.gd", "visual63"],
 	]:
 		var cls = load(entry[0])
 		if cls == null:
@@ -469,10 +470,10 @@ func test_shorthand_loses_to_later_longhand() -> void:
 
 
 func test_unsupported_property_warns_but_keeps() -> void:
-	var doc := _doc(ONE, '.x { -unity-material: url("m.mat"); color: red; }')
+	var doc := _doc(ONE, '.x { box-shadow: 1px 1px red; color: red; }')
 	var res := _resolved(doc)
-	eq(_count_kind(res["warnings"], "unsupported-property"), 1, "-unity-material warns")
-	eq(_val(doc, 'a', '-unity-material'), 'url("m.mat")', "value still computed")
+	eq(_count_kind(res["warnings"], "unsupported-property"), 1, "box-shadow (not USS) warns")
+	eq(_val(doc, 'a', 'box-shadow'), '1px 1px red', "value still computed")
 	eq(_val(doc, 'a', 'color'), 'red', "supported property unaffected")
 
 
@@ -925,13 +926,17 @@ func test_escaped_quotes_in_values() -> void:
 # Review regression: documented support is honest
 # ---------------------------------------------------------------------------
 
-func test_out_of_scope_properties_warn() -> void:
-	# filter, -unity-material and -unity-text-auto-size are later Unity
-	# versions' properties, not yet implemented.
-	var doc := _doc(ONE, '.x { -unity-material: none; filter: blur(2px); -unity-text-auto-size: best-fit; color: red; }')
+func test_unity_63_properties_supported() -> void:
+	# filter, -unity-material and -unity-text-auto-size (Unity 6.3) are in
+	# the supported envelope; the last two inherit, as in Unity.
+	var doc := _doc(ONE, '.x { -unity-material: none; filter: blur(2px); -unity-text-auto-size: best-fit 5px 20px; color: red; }')
 	var res := _resolved(doc)
-	eq(_count_kind(res["warnings"], "unsupported-property"), 3, "out-of-scope properties each warn")
+	eq(_count_kind(res["warnings"], "unsupported-property"), 0, "Unity 6.3 visual properties do not warn")
+	eq(_val(doc, 'a', 'filter'), 'blur(2px)', "filter computed")
 	eq(_val(doc, 'a', 'color'), 'red', "supported property unaffected")
+	check(UssProperties.is_inherited("-unity-material"), "-unity-material inherits")
+	check(UssProperties.is_inherited("-unity-text-auto-size"), "-unity-text-auto-size inherits")
+	check(not UssProperties.is_inherited("filter"), "filter does not inherit")
 
 
 # The visual properties (opacity, cursor, text spacing, ...) are inside the

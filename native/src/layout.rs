@@ -289,6 +289,10 @@ pub struct LayoutIn {
     pub fields: Vec<bool>,
     /// TextureRect natives (Image elements: anchor offsets follow insets).
     pub texrects: Vec<Option<Gd<Control>>>,
+    /// The style applier while some Label/Button has an active
+    /// -unity-text-auto-size (UxmlStyleApplier.auto_sizes > 0): its
+    /// autosize_measure / autosize_place serve both layout paths.
+    pub auto_size: Option<Gd<Object>>,
 }
 
 /// Native placement state: the last layout and the insets last handed to
@@ -311,6 +315,18 @@ impl Placement {
         let Some(out) = &self.last else { return };
         let Some(mut c) = io.controls[i].clone() else { return };
         let Some(r) = out.rects[i] else { return };
+        if let Some(a) = &io.auto_size {
+            if c.has_meta("uxml_autosize") {
+                // UxmlDocument._place_control: fit the font to the content
+                // box before the size lands.
+                let cs = match out.insets[i] {
+                    Some((start, end)) => r.size - start - end,
+                    None => r.size,
+                };
+                let mut a = a.clone();
+                a.call("autosize_place", &[c.to_variant(), cs.to_variant()]);
+            }
+        }
         c.set_position(r.position);
         c.set_size(r.size);
         let Some((start, end)) = out.insets[i] else { return };
@@ -403,6 +419,9 @@ pub struct Pass<'a> {
     /// Per-pass memo: the control carries `uxml_clip_text` (metas do not
     /// change during a pass).
     cliptext_m: Vec<Option<bool>>,
+    /// Best-fit text (-unity-text-auto-size): measured through
+    /// UxmlStyleApplier.autosize_measure, which reads the width hint.
+    hinted: Vec<bool>,
     // volatile (wrapping label) emulation
     volatile: Vec<bool>,
     vw: Vec<f64>,
@@ -425,9 +444,14 @@ impl<'a> Pass<'a> {
         let mut kinds = vec![CtlKind::None; n];
         let mut volatile = vec![false; n];
         let mut vw = vec![0.0; n];
+        let mut hinted = vec![false; n];
         for i in 0..n {
             if let Some(ctl) = &io.controls[i] {
                 kinds[i] = if io.boxed[i] { CtlKind::Boxed } else { CtlKind::Plain };
+                if io.auto_size.is_some() && ctl.has_meta("uxml_autosize") {
+                    hinted[i] = true;
+                    continue;
+                }
                 let wraps = match (&io.labels[i], &io.rich[i]) {
                     (Some(lbl), _) => lbl.get_autowrap_mode() != godot::classes::text_server::AutowrapMode::OFF,
                     (None, Some(r)) => r.get_autowrap_mode() != godot::classes::text_server::AutowrapMode::OFF,
@@ -459,6 +483,7 @@ impl<'a> Pass<'a> {
             meas_m: (0..n).map(|_| vec![]).collect(),
             margins_m: vec![None; n],
             cliptext_m: vec![None; n],
+            hinted,
             volatile,
             vw,
             vset: (0..n).map(|_| HashMap::new()).collect(),
@@ -832,6 +857,22 @@ impl<'a> Pass<'a> {
         self.enum_(i, E_DIR, &DIRECTIONS, "column").ends_with("-reverse")
     }
 
+    /// UxmlFlexLayout._stretch_hint: the border-box width hint of a
+    /// best-fit text item in a column whose cross axis stretches it.
+    fn stretch_hint(&mut self, ch: usize, row: bool, align_items: &str, ac: f64, m: &Edges) -> f64 {
+        if row || !self.hinted[ch] || ac < 0.0 {
+            return -1.0;
+        }
+        let mut al: &str = self.str_(ch, E_ALIGN_SELF, "auto");
+        if al == "auto" {
+            al = align_items;
+        }
+        if al != "stretch" || self.dim(ch, P_W, ac) >= 0.0 {
+            return -1.0;
+        }
+        gmax(0.0, ac - m[L] - m[R])
+    }
+
     fn sens(&mut self, i: usize) -> i32 {
         if self.sens_m[i] >= 0 {
             return self.sens_m[i];
@@ -879,11 +920,18 @@ impl<'a> Pass<'a> {
             cm.set_size(s);
         }
         let clipped = match self.kinds[i] {
+            _ if self.hinted[i] => false,
             CtlKind::Boxed => false,
             _ if !self.io.text_clip => false,
             _ => *self.cliptext_m[i].get_or_insert_with(|| c.has_meta(&self.sn_cliptext)),
         };
         let mut ms = match self.kinds[i] {
+            _ if self.hinted[i] => {
+                // UxmlStyleApplier.autosize_measure (the GDScript measurer
+                // calls the same function).
+                let mut a = self.io.auto_size.clone().unwrap();
+                a.call("autosize_measure", &[c.to_variant(), content_w.to_variant()]).try_to::<Vector2>().unwrap_or(Vector2::ZERO)
+            }
             CtlKind::Boxed => c.clone().upcast::<Object>().get(&self.sn_natural).try_to::<Vector2>().unwrap_or(Vector2::ZERO),
             _ if clipped => {
                 // overflow: hidden / elided text measures as its full text
@@ -1148,7 +1196,8 @@ impl<'a> Pass<'a> {
         for k in 0..n {
             let ch = kids[k];
             let m = self.margins(ch, asx);
-            let nat = self.measure(ch, area.size, -1.0);
+            let sh = self.stretch_hint(ch, row, align_items, ac, &m);
+            let nat = self.measure(ch, area.size, sh);
             let basis = self.lenr(ch, P_BASIS, am);
             let hyp = if !basis.is_nan() {
                 basis

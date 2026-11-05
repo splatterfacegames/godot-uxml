@@ -51,7 +51,17 @@ func _update_rect() -> void:
 func _on_child(ch: Node) -> void:
 	var ci := ch as CanvasItem
 	if ci != null and not ci.top_level:
-		RenderingServer.canvas_item_set_parent(ci.get_canvas_item(), item)
+		RenderingServer.canvas_item_set_parent(_item_of(ci), item)
+
+
+## The canvas item that hangs from the host for child `ci`: the canvas group
+## item of a filtered child (UxmlFilter), else the child's own item.
+static func _item_of(ci: CanvasItem) -> RID:
+	if ci.has_meta(&"uxml_filter"):
+		var f = ci.get_meta(&"uxml_filter")
+		if f != null and f.group_item().is_valid():
+			return f.group_item()
+	return ci.get_canvas_item()
 
 
 ## Puts the children back under the host's own canvas item and frees the
@@ -67,7 +77,7 @@ func detach() -> void:
 		for ch in host.get_children():
 			var ci := ch as CanvasItem
 			if ci != null and not ci.top_level and ci.is_inside_tree():
-				RenderingServer.canvas_item_set_parent(ci.get_canvas_item(), host.get_canvas_item())
+				RenderingServer.canvas_item_set_parent(_item_of(ci), host.get_canvas_item())
 	RenderingServer.free_rid(item)
 	item = RID()
 

@@ -154,6 +154,8 @@ const PAINT_ONLY := {
 	"-unity-slice-type": true, "-unity-slice-scale": true,
 	"cursor": true,
 	"-unity-text-generator": true, "-unity-editor-text-rendering-mode": true,
+	# Canvas group / material only (UxmlFilter, CanvasItem.material).
+	"filter": true, "-unity-material": true,
 }
 
 
@@ -534,6 +536,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	if _transitions == null:
 		_transitions = UssTransitions.new(_cascade)
 		_transitions.size_of = _percent_base
+		_transitions.filter_defaults = _filter_defaults
 	elif not changed.is_empty():
 		# Start / retarget / cancel transitions; their overrides are the
 		# animated computed values (extra cascade passes, merged here).
@@ -558,6 +561,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		_applier = UxmlStyleApplier.new(
 			_resolver, _doc.path, _doc.source, _rt_warnings
 		)
+		_applier.element_paths = _doc.element_paths
 	var need_layout := _force_layout or _full_apply or _unsettled
 	var applied: Array = []
 	var fresh := 0  # applied[0..fresh) changed this pass; the rest are re-applies
@@ -714,6 +718,14 @@ func _percent_base(index: int, property: String, sub: int) -> float:
 	return NAN
 
 
+## Interpolation defaults of a custom filter function (UssTransitions pads a
+## shorter filter list with them).
+func _filter_defaults(index: int, ref: String, entry) -> Array:
+	if _applier == null or index < 0 or _cascade == null:
+		return []
+	return _applier.filter_interpolation_defaults(ref, entry if entry is Dictionary else {}, _cascade.els[index])
+
+
 ## True when two computed styles differ only in PAINT_ONLY properties.
 static func _paint_only(old, new: Dictionary) -> bool:
 	if old == null:
@@ -740,12 +752,18 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 	var c: Control = _controls.get(el)
 	if c == null:
 		return Vector2.ZERO
-	if (c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF and content_w >= 0.0:
+	if ((c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
+			and content_w >= 0.0 and not c.has_meta(&"uxml_autosize")):
 		# Label reports its wrapped height from its current width — hand it
 		# the width the line assigned so the measurement is honest.
 		c.size.x = content_w
 	var ms: Vector2
-	if c is UxmlBox:
+	if _applier != null and _applier.auto_sizes > 0 and c.has_meta(&"uxml_autosize"):
+		# -unity-text-auto-size: the size at the font size that fits the
+		# width hint (UxmlStyleApplier.autosize_measure, shared with the
+		# native measurer).
+		ms = UxmlStyleApplier.autosize_measure(c, content_w)
+	elif c is UxmlBox:
 		# Our own wrappers keep the intrinsic measure in natural_size —
 		# custom_minimum_size would also clamp the laid-out Control size,
 		# which is not Yoga semantics.
@@ -786,8 +804,21 @@ func _volatile_measures() -> Dictionary:
 	var out := {}
 	for el in _controls:
 		var c: Control = _controls[el]
-		if (c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF:
+		if ((c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
+				and not c.has_meta(&"uxml_autosize")):
 			out[el] = c.size.x
+	return out
+
+
+## Best-fit text elements: their measure reads the width hint although they
+## are not volatile (UxmlFlexLayout options["hinted"]).
+func _autosize_elements() -> Dictionary:
+	var out := {}
+	if _applier == null or _applier.auto_sizes == 0:
+		return out
+	for el in _controls:
+		if (_controls[el] as Control).has_meta(&"uxml_autosize"):
+			out[el] = true
 	return out
 
 
@@ -812,6 +843,7 @@ func _scroll_bar_width() -> float:
 func _compute_layout(host: Vector2) -> Dictionary:
 	if _cascade != null and _cascade._native != null and use_native_layout:
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
+		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var r: Array = _cascade._native.call(
 			"layout", host, _scroll_bar_width(), _layout_warned, _rt_warnings)
 		return {"rects": r[0], "content_sizes": r[1], "insets": r[2]}
@@ -823,6 +855,7 @@ func _compute_layout(host: Vector2) -> Dictionary:
 		 "warned": _layout_warned,
 		 "volatile": _volatile_measures(),
 		 "volatile_width": _volatile_width,
+		 "hinted": _autosize_elements(),
 		 "records": _layout_records,
 		 "xcache": _layout_xcache,
 		 # _measure_leaf only reads its width hint for wrapping Labels
@@ -841,6 +874,7 @@ func _do_layout() -> void:
 	if _native_layout():
 		# Native layout + placement; results stay native.
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
+		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var force := PackedInt32Array()
 		var cidx: Dictionary = _cascade.index
 		for el in _placed_force:
@@ -892,6 +926,12 @@ func _place_control(el: UxmlElement) -> void:
 	var r = _rects.get(el)
 	if r == null:
 		return  # display:none — already hidden by the applier
+	if _applier != null and _applier.auto_sizes > 0 and c.has_meta(&"uxml_autosize"):
+		# Fit the font to the laid-out content box before the size lands,
+		# so the old font's minimum size cannot hold the box open.
+		var ip = _insets.get(el)
+		var cs: Vector2 = r.size if ip == null else r.size - ip[0] - ip[1]
+		UxmlStyleApplier.autosize_place(c, cs)
 	c.position = r.position
 	c.size = r.size
 	# Internal chrome the flex pass does not position lives inside the

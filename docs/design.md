@@ -266,8 +266,9 @@ Unity UXML declares a binding as a UxmlObject child of the bound element:
 - Inheritance: `color`, `font-size`, `letter-spacing`, `word-spacing`,
   `visibility`, `white-space`, `-unity-font*`, `-unity-paragraph-spacing`,
   `-unity-text-align`, `-unity-text-outline-*`, `text-shadow`,
-  `-unity-text-generator`, `-unity-editor-text-rendering-mode`, and all
-  `--*` custom properties.
+  `-unity-text-generator`, `-unity-editor-text-rendering-mode`,
+  `-unity-material`, `-unity-text-auto-size`, and all `--*` custom
+  properties.
 - The `initial` keyword: a declaration whose winning value is `initial`
   removes the property from the computed style. The runtime reads a
   missing property as the initial value, and children do not inherit a
@@ -289,10 +290,9 @@ Unity UXML declares a binding as a UxmlObject child of the bound element:
   layout plus the appearance properties the applier paints (see the table
   comment). The runtime implements a subset of it; values that cascade
   but are not painted warn `unsupported-value` at apply/layout time.
-  Properties outside the envelope (properties of later Unity versions
-  such as `filter`) warn
-  `unsupported-property` once per element/property; the value still
-  cascades so the data is not lost.
+  Properties outside the envelope (CSS properties that USS does not have,
+  such as `box-shadow`) warn `unsupported-property` once per
+  element/property; the value still cascades so the data is not lost.
 
 ## Resource resolution
 
@@ -316,6 +316,35 @@ case-insensitively only on Windows/macOS. Missing files report
 `missing-file`; unusable references report `malformed-reference`.
 Stylesheets dedupe by resolved path (diamond imports load once); a true
 `@import` cycle warns `import-cycle`.
+
+### `resource()` lookup
+
+`resource("name")` is Unity's `Resources.Load(name)`. `resolve()` sends a
+`resource(...)` reference to `resolve_resource(name, kind)`:
+
+- The search covers every folder named `Resources` under `<root>/Assets`
+  (at any depth) and under `<root>/Packages`. The resolver finds the
+  folders once, on the first `resource()` lookup. Folders under `Assets`
+  come first, then folders under `Packages`, each group in path order.
+- `name` has no file extension, as in Unity. The resolver tries the
+  extensions of the asset kind in this order:
+
+  | kind | extensions |
+  | --- | --- |
+  | `texture` (background-image, cursor, image prop) | png, jpg, jpeg, tga, psd, gif, bmp, tif, tiff, exr, hdr, webp, svg, ktx, dds, tres, res |
+  | `font` (-unity-font, -unity-font-definition) | ttf, otf, ttc, otc, woff2, woff, pfb, pfm, fnt, font, tres, res, fontsettings |
+  | `material` (-unity-material) | tres, res, material, gdshader, mat |
+  | `filter` (filter()) | tres, res, gdshader, asset |
+  | `` (UXML attributes and other callers) | every list above, textures first |
+
+- A name with an extension (`resource("Icons/play.png")`) also matches
+  that exact file in a Resources folder. When no Resources folder holds
+  the name, a name with an extension is also tried as a project path, as
+  Unity's stylesheet importer does with `AssetDatabase.LoadMainAssetAtPath`.
+- A `..` segment that leaves the Resources folder fails with
+  `path-outside-root`. A miss fails with `missing-file` and names the
+  extensions tried.
+- The resolver caches each result (hits and misses) per kind and name.
 
 ## Diagnostics
 
@@ -687,9 +716,12 @@ background placement and cursor mapping.
 
 `background-image: url(...)` resolves relative to the stylesheet that
 supplied the *winning* declaration (tracked per-property through
-`origin`), not the UXML — an inline `style` attribute resolves relative
-to the document, and an *inherited* value walks its origin chain back to
-the sheet that declared it. Element `src`/`image` attributes resolve
+`origin`), not the UXML. An inline `style` attribute resolves relative to
+the file that holds the attribute: the template file for an element
+cloned from a template (`UxmlDocumentModel.element_paths`), else the
+document. An *inherited* value walks its origin chain back to the
+declaring element (the `from` element of each inherited origin) and its
+sheet or file. Element `src`/`image` attributes resolve
 relative to the source UXML. All paths go through
 `UxmlResourceResolver`, so project-root containment and every accepted
 path form apply identically; missing or undecodable resources produce
@@ -881,9 +913,6 @@ rows that scrolled out; slots past the item count are `display: none`.
 
 ## Unsupported / out of scope (diagnosed, not silent)
 
-- Inline `style` `url()` references inside template clones resolve
-  against the entry UXML file, not against the template file. Use a
-  stylesheet or a project-rooted path (`Assets/...`) for such references.
 - Unsupported at-rules (`@media`, `@supports`, other unknown at-rules) —
   `unsupported-feature`, contents never apply.
 - Animations (`@keyframes`) — `unsupported-feature`. CSS
@@ -900,8 +929,7 @@ rows that scrolled out; slots past the item count are `display: none`.
   controls that are not mapped yet) — `unsupported-attribute`.
 - Binding types defined in C# (CustomBinding subclasses such as
   `LocalizedString`) — `unsupported-feature`, the binding is ignored.
-- Unity `resource("name")` lookup semantics and `Packages/com.x` package
-  *contents* beyond direct file mapping; Unity asset GUID resolution.
+- Unity asset GUID resolution.
 - Unity theme sheet / control parts (`unity-content-viewport` etc.) —
   replaced by native Godot controls.
 - Full Unity UI Toolkit API compatibility.
@@ -1026,10 +1054,29 @@ The table on the USS property reference page gives the categories.
 | number | `border-*-width`, `flex-grow`, `flex-shrink`, `opacity`, `-unity-slice-scale`, `-unity-text-outline-width` | value |
 | integer | `-unity-slice-left/right/top/bottom` | value, rounded |
 | structured | `translate`, `rotate` (degrees), `scale`, `transform-origin`, `background-size`, `text-shadow` | per component |
+| filter | `filter` | per function and parameter (see below) |
+| material | `-unity-material` | per `prop()` value (see below) |
 | discrete | `align-*`, `flex-direction`, `flex-wrap`, `justify-content`, `position`, `overflow`, `text-overflow`, `visibility`, `white-space`, `-unity-text-align`, `-unity-font-style`, `-unity-font`, `-unity-font-definition`, `background-image`, `background-position-x/y`, `background-repeat`, `-unity-overflow-clip-box`, `-unity-text-overflow-position`, `-unity-slice-type` | start value below an eased progress of 0.5, end value from 0.5 |
 
-Other properties (`display`, `cursor`, the `transition-*` properties,
-custom properties) do not animate. A change to such a property applies
+`filter` follows `ValuesListFilterFunction`: the functions that both
+lists have must match in type (and, for `filter()`, in definition), else
+the change applies immediately. A shorter list pads with the other
+list's functions at their interpolation defaults (`tint` white, `opacity`
+1, every other built-in function 0, a custom function its definition's
+`interpolation_defaults`). Each parameter interpolates with `Mathf.Lerp`
+or `Color.Lerp`, which clamp the eased progress to 0..1. The animated
+value is written as `blur(5) invert(0.5)`: numbers in Unity's internal
+units (radians, fractions).
+
+`-unity-material` follows `ValuesMaterialDefinition`: a change to or from
+`none`, or between equal materials whose `prop()` lists match in name and
+type, interpolates; a change between two materials applies immediately.
+Values interpolate with `Vector4.Lerp` (clamped); a missing value pads
+with zero; a texture switches at an eased progress of 0.5. Above an eased
+progress of 0.999 the value is the end value itself.
+
+Other properties (`display`, `cursor`, `-unity-text-auto-size`, the
+`transition-*` properties, custom properties) do not animate. A change to such a property applies
 immediately.
 
 A length or a structured value interpolates only between `px` and `%`
@@ -1214,7 +1261,7 @@ Tests and tools use these calls for deterministic time.
 
 ## Visual properties
 
-The properties in this section change only how an element draws. The
+Most properties in this section change only how an element draws. The
 document lists each property in `PAINT_ONLY`, so a restyle that changes
 only these properties applies the controls again but does not run the
 layout. Exceptions: `letter-spacing`, `word-spacing`,
@@ -1225,11 +1272,13 @@ the property, or when an earlier restyle wrote to the control. A
 document without these properties gets the same controls as before.
 
 Both layout paths (`UxmlDocument._place_control` in GDScript and
-`Placement::place` in `native/src/layout.rs`) are unchanged: transforms
-use the Godot 4.7 offset transform, which Godot applies after placement.
-The measurer is the only shared code that changed (elided and clipped
-text, rich text Labels), and the GDScript measurer and the Rust measurer
-contain the same steps.
+`Placement::place` in `native/src/layout.rs`) place controls the same
+way: transforms use the Godot 4.7 offset transform, which Godot applies
+after placement. The measurer (elided and clipped text, rich text
+Labels, best-fit text) and the placement of best-fit text are the shared
+code that changed, and the GDScript path and the Rust path contain the
+same steps. Best-fit text calls the same GDScript functions from both
+paths.
 
 ### Opacity, overflow, clip box
 
@@ -1295,10 +1344,10 @@ contain the same steps.
 - `text-shadow: <x> <y> [<blur>] [<color>]` (the color first or last)
   sets `font_shadow_color` and `shadow_offset_x/y` on a Label or a rich
   text Label (field captions included). Without a color the shadow is
-  transparent, as in Unity. Godot draws a sharp shadow: a blur radius
-  warns `unsupported-value` and the shadow draws without blur. A Button
-  or text field has no Godot text shadow; the applier warns only when
-  the element declares the shadow itself, because the property inherits.
+  transparent, as in Unity. Godot draws a sharp shadow. For a blur
+  radius, see "Text shadow blur" below. A Button or text field has no
+  Godot text shadow; the applier warns only when the element declares the
+  shadow itself, because the property inherits.
 - `text-overflow: ellipsis` with `-unity-text-overflow-position: start |
   middle | end`: Unity elides only when `overflow` is hidden and the text
   does not wrap (`TextElement.isElided`). After every layout and every
@@ -1397,5 +1446,214 @@ contain the same steps.
   image of `UxmlStyleApplier.TEXTURE_CURSOR_SHAPE` (the help shape) with
   the texture and the texture hotspot, and the element uses that shape. On exit
   the runtime resets the help shape to the system image.
-- `resource()` lookup is not supported (as for every `resource()`
-  reference).
+- `cursor: resource("name") [x y]` finds the texture in the Resources
+  folders (see "`resource()` lookup").
+
+### Filter
+
+The reference is the Unity 6000.3 C# source (`FilterFunctionDefinitionUtils`,
+`StyleProperty.ConvertDimensionToFilterFloat`, `UIRRenderTreeCompositor`)
+and the shaders `Hidden/UIR/ColorEffect` and `Hidden/UIR/GaussianBlur`.
+The expected colors in `tests/test_visual63.gd` are pixels that Unity
+6000.3.24f1 rendered in batch mode (gamma color space).
+
+- Syntax: `none` or a list of functions: `blur`, `grayscale`,
+  `contrast`, `hue-rotate`, `invert`, `opacity`, `sepia`, `tint` and the
+  custom function `filter()`. Commas between arguments are accepted, as
+  in Unity. An unknown function or an empty argument list (`grayscale()`)
+  makes the value invalid: Unity's importer rejects the stylesheet with
+  `Missing function argument`. The runtime warns `unsupported-value` and
+  draws no filter. A built-in function with more than one argument uses
+  the first argument and warns.
+- Parameters (`ConvertDimensionToFilterFloat`): `%` is divided by 100,
+  `deg`, `grad` and `turn` convert to radians, `ms` divides by 1000, and
+  every other unit (`px`, `rad`, `s`, none) is the number as written. A
+  bare number in `hue-rotate()` is radians, as in Unity. A color
+  parameter reads as 0 where a number is necessary, and a number reads
+  as transparent black where a color is necessary.
+- Color functions (`ApplySettings`): each function is a 4x4 color
+  matrix, a color offset and an invert amount on premultiplied color.
+  `tint` (alpha-weighted color), `opacity` (all four channels),
+  `invert` (0 to 1), `grayscale` and `sepia` (Unity's matrices, 0 to 1),
+  `contrast` (scale `c` with offset `(1 - c) / 2`, `c` at least 0) and
+  `hue-rotate` (Unity's luminance matrix) use Unity's constants and
+  clamps. Each pass clamps the color to 0..1, as Unity's 8-bit render
+  targets do. The composite clamps each color channel to the alpha, as
+  Unity's composite (color / alpha, clamped to 1, times alpha) does:
+  transparent pixels stay transparent.
+- `blur(<length>)`: Unity's separable Gaussian, kernel radius
+  `ceil(3 sigma + 1)` pixels, weights `exp(-0.5 (x / sigma)^2)`. Sigma is
+  the length times the render-target pixels per USS pixel at the
+  element. The group grows by the kernel radius (Unity's read and write
+  margins).
+- Chains: Unity runs one pass per function, each on the output of the
+  previous pass. godot-uxml runs one shader pass: the color functions
+  before the first blur run on each blur sample, the blur follows, and
+  the other color functions run on the result. The result is the same as
+  Unity's except for 8-bit rounding between passes, and except that two
+  or more blurs combine into one blur with
+  `sigma = sqrt(sigma1^2 + sigma2^2 + ...)`. A list can hold up to 8
+  color functions.
+
+Drawing (`runtime/uxml_filter.gd`):
+
+- The element and its subtree draw into a Godot canvas group, and the
+  group draws through one material. The group is an extra
+  RenderingServer canvas item: the group takes the place of the
+  element's canvas item under the parent's canvas item (or the parent's
+  `UxmlClip` item), with the same draw index, and the element's canvas
+  item becomes the only child of the group. The element's own
+  background and border are therefore inside the group, as in Unity.
+  Godot sets the parent canvas item again when a node enters the tree,
+  so the filter attaches again on `tree_entered`.
+- The built-in shader (`UxmlFilter.FILTER_SHADER`) reads the back buffer
+  (premultiplied color) and writes premultiplied color
+  (`blend_premul_alpha`). The shader ignores the vertex color, so the
+  opacity of an ancestor applies once, not twice.
+- A blur with a kernel radius of 16 pixels or less (sigma up to 5
+  pixels) uses Unity's kernel exactly: each bilinear fetch reads two
+  neighbor pixels on each axis with the summed Gaussian weight (the
+  weights are separable), at most 17 x 17 fetches per pixel. A wider
+  blur samples every `kernel / 8` pixels from a back-buffer mipmap of
+  about that size (also 17 x 17 fetches). The mipmap pre-filter makes
+  such a blur slightly wider than Unity's blur.
+- `bench/render_filters.gd` (needs a display) renders Unity's probe cells
+  through `UxmlDocument` and compares the pixels with the Unity pixels.
+  Result on Vulkan Forward+: every color function and chain within 1/255,
+  the `blur(3px)` profile within 1/255.
+- Cost: only an element with a filter gets a canvas group. Documents
+  without `filter` do no filter work. Each canvas group clears and fills
+  the back buffer once per frame.
+- `filter` is in `PAINT_ONLY`: a filter change re-applies the control
+  and does not run the layout.
+- Limit: Godot does not nest canvas groups. When an element with a
+  filter is inside another element with a filter, the inner filter does
+  not draw and the applier warns `unsupported-value`. The inner filter
+  draws again when the outer filter goes away.
+- Limit: Unity scales the blur by the panel's pixels per point. The
+  runtime reads the element's transform to the render target when the
+  element is applied; a later scale change of an ancestor does not
+  update the blur until the next restyle of the element.
+
+### Custom filters
+
+`filter(<definition> <parameters>)` names a Unity
+`FilterFunctionDefinition` asset. `<definition>` is `url()`, `resource()`
+or a quoted path. The Godot counterpart is `UxmlFilterDefinition`
+(`runtime/uxml_filter_definition.gd`):
+
+| Unity `FilterFunctionDefinition` | `UxmlFilterDefinition` |
+| --- | --- |
+| `filterName` | `filter_name` |
+| `passes[0].material` | `material`: a `ShaderMaterial` with a `canvas_item` shader that reads the subtree as `uniform sampler2D t : hint_screen_texture` at `SCREEN_UV` (premultiplied, as Unity's `_MainTex`) and writes `COLOR` |
+| `passes[0].parameterBindings[i].name` | `parameter_names[i]`: the uniform that receives parameter `i` |
+| `parameters[i].interpolationDefaultValue` | `interpolation_defaults[i]` (float or Color) |
+| `passes[0].readMargins` / `writeMargins` | `margins` (left, top, right, bottom, in pixels; the group grows by the largest value) |
+
+- Look-up: the resolved file when Godot can load the file, else the same
+  path with `.tres`, `.res` or `.gdshader`. A Unity project keeps
+  `Filters/Swirl.asset`; the Godot project adds `Filters/Swirl.tres`
+  beside it.
+- A `ShaderMaterial` or a `Shader` is also accepted as the definition:
+  the shader's non-sampler uniforms take the parameters in declaration
+  order, and the margins are 0.
+- Each element gets its own copy of the material, so each element binds
+  its own parameters. As in Unity, a missing parameter takes the
+  interpolation default, a parameter of the wrong type takes the
+  interpolation default, and extra parameters are ignored (warned).
+- Limit: Godot draws a canvas group with one material, so a definition
+  has one pass. A Unity filter with several passes needs one Godot
+  shader that does the work of all passes.
+- Limit: a custom function draws alone. When a list holds a custom
+  function and other functions, only the first custom function draws,
+  and the applier warns.
+- `UIE_OUTPUT_LINEAR` and the force-gamma rules of Unity do not apply:
+  Godot 2D draws in the color space of the canvas.
+
+### Material
+
+`-unity-material: (url() | resource()) prop("<name>" <value>)* | none`
+(`StyleProperty.TryGetMaterialDefinition`).
+
+- The value inherits, as in Unity (`InheritedData`): the element and its
+  descendants draw their own background, border and text with the
+  material. The applier sets `CanvasItem.material` on the element's
+  control, on the inner native control, and `use_parent_material` on a
+  field caption.
+- Look-up: the resolved file when Godot can load the file, else the same
+  path with `.tres`, `.res`, `.material` or `.gdshader`. A Unity
+  `Materials/Glow.mat` maps to a Godot `Materials/Glow.tres` (a
+  `ShaderMaterial` with a `canvas_item` shader) beside it. A `.gdshader`
+  gets a new `ShaderMaterial`.
+- `prop()` values (Unity `MaterialPropertyValue`): one number is a float,
+  two to four numbers are a vector, a color is a color, and `url()` or
+  `resource()` is a texture. Each `prop()` goes to a copy of the material
+  for the element. The uniform is the name as written, else the name
+  without a leading `_`, else that name in lower case or snake case
+  (`_Strength` -> `strength`). Vectors and colors convert to the type of
+  the uniform (`vec2`, `vec3`, `vec4`, color).
+- Without `prop()`, every element with the same material shares one
+  material resource.
+- `-unity-material` is in `PAINT_ONLY`.
+- Deviation: Unity accepts only a material whose shader carries the tag
+  `isCustomUITKShader` (UI Shader Graph). Godot has no such tag; every
+  `canvas_item` material draws.
+
+### Text shadow blur
+
+- A Label with a `text-shadow` blur radius gets a `UxmlTextShadow`
+  (`runtime/uxml_text_shadow.gd`): a copy of the Label in the shadow
+  color, at the shadow offset, inside a canvas group with the filter
+  blur shader. The group is a child canvas item of the Label and draws
+  behind the Label, so the text stays on top. The copy follows the
+  Label's text, font, size, alignment, wrapping and size on every redraw
+  of the Label.
+- Sigma is half the blur radius, as CSS defines. Unity softens the edge
+  of the signed distance field of the glyphs, over a distance of about
+  the blur radius and at most the padding of the font atlas. The two
+  shadows have the same size and position, and the edges have a
+  different profile.
+- Cost: one extra Label and one canvas group per Label with a blurred
+  shadow. Labels without a blur keep Godot's own sharp font shadow.
+- Limit: a rich text Label draws the shadow sharp and warns. A blurred
+  shadow inside an element with a filter draws sharp and warns, because
+  Godot does not nest canvas groups.
+
+### Text auto size
+
+`-unity-text-auto-size: none | best-fit <min> <max>`
+(`StylePropertyReaderHelper.ReadTextAutoSize`). The value inherits, as in
+Unity. Unity measured these rules in batch mode (6000.3.24f1):
+
+- Best fit needs the advanced text generator
+  (`-unity-text-generator: advanced`). With the standard generator Unity
+  logs a warning and ignores the property. The runtime does the same and
+  warns `unsupported-value`.
+- The font size is the largest size in `[min, max]` at which the text
+  fits the content box. `font-size` is ignored. When no size fits, the
+  size is `min`.
+- Measurement: with no width constraint the text measures at `max` on
+  one line. With a width constraint (an authored width, the width that a
+  row gives a flex item, or the width of a stretched item in a column)
+  the size fits that width, and a wrapping text wraps at that width. An
+  authored px `height` constrains the height. The measured size is the
+  text size at the fitted size.
+- Placement: after each layout the size fits the laid-out content box
+  (width and height), before the control gets the laid-out size.
+- Both layout paths call the same functions:
+  `UxmlStyleApplier.autosize_measure()` (the measurer, from
+  `UxmlDocument._measure_leaf` and from `Pass::measure_leaf` in
+  `native/src/layout.rs`) and `UxmlStyleApplier.autosize_place()` (from
+  `UxmlDocument._place_control` and `Placement::place`). The results are
+  therefore identical. A best-fit text element is not a volatile measure;
+  `UxmlFlexLayout` gets the elements as `options["hinted"]` so the cross-pass
+  cache replays the width hint.
+- Applies to Label and Button text. A rich text Label warns.
+- Cost: `UxmlStyleApplier.auto_sizes` counts the active controls. While
+  the count is 0 the measurers skip the check.
+- Deviation: Godot font sizes are whole pixels; Unity's advanced
+  generator uses fractional sizes, so the fitted size can be up to 1px
+  smaller.
+- Deviation: a height that comes from the parent (a stretched row item,
+  a growing column item) does not constrain the measurement; the
+  placement still fits that height.
