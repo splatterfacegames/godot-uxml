@@ -9,7 +9,8 @@ extends RefCounted
 ##   Button       -> Button (its look comes from USS: every stylebox slot)
 ##   RepeatButton -> UxmlRepeatButton (Button that repeats while held)
 ##   Toggle, RadioButton (and a Foldout's toggle part) -> UxmlToggle
-##   GroupBox, HelpBox, PopupWindow, Foldout, ProgressBar,
+##   PopupWindow  -> Label (draws its title; the content part is a child)
+##   GroupBox, HelpBox, Foldout, ProgressBar,
 ##   RadioButtonGroup, ToggleButtonGroup, Box, TemplateContainer and every
 ##   container part -> UxmlBox
 ##   Image        -> UxmlBox host wrapping a full-rect TextureRect, so
@@ -121,7 +122,9 @@ func _create(el: UxmlElement) -> Control:
 			rb.text = _attr(el, "text")
 			rb.configure(_num_attr(el, "delay", 0.0), _num_attr(el, "interval", 0.0))
 			return rb
-		"TextElement":
+		"TextElement", "PopupWindow":
+			# PopupWindow is a TextElement: it draws its own title text in
+			# its content box; its content container part is a child.
 			var te := Label.new()
 			te.text = _attr(el, "text")
 			return te

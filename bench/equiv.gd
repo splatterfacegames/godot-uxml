@@ -9,6 +9,13 @@ extends SceneTree
 ##
 ##   Godot --headless --path <project> -s res://bench/equiv.gd
 ## Run bench/bench.gd once first so the synthetic document exists.
+##
+## Control part trees (UxmlParts) are plain elements, so part-expanded
+## documents (no theme) still compare against the reference resolver. The
+## default theme ranks below author rules (UssCascade.AUTHOR_LAYER), which
+## the pre-optimization reference does not know, so themed documents are
+## compared GDScript cascade vs native cascade instead — same option sets,
+## same incremental churn (added with unity/controls-foundation).
 
 var _fails := 0
 var _checks := 0
@@ -48,6 +55,14 @@ func _initialize() -> void:
 			continue
 		docs.append([pair[1], d])
 	docs.append(["inline-var", _inline_doc()])
+	# Part trees, no theme: still the reference resolver's semantics.
+	for pair in [
+		["res://tests/fixtures/controls", "Assets/UI/controls.uxml"],
+		["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml"],
+	]:
+		var pd := UxmlLoader.load_file(pair[1], pair[0])
+		UxmlParts.expand(pd)
+		docs.append([pair[1] + " (parts)", pd])
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 12345
@@ -58,6 +73,25 @@ func _initialize() -> void:
 		for opts in _option_sets(d, els, rng):
 			_compare(name, d, opts)
 		_incremental(name, d, els, rng, 60 if els.size() < 300 else 15)
+	# Themed + parts: GDScript cascade vs native cascade.
+	if ClassDB.class_exists("UxmlNativeCascade") and UssCascade.use_native:
+		for pair in [
+			["res://tests/fixtures/controls", "Assets/UI/controls.uxml"],
+			["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml"],
+			["res://tests/fixtures/options", "Assets/UI/Options.uxml"],
+			["user://godot_uxml_bench", "Assets/UI/hud.uxml"],
+		]:
+			var td := UxmlLoader.load_file(pair[1], pair[0])
+			if td.path.is_empty():
+				continue
+			UxmlTheme.attach(td, UxmlTheme.DEFAULT)
+			UxmlParts.expand(td)
+			var tels := td.root.walk()
+			for opts in _option_sets(td, tels, rng):
+				_compare_paths(pair[1] + " (themed)", td, opts)
+			_incremental_paths(pair[1] + " (themed)", td, tels, rng, 40)
+	else:
+		print("themed native/GDScript comparison skipped (GDScript path only)")
 	print("EQUIV %s: %d checks, %d failures" % ["OK" if _fails == 0 else "FAIL", _checks, _fails])
 	quit(0 if _fails == 0 else 1)
 
@@ -104,6 +138,45 @@ func _compare(name: String, d: UxmlDocumentModel, opts: Dictionary) -> void:
 	var a := RefStyleResolver.resolve(d, opts)
 	var b := UssStyleResolver.resolve(d, opts)
 	_same_result(name, a, b["styles"], b["warnings"])
+
+
+## The same resolve on the GDScript cascade and on the native cascade.
+func _compare_paths(name: String, d: UxmlDocumentModel, opts: Dictionary) -> void:
+	UssCascade.use_native = false
+	var a := UssStyleResolver.resolve(d, opts)
+	UssCascade.use_native = true
+	var b := UssStyleResolver.resolve(d, opts)
+	_same_result(name, a, b["styles"], b["warnings"])
+
+
+## Incremental churn on a native cascade, each step against a fresh
+## GDScript resolve.
+func _incremental_paths(name: String, d: UxmlDocumentModel, els: Array, rng: RandomNumberGenerator, steps: int) -> void:
+	var cas := UssCascade.new(d)
+	var es := {}
+	var opts := {"element_states": es, "disabled_elements": {}, "enabled_elements": {}}
+	cas.update(opts)
+	for _s in steps:
+		var el: UxmlElement = els[rng.randi() % els.size()]
+		match rng.randi() % 3:
+			0, 1:
+				var st: String = ["hover", "focus", "active", "checked", "selected"][rng.randi() % 5]
+				var cur: Array = es.get(el, []).duplicate()
+				if cur.has(st):
+					cur.erase(st)
+				else:
+					cur.append(st)
+				if cur.is_empty():
+					es.erase(el)
+				else:
+					es[el] = cur
+			2:
+				_set_attr(el, "class", ["unity-disabled", "hot", "", "unity-button-group__button"][rng.randi() % 4])
+		cas.update(opts)
+		UssCascade.use_native = false
+		var ref := UssStyleResolver.resolve(d, opts)
+		UssCascade.use_native = true
+		_same_result("%s incremental" % name, ref, cas.styles, cas.collect_warnings())
 
 
 func _same_result(name: String, ref: Dictionary, styles: Dictionary, warnings: Array) -> void:

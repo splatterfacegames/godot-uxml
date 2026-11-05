@@ -46,6 +46,8 @@ static func _create(el: UxmlElement) -> Behavior:
 			return HelpBoxBehavior.new()
 		"GroupBox":
 			return TextPartBehavior.new()
+		"PopupWindow":
+			return OwnTextBehavior.new()
 	return null
 
 
@@ -347,3 +349,12 @@ class HelpBoxBehavior extends Behavior:
 class TextPartBehavior extends Behavior:
 	func on_model_changed() -> void:
 		sync_text("label", "text")
+
+
+## Controls that draw their own `text` (PopupWindow).
+class OwnTextBehavior extends Behavior:
+	func on_model_changed() -> void:
+		var l := doc._controls.get(el) as Label
+		if l != null and l.text != attr("text"):
+			l.text = attr("text")
+			doc.relayout()

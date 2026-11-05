@@ -5,11 +5,11 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T14:51:29.4154762Z"
+  "dumpedAtUtc": "2026-11-05T15:00:06.3215514Z"
  },
  "panel": {
   "width": 400,
-  "height": 300
+  "height": 600
  },
  "actions": [],
  "focused": null,
@@ -1345,19 +1345,19 @@
     "x": 0,
     "y": 78,
     "width": 400,
-    "height": 40
+    "height": 62
    },
    "layout": {
     "x": 0,
     "y": 78,
     "width": 400,
-    "height": 40
+    "height": 62
    },
    "contentRect": {
     "x": 0,
     "y": 0,
     "width": 400,
-    "height": 40
+    "height": 62
    },
    "pseudoStates": [
     "checked"
@@ -1407,7 +1407,7 @@
     "flex-shrink": 1,
     "flex-wrap": "no-wrap",
     "font-size": 14,
-    "height": 40,
+    "height": 62,
     "justify-content": "flex-start",
     "left": 0,
     "letter-spacing": 0,
@@ -1430,7 +1430,7 @@
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
     "top": 78,
-    "transform-origin": "(200.00, 20.00, 0.00)",
+    "transform-origin": "(200.00, 31.00, 0.00)",
     "transition-delay": [
      "0s"
     ],
@@ -2087,19 +2087,19 @@
     "x": 30,
     "y": 109,
     "width": 370,
-    "height": 9
+    "height": 31
    },
    "layout": {
     "x": 30,
     "y": 31,
     "width": 370,
-    "height": 9
+    "height": 31
    },
    "contentRect": {
     "x": 0,
     "y": 0,
     "width": 370,
-    "height": 9
+    "height": 31
    },
    "pseudoStates": [],
    "focusable": false,
@@ -2144,7 +2144,7 @@
     "flex-shrink": 1,
     "flex-wrap": "no-wrap",
     "font-size": 14,
-    "height": 9,
+    "height": 31,
     "justify-content": "flex-start",
     "left": 30,
     "letter-spacing": 0,
@@ -2167,7 +2167,7 @@
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
     "top": 31,
-    "transform-origin": "(185.00, 4.50, 0.00)",
+    "transform-origin": "(185.00, 15.50, 0.00)",
     "transition-delay": [
      "0s"
     ],
@@ -2231,19 +2231,19 @@
     "x": 32,
     "y": 113,
     "width": 364,
-    "height": 8
+    "height": 25
    },
    "layout": {
     "x": 2,
     "y": 4,
     "width": 364,
-    "height": 8
+    "height": 25
    },
    "contentRect": {
     "x": 1,
     "y": 4,
     "width": 361,
-    "height": 0
+    "height": 17
    },
    "pseudoStates": [],
    "focusable": false,
@@ -2289,13 +2289,13 @@
     "color": "rgba(27, 27, 27, 1)",
     "display": "flex",
     "filter": [],
-    "flex-basis": 8,
+    "flex-basis": 25,
     "flex-direction": "column",
     "flex-grow": 0,
     "flex-shrink": 0,
     "flex-wrap": "no-wrap",
     "font-size": 14,
-    "height": 8,
+    "height": 25,
     "justify-content": "flex-start",
     "left": 2,
     "letter-spacing": 0,
@@ -2318,7 +2318,7 @@
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
     "top": 4,
-    "transform-origin": "(182.00, 4.00, 0.00)",
+    "transform-origin": "(182.00, 12.50, 0.00)",
     "transition-delay": [
      "0s"
     ],
@@ -2374,13 +2374,13 @@
    "hierarchyChildren": 1,
    "rect": {
     "x": 4,
-    "y": 122,
+    "y": 144,
     "width": 392,
     "height": 24
    },
    "layout": {
     "x": 4,
-    "y": 122,
+    "y": 144,
     "width": 392,
     "height": 24
    },
@@ -2460,7 +2460,7 @@
     "rotate": "0 (0.00, 0.00, 1.00)",
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
-    "top": 122,
+    "top": 144,
     "transform-origin": "(196.00, 12.00, 0.00)",
     "transition-delay": [
      "0s"
@@ -2521,7 +2521,7 @@
    "hierarchyChildren": 1,
    "rect": {
     "x": 4,
-    "y": 122,
+    "y": 144,
     "width": 392,
     "height": 24
    },
@@ -2664,7 +2664,7 @@
    "hierarchyChildren": 2,
    "rect": {
     "x": 4,
-    "y": 122,
+    "y": 144,
     "width": 392,
     "height": 24
    },
@@ -2809,7 +2809,7 @@
    "hierarchyChildren": 0,
    "rect": {
     "x": 7,
-    "y": 125,
+    "y": 147,
     "width": 94,
     "height": 18
    },
@@ -2951,7 +2951,7 @@
    "hierarchyChildren": 1,
    "rect": {
     "x": 5,
-    "y": 123,
+    "y": 145,
     "width": 390,
     "height": 22
    },
@@ -3098,7 +3098,7 @@
    "hierarchyChildren": 0,
    "rect": {
     "x": 185,
-    "y": 123,
+    "y": 145,
     "width": 30,
     "height": 22
    },
@@ -3244,13 +3244,13 @@
    "hierarchyChildren": 0,
    "rect": {
     "x": 0,
-    "y": 150,
+    "y": 172,
     "width": 400,
     "height": 19
    },
    "layout": {
     "x": 0,
-    "y": 150,
+    "y": 172,
     "width": 400,
     "height": 19
    },
@@ -3332,7 +3332,7 @@
     "rotate": "0 (0.00, 0.00, 1.00)",
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
-    "top": 150,
+    "top": 172,
     "transform-origin": "(200.00, 9.50, 0.00)",
     "transition-delay": [
      "0s"
@@ -3391,13 +3391,13 @@
    "hierarchyChildren": 0,
    "rect": {
     "x": 0,
-    "y": 169,
+    "y": 191,
     "width": 400,
     "height": 17
    },
    "layout": {
     "x": 0,
-    "y": 169,
+    "y": 191,
     "width": 400,
     "height": 17
    },
@@ -3479,7 +3479,7 @@
     "rotate": "0 (0.00, 0.00, 1.00)",
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
-    "top": 169,
+    "top": 191,
     "transform-origin": "(200.00, 8.50, 0.00)",
     "transition-delay": [
      "0s"
@@ -3537,13 +3537,13 @@
    "hierarchyChildren": 0,
    "rect": {
     "x": 5,
-    "y": 191,
+    "y": 213,
     "width": 390,
     "height": 35
    },
    "layout": {
     "x": 5,
-    "y": 191,
+    "y": 213,
     "width": 390,
     "height": 35
    },
@@ -3625,7 +3625,7 @@
     "rotate": "0 (0.00, 0.00, 1.00)",
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
-    "top": 191,
+    "top": 213,
     "transform-origin": "(195.00, 17.50, 0.00)",
     "transition-delay": [
      "0s"
@@ -3682,13 +3682,13 @@
    "hierarchyChildren": 1,
    "rect": {
     "x": 4,
-    "y": 237,
+    "y": 259,
     "width": 392,
     "height": 34
    },
    "layout": {
     "x": 4,
-    "y": 237,
+    "y": 259,
     "width": 392,
     "height": 34
    },
@@ -3765,7 +3765,7 @@
     "rotate": "0 (0.00, 0.00, 1.00)",
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
-    "top": 237,
+    "top": 259,
     "transform-origin": "(196.00, 17.00, 0.00)",
     "transition-delay": [
      "0s"
@@ -3828,7 +3828,7 @@
    "hierarchyChildren": 0,
    "rect": {
     "x": 9,
-    "y": 237,
+    "y": 259,
     "width": 383,
     "height": 25
    },
@@ -3973,21 +3973,21 @@
    "hierarchyChildren": 2,
    "rect": {
     "x": 3,
-    "y": 274,
+    "y": 296,
     "width": 394,
-    "height": 25
+    "height": 38
    },
    "layout": {
     "x": 3,
-    "y": 274,
+    "y": 296,
     "width": 394,
-    "height": 25
+    "height": 38
    },
    "contentRect": {
     "x": 3,
     "y": 3,
     "width": 388,
-    "height": 19
+    "height": 32
    },
    "pseudoStates": [],
    "focusable": false,
@@ -4035,7 +4035,7 @@
     "flex-shrink": 1,
     "flex-wrap": "no-wrap",
     "font-size": 14,
-    "height": 25,
+    "height": 38,
     "justify-content": "flex-start",
     "left": 3,
     "letter-spacing": 0,
@@ -4057,8 +4057,8 @@
     "rotate": "0 (0.00, 0.00, 1.00)",
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
-    "top": 274,
-    "transform-origin": "(197.00, 12.50, 0.00)",
+    "top": 296,
+    "transform-origin": "(197.00, 19.00, 0.00)",
     "transition-delay": [
      "0s"
     ],
@@ -4120,13 +4120,13 @@
    "hierarchyChildren": 0,
    "rect": {
     "x": 6,
-    "y": 271,
+    "y": 299,
     "width": 34,
     "height": 32
    },
    "layout": {
     "x": 3,
-    "y": -3,
+    "y": 3,
     "width": 34,
     "height": 32
    },
@@ -4201,7 +4201,7 @@
     "rotate": "0 (0.00, 0.00, 1.00)",
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
-    "top": -3,
+    "top": 3,
     "transform-origin": "(17.00, 16.00, 0.00)",
     "transition-delay": [
      "0s"
@@ -4263,21 +4263,21 @@
    "hierarchyChildren": 0,
    "rect": {
     "x": 42,
-    "y": 281,
+    "y": 304,
     "width": 12,
-    "height": 13
+    "height": 25
    },
    "layout": {
     "x": 39,
-    "y": 7,
+    "y": 8,
     "width": 12,
-    "height": 13
+    "height": 25
    },
    "contentRect": {
     "x": 0,
     "y": 4,
     "width": 11,
-    "height": 5
+    "height": 17
    },
    "pseudoStates": [],
    "focusable": true,
@@ -4329,7 +4329,7 @@
     "flex-shrink": 1,
     "flex-wrap": "no-wrap",
     "font-size": 14,
-    "height": 13,
+    "height": 25,
     "justify-content": "flex-start",
     "left": 39,
     "letter-spacing": 0,
@@ -4351,8 +4351,8 @@
     "rotate": "0 (0.00, 0.00, 1.00)",
     "scale": "(1.00, 1.00, 1.00)",
     "text-overflow": "clip",
-    "top": 7,
-    "transform-origin": "(6.00, 6.50, 0.00)",
+    "top": 8,
+    "transform-origin": "(6.00, 12.50, 0.00)",
     "transition-delay": [
      "0s"
     ],

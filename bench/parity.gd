@@ -280,7 +280,7 @@ func _paths(root: UxmlElement) -> Dictionary:
 func _unity_section(cases: Array) -> bool:
 	var rows: Array = []
 	var tot := {"cases": 0, "match": 0, "elements": 0, "struct_ok": 0,
-		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0}
+		"geo": 0, "geo_ok": 0, "geo_half": 0, "style": 0, "style_ok": 0, "pixel_only": 0}
 	var negatives_ok := true
 	for c in cases:
 		var dpath: String = UNITY_DIR + String(c["name"]) + ".json"
@@ -290,8 +290,11 @@ func _unity_section(cases: Array) -> bool:
 		var r := _run_unity(c, dump)
 		rows.append(r)
 		tot["cases"] += 1
-		for k in ["elements", "struct_ok", "geo", "geo_ok", "style", "style_ok"]:
+		for k in ["elements", "struct_ok", "geo", "geo_ok", "geo_half", "style", "style_ok"]:
 			tot[k] += r[k]
+		if (r["status"] != "match" and r["struct_ok"] == r["elements"] and r["style_ok"] == r["style"]
+				and r["geo_ok"] + r["geo_half"] == r["geo"]):
+			tot["pixel_only"] += 1
 		if r["status"] == "match":
 			tot["match"] += 1
 			negatives_ok = _unity_negative(r) and negatives_ok
@@ -314,9 +317,12 @@ func _unity_section(cases: Array) -> bool:
 		print("| %s | %s | %d/%d | %d/%d | %d/%d | %s |" % [r["name"], r["status"],
 			r["struct_ok"], r["elements"], r["geo_ok"], r["geo"], r["style_ok"], r["style"], shown])
 	print("")
-	print("UNITY PARITY: %d/%d cases match; structure %d/%d elements, geometry %d/%d values, style %d/%d values; negative cases %s" % [
-		tot["match"], tot["cases"], tot["struct_ok"], tot["elements"], tot["geo_ok"], tot["geo"],
-		tot["style_ok"], tot["style"], "detected" if negatives_ok else "NOT DETECTED"])
+	# Unity rounds every layout edge to the pixel grid (Yoga's
+	# RoundToPixelGrid); godot-uxml's layout keeps fractions. Differences of
+	# at most half a pixel are counted separately so other causes stand out.
+	print("UNITY PARITY: %d/%d cases match (%d more differ only by pixel-grid rounding); structure %d/%d elements, geometry %d/%d values (%d more within 0.5px), style %d/%d values; negative cases %s" % [
+		tot["match"], tot["cases"], tot["pixel_only"], tot["struct_ok"], tot["elements"], tot["geo_ok"], tot["geo"],
+		tot["geo_half"], tot["style_ok"], tot["style"], "detected" if negatives_ok else "NOT DETECTED"])
 	return negatives_ok
 
 
@@ -364,7 +370,7 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	var res := UxmlFlexLayout.compute(doc.root, styles, panel, measurer, [],
 		{"scroll_bar_width": SCROLLBAR})
 	var abs := _abs_rects(doc.root, res["rects"])
-	var out := {"name": name, "status": "match", "notes": [], "elements": 0, "struct_ok": 0,
+	var out := {"name": name, "status": "match", "notes": [], "elements": 0, "struct_ok": 0, "geo_half": 0,
 		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0, "pairs": []}
 	var seen := {}
 	# Unity does not resolve styles under display:none; those elements are
@@ -401,9 +407,12 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		if not hidden_under.has(path) and (not hidden or r != null):
 			for k in 4:
 				out["geo"] += 1
-				if absf(_r1(got[k]) - _r1(want[k])) <= 0.05:
+				var dv := absf(_r1(got[k]) - _r1(want[k]))
+				if dv <= 0.05:
 					out["geo_ok"] += 1
 				else:
+					if dv <= 0.55:
+						out["geo_half"] += 1
 					out["notes"].append("%s %s: ours %s vs Unity %s" % [label, ["x", "y", "w", "h"][k], _r1(got[k]), _r1(want[k])])
 		var st: Dictionary = styles.get(el, {})
 		# Unity reports layout-derived margins/padding/borders, which are 0 on

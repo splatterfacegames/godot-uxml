@@ -18,6 +18,8 @@
  *   .unity-base-field__label { text-overflow: ellipsis }
  *   .unity-help-box__icon { -unity-background-scale-mode: scale-to-fit }
  *
+ * Deliberate deviation: .unity-help-box__label also grows (see there).
+ *
  * The images (check, arrows, help box icons) are godot-uxml's own SVGs.
  */
 
@@ -173,6 +175,10 @@ UXML {
   border-color: rgb(50, 50, 50);
 }
 
+.unity-radio-button:focus > .unity-radio-button__input > .unity-radio-button__checkmark-background {
+  border-color: rgb(0, 106, 166);
+}
+
 .unity-radio-button__checkmark {
   width: 12px;
   height: 12px;
@@ -254,6 +260,10 @@ UXML {
   padding: 4px 1px 4px 0;
   flex-shrink: 1;
   white-space: normal;
+  /* Not Unity's value (Unity: no grow; the label is as wide as its text).
+     godot-uxml measures a wrapping Label without a max-content width, so
+     without grow the label would collapse to one character per line. */
+  flex-grow: 1;
 }
 
 .unity-help-box__icon {
@@ -310,6 +320,14 @@ UXML {
 .unity-foldout__input:checked > .unity-foldout__checkmark {
   border-color: rgb(100, 100, 100);
   background-image: url("arrow-down.svg");
+}
+
+.unity-foldout__input:hover > .unity-foldout__checkmark {
+  border-color: rgb(50, 50, 50);
+}
+
+.unity-foldout__toggle:focus > .unity-foldout__input > .unity-foldout__checkmark {
+  border-color: rgb(0, 106, 166);
 }
 
 .unity-foldout__toggle:disabled > .unity-foldout__input > .unity-foldout__checkmark {

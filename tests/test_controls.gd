@@ -410,3 +410,60 @@ func test_reload_stable_with_parts() -> void:
 	var n1 := Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
 	h.check(absf(n1 - n0) < 1.0, "reloads keep the node count flat (%d -> %d)" % [n0, n1])
 	_unload(doc)
+
+
+func test_focus_and_disabled_classes() -> void:
+	var doc := _load()
+	var t := doc.get_native("sound") as UxmlToggle
+	var el := doc.get_element_model("sound")
+	var input := UxmlParts.find_part(el, "input")
+	t.grab_focus()
+	await h.process_frame
+	_flush(doc)
+	h.check(_states(doc, el).has("focus"), "focused Toggle is :focus")
+	h.check(_states(doc, input).has("focus"), "and its input part (Unity puts :focus on both)")
+	var check := UxmlParts.find_part(el, "checkmark")
+	# The fixture's `.unity-toggle__checkmark { border-color: var(--accent) }`
+	# is an author rule: it beats the theme's :focus border, as in Unity.
+	h.eq(_val(doc, check, "border-top-color"), "rgb(40, 120, 220)", "author border beats the theme focus rule")
+	t.release_focus()
+	await h.process_frame
+	_flush(doc)
+	h.check(not _states(doc, input).has("focus"), "focus leaves the input too")
+	doc.set_enabled("play", false)
+	_flush(doc)
+	h.check(_classes(doc.get_element_model("play")).has("unity-disabled"), "set_enabled(false) adds unity-disabled")
+	h.eq(_val(doc, doc.get_element_model("play"), "background-color"), "rgb(149, 149, 149)", "theme :disabled look")
+	doc.set_enabled("play", true)
+	_flush(doc)
+	h.check(not _classes(doc.get_element_model("play")).has("unity-disabled"), "set_enabled(true) removes it")
+	_unload(doc)
+	var d2 := _doc('<ui:VisualElement name="p" enabled="false"><ui:Button name="b" text="x" /></ui:VisualElement>')
+	_flush(d2)
+	h.check(_classes(d2.get_element_model("p")).has("unity-disabled"), "enabled=false adds unity-disabled")
+	h.check(not _classes(d2.get_element_model("b")).has("unity-disabled"), "only on the element itself")
+	_unload(d2)
+
+
+func test_popup_window_draws_title() -> void:
+	var doc := _load()
+	var pw := doc.get_element("popup") as Label
+	h.check(pw != null and pw.text == "Popup", "PopupWindow draws its own title")
+	doc.get_element_model("popup").set_attribute("text", "Renamed")
+	_flush(doc)
+	h.eq(pw.text, "Renamed", "text attribute change reaches the title")
+	_unload(doc)
+
+
+func test_loose_radio_buttons_are_exclusive() -> void:
+	var doc := _doc('<ui:RadioButton name="a" text="A" value="true" /><ui:RadioButton name="b" text="B" />'
+		+ '<ui:GroupBox><ui:RadioButton name="c" text="C" value="true" /></ui:GroupBox>')
+	await h.process_frame
+	var a := doc.get_native("a") as UxmlToggle
+	var b := doc.get_native("b") as UxmlToggle
+	var c := doc.get_native("c") as UxmlToggle
+	b._activate()
+	_flush(doc)
+	h.check(b.button_pressed and not a.button_pressed, "switching one loose radio on switches the other off")
+	h.check(c.button_pressed, "a radio inside a GroupBox is its own group")
+	_unload(doc)

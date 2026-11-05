@@ -23,10 +23,22 @@ at commit `819d9c8d11bd6c50e326797055b80fd8b0cf250d`.
 
 Deliberate deltas are documented per file: attribute entity decoding at parse
 time, mismatched-close-tag and duplicate-attribute diagnostics, unsupported
-pseudo names reported rather than silently never matching, and no Unity theme
-sheet or control parts (native Godot controls replace both).
+pseudo names reported rather than silently never matching. The default theme
+and the control part trees (`runtime/controls/`, `themes/`) are not ported
+from uxml-preview's `theme.ts`/`registry.ts`: they come from godot-uxml's own
+measurements of Unity (see below).
 
 The Apache-2.0 license text is in `licenses/uxml-preview.LICENSE`.
+
+## Unity measurements (no Unity files)
+
+`themes/unity-default.uss`, the part trees in `runtime/controls/uxml_parts.gd`
+and `bench/parity/unity/*.json` record values measured in Unity 6000.3.24f1
+with `tools/unity-dump` (Unity's default runtime theme, resolved styles and
+layout). No Unity stylesheet, image or source file is included. The check,
+arrow and help box images in `themes/` are godot-uxml's own SVGs. Unity and
+UI Toolkit are trademarks of Unity Technologies; godot-uxml is not affiliated
+with Unity.
 
 ## Design inspiration (no code)
 

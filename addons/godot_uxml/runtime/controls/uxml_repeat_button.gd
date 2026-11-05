@@ -12,6 +12,8 @@ var _held := false
 
 
 func _init() -> void:
+	# Unity's theme gives RepeatButton no box: plain text, no Godot chrome.
+	flat = true
 	focus_mode = Control.FOCUS_ALL
 	button_down.connect(_on_down)
 	button_up.connect(_stop)
