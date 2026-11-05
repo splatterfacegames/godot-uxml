@@ -145,40 +145,33 @@ Run the example:
 godot --path . --script res://examples/minimal/minimal.gd
 ```
 
-## Supported subset
+## Unity coverage
 
-- **Controls:** `VisualElement`, `Label`, `Button`, `Image`, `Slider`,
-  `SliderInt`, `Toggle`, `TextField`, `DropdownField`, `ScrollView`,
-  `ListView`.
-- **Selectors:** type, `.class`, `#name`, `*`, compounds, descendant and
-  `>` child combinators, comma groups.
-- **Pseudo-classes:** `:hover`, `:active`, `:inactive`, `:focus`,
-  `:checked`, `:disabled`, `:enabled`, `:selected`, `:root`.
-- **Values:** `var()` custom properties, `@import`, inline `style`,
-  inheritance, shorthands.
-- **Layout:** flexbox (direction, wrap, grow, shrink, basis, alignment,
-  justification, gap), margins, padding, borders, `px` and `%` lengths.
-- **Paint:** background color and image, 9-slice backgrounds, image tint,
-  border colors and radii, fonts, text color and text outline.
+godot-uxml targets full support for Unity UI Toolkit 6000.3: every UXML
+element and attribute, every USS property, templates, transitions and
+data binding. [docs/unity-coverage.md](docs/unity-coverage.md) gives the
+status of each item.
 
-Out of scope, with a diagnostic: UXML templates, `@media`, transitions,
-transforms, absolute positioning, `em`/`rem`/`vh` units, `+` and `~`
-combinators and attribute selectors. The full list is in
-[docs/design.md](docs/design.md).
+Some CSS features do not exist in USS: `@media`, `em`/`rem`/`vh` units,
+`+` and `~` combinators, attribute selectors and `::` pseudo-elements.
+Unity rejects these features. godot-uxml also rejects them and gives a
+diagnostic.
 
 ## Fidelity
 
-godot-uxml layout agrees with the reference engine in 27 of 44 golden
+godot-uxml layout agrees with the reference engine in 31 of 44 golden
 cases. In 4 more cases, layout agrees except for Unity internal control
-parts. All 13 differences have a known cause:
+parts. All 9 differences have a known cause:
 
-- Absolute positioning is out of scope.
-- godot-uxml does not apply the Unity default Button theme margins.
+- godot-uxml does not yet apply the Unity default control theme. The
+  Button margins of the theme cause 6 differences.
 - In one case, the reference engine is incorrect and godot-uxml agrees
   with Unity.
+- One case uses Unity internal control parts.
+- One case uses an import rule that Unity has not confirmed.
 
-Controls show native Godot chrome. USS overrides the chrome only where the
-author writes a rule. Details are in [docs/parity.md](docs/parity.md).
+Unity part trees and the default theme are in progress. Details are in
+[docs/parity.md](docs/parity.md).
 
 ## Tests and benchmarks
 
