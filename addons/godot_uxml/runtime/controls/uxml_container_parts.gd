@@ -934,6 +934,9 @@ static func move_tab_headers(view: UxmlElement) -> void:
 			handle.children.append(_part(tab, "VisualElement", "reorderable-handle-bar",
 				"unity-tab__reorderable-handle-bar", ["unity-tab__reorderable-handle-bar"]))
 			header.children.insert(0, handle)
+			var cache: Dictionary = tab.get_meta(&"uxml_part_cache", {})
+			cache["reorderable-handle"] = weakref(handle)
+			tab.set_meta(&"uxml_part_cache", cache)
 		hc.children.append(header)
 		tab.set_meta(&"uxml_tab_index", k)
 		k += 1

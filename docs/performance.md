@@ -207,7 +207,7 @@ Representative screens (`bench/workloads.gd`, native core):
 | inventory (80 slots) | load / hover / select / count change | 127 / 0.69 / 1.9 / 1.5 ms |
 | dialog | typewriter char + relayout / hover choice | 0.31 / 0.12 ms |
 | 1,000 rows, not virtualized | load / update one row | 1,126 / 18 ms |
-| `ListView`, 10,000 items | load / scroll 3 rows / hover / rebind visible | 57 / 2.0 / 0.18 / 2.1 ms |
+| `ListView`, 10,000 items | load / scroll 3 rows / hover / rebind visible | 57 / 2.0 / 0.18 / 2.1 ms (main; see "Containers and collections" below) |
 
 Versus the same screen hand-built from native Godot containers
 (`bench/native_compare.gd`; native re-sort forced on every container, an
@@ -389,3 +389,56 @@ Correctness after the merge: `tests/run_tests.gd` 1418 checks,
 `bench/equiv.gd` 1483 (native) / 1295 (`--gdscript`),
 `bench/equiv_layout.gd` 192 / 192, `bench/equiv_runtime.gd` 1158 / 1158,
 `bench/equiv_parse.gd` 2619 / 2619, 0 failures.
+
+
+## Containers and collections as part trees (`unity/controls-containers`)
+
+Method: `bench/workloads.gd` and `bench/bench.gd -- --quick`, with and
+without `-- --no-theme`, for `main` and this branch one after the other in
+the same session. Other Godot processes ran on the machine, so
+cross-process numbers vary by about ±30 %. Same-process probes
+(`load_document` of one fixture 25 times, median) back the load rows.
+
+| workload (native core, ms, median) | main, theme | branch, theme | main, no theme | branch, no theme |
+| --- | ---: | ---: | ---: | ---: |
+| `ListView` 10,000 items: load + first layout | 106 | 90 | 62 | 69 |
+| `ListView` 10,000 items: scroll 3 rows | 3.4 | 3.6 | 1.9 | 2.8 |
+| `ListView` 10,000 items: `refresh_list` | 3.6 | 3.2 | 3.6 | 3.3 |
+| `ListView` 10,000 items: hover row | 0.21 | 0.19 | 0.19 | 0.19 |
+| 1,000 rows in a ScrollView: update one row + relayout | 25.6 | 26.0 | 19.1 | 18.2 |
+
+| `load_document`, same process (ms, median) | main | branch |
+| --- | ---: | ---: |
+| `Menu.uxml` (no container), theme / no theme | 5.0 / 1.9 | 4.8 / 2.0 |
+| `runtime.uxml` (one ScrollView), theme / no theme | 12.9 / 7.9 | 22.2 / 14.7 |
+
+What the branch costs and why:
+
+- A document without a container control does the same work as on
+  `main`: the container sheets (`unity-structure.uss`,
+  `unity-default-containers.uss`) join only a document with one.
+- A ScrollView is now about 25 elements (two Scrollers of 10 parts each)
+  instead of one control. In `runtime.uxml` that costs about 0.9 ms of
+  factory work, 1 ms of apply and 0.5 ms of layout per load. The native
+  cascade also converts the structure sheet's rules on each load (about
+  2.4 ms); the GDScript side keeps the compiled theme rules across loads
+  (`UssCascade._compile_rule`), which also took the cost of the larger
+  theme back to `main`'s level (one-Label document: 4.2 ms with the
+  native cascade, 2.2 ms GDScript, against 4.2 and 2.7 ms on `main`).
+- A scroll writes the translate of the content container and the
+  Scroller value and dragger (paint-only), re-binds the rows that left the
+  view and lays out again for their new text, as on `main`. The
+  post-layout Scroller update runs only when the viewport, content or
+  Scroller sizes changed.
+- The first version looked parts up with a subtree walk after each
+  layout (20 ms on the 1,000-row ScrollView); parts are now looked up in a
+  per-control cache (`UxmlContainerParts.get_part`).
+
+Correctness after the change: `tests/run_tests.gd` 1695 checks (278
+tests), `bench/equiv.gd` 1483 (native) / 1295 (`--gdscript`),
+`bench/equiv_layout.gd` 192 / 192, `bench/equiv_parse.gd` 2619 / 2619,
+`bench/equiv_runtime.gd` 1158 / 1158, 0 failures. The reference layout
+in `bench/ref/` follows three intentional changes (no ScrollView special
+case, a stretched container measured at the stretched width, the
+`overflow: scroll` cross-size rule) and now places `position: absolute`
+children, which the Scroller parts bring into the equivalence documents.

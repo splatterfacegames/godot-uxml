@@ -83,7 +83,7 @@ Status values:
 | Scroller: `low-value`, `high-value`, `direction`, `value` | done |
 | Collection views: `fixed-item-height`, `selection-type`, `show-border`, `show-alternating-row-backgrounds`, `reorderable`, `reorder-mode`, `show-foldout-header`, `header-title`, `show-add-remove-footer`, `allow-add`, `allow-remove`, `show-bound-collection-size`, `horizontal-scrolling`, `item-template`, `sorting-mode`, `auto-expand` | done |
 | Collection views: `virtualization-method` | `FixedHeight` done; `DynamicHeight` is diagnosed (`unsupported-value`), rows keep `fixed-item-height` |
-| Tab: `label`, `icon-image`, `closeable`; TabView: `reorderable` | done (reorderable builds the drag handles; a drag does not move the tab yet) |
+| Tab: `label`, `icon-image`, `closeable`; TabView: `reorderable` | done (a drag of a header moves its Tab) |
 | TwoPaneSplitView: `fixed-pane-index`, `fixed-pane-initial-dimension`, `orientation` | done |
 
 ## Data binding
@@ -152,6 +152,15 @@ Container and collection differences to Unity:
   Unity makes it as wide as the Tab (400px against 81px in `ctl-tabview`).
 - A closed Tab stays in the tree with `display: none`; part trees are
   fixed after load. Unity removes it.
+- An auto-height ScrollView in a sized column measures a row-wrap grid as
+  one line when the column computes the ScrollView's size (the layout
+  passes no width bound to children in an intrinsic measure). Inside a
+  sized ScrollView the grid has its full height.
+- The `ScrollView` keyboard scroll needs `focusable="true"`; Unity puts
+  the keys on the focusable Scroller sliders, which godot-uxml also
+  supports.
+- `nested-interaction-kind="ForwardScrolling"` acts like `Default` for the
+  wheel (the event goes on to an outer ScrollView at a bound).
 
 ## Controls (UnityEngine.UIElements)
 
@@ -179,7 +188,7 @@ with Unity dumps (`docs/parity.md`).
 | ScrollView, Scroller | done: part trees, structure and theme, Scroller visibility after layout, scrolling by `translate`, wheel, touch, keys, controller, follow focus, Scroller buttons, track and dragger, view data. Matches Unity in every measured case |
 | ListView | done: part trees (rows, foldout header, footer, size field, reorder handles), fixed-height virtualization, selection (mouse, keys, controller), `:checked`/`--selected`, `items_chosen`, footer add/remove, reorder, data binding. Size field parts follow TextField (planned). Differences: see below |
 | TreeView, MultiColumnListView, MultiColumnTreeView | done: tree rows (indent, toggle, content), expansion (toggle, keys), `<Columns>`, header, sorting (`sorting-mode`, `sort-column-descriptions`), header resizing, cell binders, tree data API |
-| Tab, TabView | done: part trees, header move, selection (mouse, `ui_accept`), close, `label` binding. A drag does not reorder tabs yet |
+| Tab, TabView | done: part trees, header move, selection (mouse, `ui_accept`), close, drag reorder, `label` binding |
 | TwoPaneSplitView | done: part tree, fixed pane, draggable splitter |
 | IMGUIContainer | done: the element hosts a Godot draw and input callback (`set_imgui_handler`); Unity's C# IMGUI code cannot run |
 

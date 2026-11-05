@@ -15,7 +15,7 @@ extends SceneTree
 ## each step all are flushed and every control is snapshotted — geometry,
 ## visibility, input filters, disabled/editable/pressed, every theme
 ## override (stylebox internals included), fonts, alignment/autowrap,
-## UxmlBox/UxmlField chrome, image offsets, scroll content size — and the
+## UxmlBox/UxmlField chrome, image offsets, ScrollView offsets — and the
 ## diagnostics arrays are compared.
 ##
 ## Change history: until the Unity part trees (unity/controls-foundation)

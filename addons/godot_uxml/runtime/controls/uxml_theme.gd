@@ -17,25 +17,71 @@ extends RefCounted
 const DEFAULT := "res://addons/godot_uxml/themes/unity-default.uss"
 ## The geometry of the container and collection parts (ScrollView,
 ## Scroller, ListView, TreeView, MultiColumn*, TabView, TwoPaneSplitView):
-## attached ahead of the theme, and also when the theme is disabled, so
-## these controls work without the Unity look (unity-structure.uss).
+## attached ahead of the theme, also when the theme is disabled, so these
+## controls work without the Unity look (unity-structure.uss).
 const STRUCTURE := "res://addons/godot_uxml/themes/unity-structure.uss"
 
 static var _cache := {}  # path -> [source, items, warnings]
 
 
-## Splice the structure sheet and the theme sheet at `path` ahead of
-## `doc`'s sheets. An empty path attaches the structure sheet only (theme
-## disabled). A missing theme is a diagnostic.
+## The look of the container controls in the default theme
+## (unity-default-containers.uss).
+const DEFAULT_CONTAINERS := "res://addons/godot_uxml/themes/unity-default-containers.uss"
+## Tags whose part trees need STRUCTURE (UxmlContainerParts).
+const CONTAINER_TAGS := {"ScrollView": true, "Scroller": true, "ListView": true,
+	"TreeView": true, "MultiColumnListView": true, "MultiColumnTreeView": true,
+	"TabView": true, "Tab": true, "TwoPaneSplitView": true}
+const META_CONTAINERS := &"uxml_container_sheets"
+
+
+## Splice the theme sheet at `path` ahead of `doc`'s sheets. An empty path
+## attaches no theme. A missing theme is a diagnostic. A document with a
+## container control also gets the container sheets (attach_containers).
 static func attach(doc: UxmlDocumentModel, path: String) -> void:
 	if doc == null:
 		return
 	if not path.is_empty():
 		_attach_sheet(doc, path)
-	_attach_sheet(doc, STRUCTURE)
+	doc.set_meta(&"uxml_theme_path", path)
+	attach_containers(doc)
 
 
-static func _attach_sheet(doc: UxmlDocumentModel, path: String) -> void:
+## The structure sheet (and, with the default theme, the container look)
+## for a document that has a container control; nothing for other
+## documents, so they do not compile these rules. Run again after a later
+## step adds elements (collection item templates); attaches once.
+static func attach_containers(doc: UxmlDocumentModel) -> void:
+	if doc == null or doc.root == null or doc.has_meta(META_CONTAINERS):
+		return
+	var found := false
+	for el in doc.root.walk():
+		if CONTAINER_TAGS.has(el.local):
+			found = true
+			break
+	if not found:
+		return
+	doc.set_meta(META_CONTAINERS, true)
+	var path: String = doc.get_meta(&"uxml_theme_path", "")
+	# Cascade order: structure, theme, container look (each insert goes
+	# first, so the look goes in first).
+	var at := _theme_roots(doc)
+	if path == DEFAULT:
+		_attach_sheet(doc, DEFAULT_CONTAINERS, at)
+	_attach_sheet(doc, STRUCTURE, 0)
+
+
+## Number of theme sheets at the start of the cascade order.
+static func _theme_roots(doc: UxmlDocumentModel) -> int:
+	var n := 0
+	for r in doc.style_roots:
+		if bool(doc.sheets[r["sheet"]].get("theme", false)):
+			n += 1
+		else:
+			break
+	return n
+
+
+static func _attach_sheet(doc: UxmlDocumentModel, path: String, at: int = 0) -> void:
 	var hit = _cache.get(path)
 	if hit == null:
 		if not FileAccess.file_exists(path):
@@ -57,7 +103,7 @@ static func _attach_sheet(doc: UxmlDocumentModel, path: String) -> void:
 		"theme": true,
 	})
 	doc.warnings.append_array(hit[2])
-	doc.style_roots.insert(0, {"sheet": index, "scope": null})
+	doc.style_roots.insert(at, {"sheet": index, "scope": null})
 
 
 ## Drop cached parses (after editing a theme file at runtime).

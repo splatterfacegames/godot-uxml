@@ -56,6 +56,8 @@ signal column_sorting_changed(element_name, descriptions)
 signal item_expanded_changed(element_name, id, expanded)
 ## A closeable Tab of a TabView was closed (Unity Tab.closed).
 signal tab_closed(element_name, index)
+## A reorderable TabView moved a Tab (a drag of its header).
+signal tab_reordered(element_name, from_index, to_index)
 
 ## The UXML file to load. Setting it while the node is inside the tree
 ## reloads the document.
@@ -1400,6 +1402,35 @@ func close_tab(view_name: String, index: int) -> void:
 	var b = _behavior_of(view_name, "close")
 	if b != null:
 		b.close(index)
+
+
+## Move the tab at `from` to `to` in a TabView, as a drag of its header
+## does in a reorderable TabView (emits tab_reordered).
+func move_tab(view_name: String, from: int, to: int) -> void:
+	var b = _behavior_of(view_name, "move_tab")
+	if b != null:
+		b.move_tab(from, to)
+
+
+## The element tree changed shape (a TabView reorder): rebuild the parent
+## map now and the cascade and layout caches on the next restyle. Part
+## trees are otherwise fixed after load.
+func _structure_changed() -> void:
+	_parents.clear()
+	var stack: Array = [_doc.root]
+	while not stack.is_empty():
+		var el: UxmlElement = stack.pop_back()
+		for child in el.children:
+			_parents[child] = el
+			stack.append(child)
+	_cascade = null
+	_transitions = null
+	_layout_records = {}
+	_layout_xcache = {}
+	_full_apply = true
+	_force_layout = true
+	_scan_all = true
+	_queue_restyle()
 
 
 ## TwoPaneSplitView: the size of the fixed pane.

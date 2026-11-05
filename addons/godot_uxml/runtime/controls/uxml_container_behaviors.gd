@@ -69,6 +69,7 @@ class ScrollViewBehavior extends UxmlBehaviors.Behavior:
 	var _velocity := Vector2.ZERO  # px/s, of the touch drag and its inertia
 	var _drag_t := 0             # ticks (usec) of the last drag event
 	var _moving := false         # inertia or elastic spring-back runs
+	var _last_sizes: Array = []  # sizes of the last after_layout update
 
 	func setup() -> void:
 		_vs = UxmlContainerParts.get_part(el, "vertical-scroller")
@@ -86,6 +87,11 @@ class ScrollViewBehavior extends UxmlBehaviors.Behavior:
 
 	func native() -> Control:
 		return doc._controls.get(el)
+
+	## A changed attribute (mode, *-scroller-visibility) updates the
+	## Scrollers after the next layout.
+	func on_model_changed() -> void:
+		_last_sizes = []
 
 	func offset() -> Vector2:
 		return UxmlContainerParts.scroll_offset(el)
@@ -118,13 +124,23 @@ class ScrollViewBehavior extends UxmlBehaviors.Behavior:
 
 	func after_layout() -> void:
 		var before := offset()
+		# Scroller state depends only on the viewport, content and Scroller
+		# sizes: skip the update when a layout left them unchanged (a scroll
+		# that re-binds list rows lays out again).
+		var key := [_size_of(_vp), _size_of(_content), _size_of(_vs), _size_of(_hs),
+			_size_of(UxmlContainerParts.get_part(_vs, "drag-container")),
+			_size_of(UxmlContainerParts.get_part(_hs, "drag-container"))]
+		if key == _last_sizes and _pending == null:
+			return
+		_last_sizes = key
+		# update_scroll_view also places the Scroller draggers.
 		UxmlContainerParts.update_scroll_view(el, _size_of)
 		if _pending != null:
 			var want: Vector2 = _pending
 			UxmlContainerParts.set_scroll_offset(el, want)
 			if offset().is_equal_approx(want):
 				_pending = null
-		_sync_scrollers()
+			_sync_scrollers()
 		if offset() != before:
 			scrolled.emit(offset())
 
@@ -555,6 +571,8 @@ class ScrollerBehavior extends UxmlBehaviors.Behavior:
 ## reordering, tree expansion, column sorting and resizing.
 class CollectionBehavior extends UxmlBehaviors.Behavior:
 	var _rows: Array = []          # UxmlListRow per pool slot
+	var _row_ctl: Array = []       # row Control per pool slot
+	var _shift := PackedInt32Array()  # rows each slot's Control is moved by
 	var _sv: UxmlElement
 	var _content: UxmlElement
 	var _info: Dictionary          # doc._lists[el]: {rows, h, count, bind, first}
@@ -588,6 +606,8 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 			_rows.append(r)
 			# Rows are parts: the factory already lets them pass the mouse.
 			var c := control_of(row)
+			_row_ctl.append(c)
+			_shift.append(0)
 			if c != null:
 				c.gui_input.connect(_on_row_input.bind(r))
 			if not tree:
@@ -831,22 +851,18 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 	func _place() -> void:
 		var h := item_height()
 		for k in _rows.size():
-			var row: UxmlListRow = _rows[k]
-			var c: Control = doc._controls.get(row.element)
+			var c: Control = _row_ctl[k]
 			if c == null:
 				continue
-			var want := 0 if row.index < 0 else row.index - k
-			var have := int(c.get_meta(&"uxml_row_shift", 0))
-			if want != have:
-				c.position.y += (want - have) * h
-				c.set_meta(&"uxml_row_shift", want)
+			var idx: int = (_rows[k] as UxmlListRow).index
+			var want := 0 if idx < 0 else idx - k
+			if want != _shift[k]:
+				c.position.y += (want - _shift[k]) * h
+				_shift[k] = want
 
 	func after_layout() -> void:
 		# A layout put every row back at its slot.
-		for k in _rows.size():
-			var c: Control = doc._controls.get((_rows[k] as UxmlListRow).element)
-			if c != null:
-				c.set_meta(&"uxml_row_shift", 0)
+		_shift.fill(0)
 		_place()
 		if UxmlContainerParts.is_multi_column(el):
 			var hc := control_of(UxmlContainerParts.get_part(el, "header"))
@@ -1275,12 +1291,16 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 # ---------------------------------------------------------------------------
 
 ## TabView: a click (or ui_accept on a focused header) selects a Tab; the
-## close button of a closeable Tab closes it. `value_changed` sends the
+## close button of a closeable Tab closes it; with `reorderable` a drag of
+## a header moves its Tab (tab_reordered). `value_changed` sends the
 ## selected index (Unity selectedTabIndex).
 class TabViewBehavior extends UxmlBehaviors.Behavior:
 	var _tabs: Array = []
 	var _index := -1
-	var _closed: Dictionary = {}
+	var _closed: Dictionary = {}   # Tab element -> true
+	var _drag_tab: UxmlElement = null
+	var _drag_x := 0.0
+	var _dragging := false
 
 	func setup() -> void:
 		_tabs = UxmlContainerParts.tabs_of(el)
@@ -1293,13 +1313,13 @@ class TabViewBehavior extends UxmlBehaviors.Behavior:
 				# reach the tabs.
 				UxmlContainerBehaviors.set_focus(hc, Control.FOCUS_ALL)
 				UxmlContainerBehaviors.set_mouse(hc, Control.MOUSE_FILTER_STOP)
-				hc.gui_input.connect(_on_header_input.bind(k))
+				hc.gui_input.connect(_on_header_input.bind(tab))
 				hc.focus_entered.connect(set_state.bind(header, "focus", true))
 				hc.focus_exited.connect(set_state.bind(header, "focus", false))
 			var cb := control_of(UxmlContainerParts.get_part(tab, "close-button"))
 			if cb != null:
 				UxmlContainerBehaviors.set_mouse(cb, Control.MOUSE_FILTER_STOP)
-				cb.gui_input.connect(_on_close_input.bind(k))
+				cb.gui_input.connect(_on_close_input.bind(tab))
 		select(0, false)
 
 	func native() -> Control:
@@ -1309,7 +1329,7 @@ class TabViewBehavior extends UxmlBehaviors.Behavior:
 		return _index
 
 	func select(i: int, notify: bool = true) -> void:
-		if i < 0 or i >= _tabs.size() or _closed.has(i) or i == _index:
+		if i < 0 or i >= _tabs.size() or _closed.has(_tabs[i]) or i == _index:
 			return
 		_index = i
 		UxmlContainerParts.select_tab_model(el, i)
@@ -1322,33 +1342,93 @@ class TabViewBehavior extends UxmlBehaviors.Behavior:
 			ui_changed.emit()
 
 	func close(i: int) -> void:
-		if i < 0 or i >= _tabs.size() or _closed.has(i):
+		if i < 0 or i >= _tabs.size() or _closed.has(_tabs[i]):
 			return
-		_closed[i] = true
 		var tab: UxmlElement = _tabs[i]
+		_closed[tab] = true
 		UxmlContainerParts.set_style(UxmlContainerParts.get_part(tab, "header"), "display: none;")
 		UxmlContainerParts.set_style(tab, "display: none;")
 		doc.tab_closed.emit(element_name(), i)
 		if _index == i:
 			_index = -1
 			for k in _tabs.size():
-				if not _closed.has(k):
+				if not _closed.has(_tabs[k]):
 					select(k)
 					break
 
-	func _on_header_input(ev: InputEvent, i: int) -> void:
+	func _on_header_input(ev: InputEvent, tab: UxmlElement) -> void:
+		var i := _tabs.find(tab)
 		var mb := ev as InputEventMouseButton
-		if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			select(i)
+		if mb != null and mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.pressed:
+				select(i)
+				_drag_tab = tab
+				_drag_x = mb.global_position.x
+				_dragging = false
+			else:
+				if _dragging and _drag_tab != null:
+					_drop(mb.global_position.x)
+				_drag_tab = null
+				_dragging = false
+			return
+		var mm := ev as InputEventMouseMotion
+		if mm != null and _drag_tab != null and UxmlParts._bool(el, "reorderable", false):
+			if absf(mm.global_position.x - _drag_x) > 5.0:
+				_dragging = true
 			return
 		if ev.is_action_pressed("ui_accept"):
 			select(i)
-			control_of(UxmlContainerParts.get_part(_tabs[i], "header")).accept_event()
+			control_of(UxmlContainerParts.get_part(tab, "header")).accept_event()
 
-	func _on_close_input(ev: InputEvent, i: int) -> void:
+	func _on_close_input(ev: InputEvent, tab: UxmlElement) -> void:
 		var mb := ev as InputEventMouseButton
 		if mb != null and not mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			close(i)
+			close(_tabs.find(tab))
+
+	## The header under the pointer takes the dragged Tab's place.
+	func _drop(x: float) -> void:
+		var from := _tabs.find(_drag_tab)
+		var to := from
+		for k in _tabs.size():
+			var hc := control_of(UxmlContainerParts.get_part(_tabs[k], "header"))
+			if hc != null and hc.is_visible_in_tree():
+				var r := hc.get_global_rect()
+				if x >= r.position.x and x < r.end.x:
+					to = k
+		move_tab(from, to)
+
+	## Move the Tab at `from` to index `to` (Unity's reorderable TabView):
+	## its header moves in the header container and the Tab in the content
+	## container; the selection follows the Tab. Emits tab_reordered.
+	func move_tab(from: int, to: int) -> void:
+		if from < 0 or to < 0 or from >= _tabs.size() or to >= _tabs.size() or from == to:
+			return
+		var tab: UxmlElement = _tabs[from]
+		var selected: UxmlElement = _tabs[_index] if _index >= 0 else null
+		var hc := UxmlContainerParts.get_part(el, "header-container")
+		var content := UxmlContainerParts.get_part(el, "content")
+		var header := UxmlContainerParts.get_part(tab, "header")
+		var target: UxmlElement = _tabs[to]
+		_move_child(hc, header, UxmlContainerParts.get_part(target, "header"), to > from)
+		_move_child(content, tab, target, to > from)
+		_tabs.remove_at(from)
+		_tabs.insert(to, tab)
+		_index = _tabs.find(selected) if selected != null else -1
+		doc._structure_changed()
+		doc.tab_reordered.emit(element_name(), from, to)
+
+	## Move `child` of `parent` before (or after) `anchor`, in the model and
+	## in the Godot node order.
+	func _move_child(parent: UxmlElement, child: UxmlElement, anchor: UxmlElement, after: bool) -> void:
+		parent.children.erase(child)
+		var at := parent.children.find(anchor) + (1 if after else 0)
+		parent.children.insert(at, child)
+		var k := 0
+		for c in parent.children:
+			var ctl := control_of(c)
+			if ctl != null and ctl.get_parent() != null:
+				ctl.get_parent().move_child(ctl, k)
+				k += 1
 
 	func bind_write(prop: String, v: Variant) -> int:
 		if prop == "selected-tab-index" or prop == "value":
@@ -1363,6 +1443,12 @@ class TabViewBehavior extends UxmlBehaviors.Behavior:
 
 	func view_state() -> Dictionary:
 		return {"selected_tab_index": _index}
+
+	func tab_order() -> Array:
+		var out: Array = []
+		for t in _tabs:
+			out.append(doc._el_names.get(t, ""))
+		return out
 
 	func restore_view_state(d: Dictionary) -> void:
 		if d.has("selected_tab_index"):

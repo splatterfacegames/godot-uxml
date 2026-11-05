@@ -446,6 +446,7 @@ sees the result of the steps before it.
 | `runtime/controls/uxml_container_behaviors.gd` | `UxmlContainerBehaviors` | behaviors of those controls: scrolling, Scroller input, virtualization, selection, keys, tabs, splitter |
 | `runtime/controls/uxml_imgui_box.gd` | `UxmlImguiBox` | the control of an IMGUIContainer: hosts a Godot draw and input callback |
 | `themes/unity-default.uss` | — | the default theme, written from Unity 6000.3 measurements |
+| `themes/unity-default-containers.uss` | — | the default theme's look of the container controls |
 | `themes/unity-structure.uss` | — | the geometry of the container parts; attached also without the theme |
 
 ### Control mapping
@@ -734,7 +735,7 @@ A Unity control is a tree of elements. Unity's constructors build the
 parts, give the parts Unity's names and classes, and style the parts
 through the theme. godot-uxml builds the same parts as real `UxmlElement`
 children in the model. `UxmlParts.expand(doc)` runs once per load, after
-`_expand_lists` and before the name index, the cascade and the controls
+`_prepare_collections` and before the name index, the cascade and the controls
 exist. The cascade (GDScript and native), `var()`, pseudo-states and the
 flex layout then treat parts as ordinary elements. No cascade or layout
 code knows about controls.
@@ -907,10 +908,15 @@ Rules of these trees:
   re-binds only the rows that left the view, and each row control moves
   by `(item - slot) * item height` after the layout. The content
   container has an inline height of `count * item height`.
+- A TabView reorder is the one change of shape after load: the header and
+  the Tab move in the model and in the node order, and
+  `UxmlDocument._structure_changed()` rebuilds the parent map and, on the
+  next restyle, the cascade and the layout caches.
 - The geometry rules of these parts are in `themes/unity-structure.uss`,
   which `UxmlTheme.attach` adds also when `theme_path` is empty, so the
   controls work without the Unity look. The look is in
-  `themes/unity-default.uss`.
+  `themes/unity-default-containers.uss`. Both join only a document with
+  a container control.
 
 Behavior (`UxmlContainerBehaviors`):
 
@@ -919,7 +925,7 @@ Behavior (`UxmlContainerBehaviors`):
 | ScrollView | wheel: `mouse-wheel-scroll-size` per notch, else 36px (Unity's runtime line height, measured: `ctl-scrollview-wheel`); a Horizontal view scrolls sideways on the vertical wheel; the event goes on to an outer ScrollView at a bound unless `nested-interaction-kind="StopScrolling"`. Touch drag scrolls with `touch-scroll-type` `Clamped`, `Elastic` (past the range by `elasticity` of the viewport) or `Unrestricted`. A focused child scrolls into view (follow focus, for keyboard and controller navigation). A ScrollView with `focusable="true"` scrolls on `ui_up`/`ui_down` (one line), `ui_page_up`/`ui_page_down` (one viewport) and `ui_left`/`ui_right` |
 | Scroller | low and high RepeatButtons step by the page size (`*-page-size` of the ScrollView, else a tenth of the dragger, Unity's `k_ScrollPageOverlapFactor`; 20 for a standalone Scroller) after 250 ms and every 30 ms while held; a press on the track pages toward the pointer; the dragger follows the pointer; the focused ScrollerSlider takes `ui_*`, page, Home and End. A standalone Scroller sends `value_changed` |
 | ListView, TreeView, multi-column | selection by click (Ctrl adds, Shift extends for `selection-type="Multiple"`), `set_selection`, keys and controller (`ui_up`/`ui_down`, page, Home, End, Shift); the selected row gets `unity-collection-view__item--selected`, `:checked` (Unity 6000.3) and `:selected` (Unity's alias of `:checked`). Enter, controller A and a double click send `items_chosen`. The footer adds and removes items, the size field sets the count, `reorderable` rows move by drag (`item_index_changed`). TreeView: the toggle, `ui_right` and `ui_left` open and close items. Multi-column: a click on a sortable header sorts (`column_sorting_changed`; `sorting-mode="Default"` sorts the items source), the resize handles change a column width |
-| TabView | a click or `ui_accept` on a header selects its Tab (`value_changed` with the index); the other Tabs are `display: none`; the close button of a `closeable` Tab closes it (`tab_closed`). Headers are focusable so a controller can reach them |
+| TabView | a click or `ui_accept` on a header selects its Tab (`value_changed` with the index); the other Tabs are `display: none`; the close button of a `closeable` Tab closes it (`tab_closed`); in a `reorderable` TabView a drag of a header moves its Tab (`tab_reordered`, `move_tab`). Headers are focusable so a controller can reach them |
 | TwoPaneSplitView | a drag on the dragline sets the fixed pane size (`set_split_dimension`), between 0 and the view size |
 | IMGUIContainer | `set_imgui_handler(name, draw, input)`: `draw.call(box, rect)` runs in the control's `_draw`, `input.call(box, event)` in its `gui_input`. Unity's `onGUIHandler` is C# IMGUI code, which Godot cannot run |
 
@@ -932,11 +938,14 @@ not Unity's stylesheet, and the check, arrow and help box images are
 godot-uxml's own SVGs.
 
 `UxmlTheme.attach(doc, path)` adds the sheet to the model with no scope
-and `"theme": true`, and puts the sheet first in cascade order. The
+and `"theme": true`, and puts the sheet first in cascade order. A document
+with a container control (`UxmlTheme.CONTAINER_TAGS`) also gets the
 structure sheet (`themes/unity-structure.uss`, the geometry of the
-container parts) goes ahead of it, also when `path` is empty. The
-compiled form of a theme rule (`UssCascade._compile_rule`) is kept on the
-shared parsed rule, so a load does not compile the theme again.
+container parts) ahead of the theme, also when `path` is empty, and, with
+the default theme, `themes/unity-default-containers.uss` after it. Other
+documents do not compile these rules. The compiled form of a theme rule
+(`UssCascade._compile_rule`) is kept on the shared parsed rule, so a load
+does not compile the theme again on the GDScript side.
 `UssCascade` ranks every author rule above every theme rule
 (`AUTHOR_LAYER`, a bit in the compiled specificity key that the native
 cascade reads too). Unity does the same: an author `Button { margin: 0 }`
@@ -1147,7 +1156,7 @@ index for a TabView), `loaded(success)`. Collection views:
 `item_index_changed(name, from, to)`, `items_added(name, indices)`,
 `items_removed(name, indices)`, `column_sorting_changed(name,
 descriptions)`, `item_expanded_changed(name, id, expanded)`. TabView:
-`tab_closed(name, index)`. Native
+`tab_closed(name, index)`, `tab_reordered(name, from, to)`. Native
 signals (`pressed`, `toggled`, `text_changed`, ...) remain directly
 connectable on the controls `get_element`/`get_native` returns —
 `value_changed` fires exactly once per real edit.
@@ -1265,6 +1274,7 @@ doc.set_column_comparison("table", "hp", func(a, b): return a.hp - b.hp)
 doc.set_scroll_offset("sv", Vector2(0, 120))   # ScrollView.scrollOffset
 doc.scroll_to("sv", "item-name")               # ScrollView.ScrollTo
 doc.select_tab("tabs", 1)                      # TabView
+doc.move_tab("tabs", 0, 2)                     # reorderable TabView
 doc.set_split_dimension("split", 200)          # TwoPaneSplitView
 doc.set_imgui_handler("gl", func(box, rect): box.draw_rect(rect, Color.RED))
 for d in doc.diagnostics:                 # everything, parse→runtime

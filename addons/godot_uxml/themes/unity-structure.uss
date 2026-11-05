@@ -4,11 +4,12 @@
  *
  * Unity lays the parts of these controls out with rules of its default
  * theme. Without those rules a ScrollView cannot scroll and a list row
- * has no row layout, so UxmlTheme attaches this sheet even when
- * UxmlDocument.theme_path is empty, ranked like the theme (below every
- * author rule). It holds only geometry: direction, grow and shrink,
- * position, part sizes and overflow. The look (colours, borders, padding,
- * fonts) is in unity-default.uss.
+ * has no row layout, so UxmlTheme attaches this sheet to a document with
+ * one of these controls even when UxmlDocument.theme_path is empty,
+ * ranked like the theme (below every author rule). It holds only
+ * geometry: direction, grow and shrink, position, part sizes and
+ * overflow. The look (colours, borders, padding, fonts) is in
+ * unity-default-containers.uss.
  *
  * Values measured in Unity 6000.3.24f1 (bench/parity/unity/ctl-scroll*,
  * ctl-list*, ctl-tree*, ctl-multicolumn-*, ctl-tab*, ctl-twopane).

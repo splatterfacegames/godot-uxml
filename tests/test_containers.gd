@@ -687,6 +687,30 @@ func test_tab_view() -> void:
 	_unload(doc)
 
 
+## reorderable TabView: a moved Tab keeps its content and the selection.
+func test_tab_reorder() -> void:
+	var doc := _doc('<ui:TabView name="tabs" reorderable="true" style="width: 300px; height: 150px;">'
+		+ '<ui:Tab name="a" label="A"><ui:Label name="ab" text="Alpha"/></ui:Tab>'
+		+ '<ui:Tab name="b" label="B"/><ui:Tab name="c" label="C"/></ui:TabView>')
+	_settle(doc)
+	var tabs := doc.get_element_model("tabs")
+	h.check(_part(doc.get_element_model("a"), "reorderable-handle") != null, "drag handle part")
+	var moved := []
+	doc.tab_reordered.connect(func(n, a, b): moved.append([a, b]))
+	doc.move_tab("tabs", 0, 2)
+	_settle(doc)
+	h.eq(moved, [[0, 2]], "tab_reordered")
+	h.eq(doc._behaviors[tabs].tab_order(), ["b", "c", "a"], "tab order")
+	var hc := _part(tabs, "header-container")
+	h.eq(hc.children[2], _part(doc.get_element_model("a"), "header"), "header moved")
+	h.eq(doc.get_selected_tab("tabs"), 2, "the selection follows the Tab")
+	h.check(doc.get_element("ab").is_visible_in_tree(), "the moved Tab keeps its content")
+	var xa := _ctl(doc, _part(doc.get_element_model("a"), "header")).position.x
+	var xb := _ctl(doc, _part(doc.get_element_model("b"), "header")).position.x
+	h.check(xa > xb, "the header is laid out in its new place")
+	_unload(doc)
+
+
 ## Measured (ctl-twopane): fixed pane at its initial dimension, 1px
 ## dragline anchor, the other pane grows; set_split_dimension.
 func test_two_pane_split_view() -> void:
