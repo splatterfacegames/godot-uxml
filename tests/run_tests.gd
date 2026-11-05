@@ -24,6 +24,8 @@ func _initialize() -> void:
 	var si := ua.find("--suite")
 	if si >= 0 and si + 1 < ua.size():
 		only = ua[si + 1]
+	if not only.is_empty():
+		await process_frame  # the root enters the tree (timers, input)
 	var suites: Array = [] if not only.is_empty() and only != "core" else [[self, "core"]]
 	for entry in [
 		["res://tests/test_layout.gd", "layout"],
@@ -1006,7 +1008,9 @@ func test_all_initial() -> void:
 func test_recognized_but_unmapped_controls_warn() -> void:
 	# IntegerField and FloatField left the recognized-but-unmapped list when
 	# they became Unity part trees (runtime/controls/uxml_input_parts.gd):
-	# they are known controls now. An editor-only control still warns.
+	# they are known controls now. The editor controls (uie:) are part
+	# trees too (runtime/controls/uxml_editor_parts.gd); an unknown tag
+	# still warns.
 	for tag in ["IntegerField", "FloatField"]:
 		var doc := UxmlLoader.load_source(
 			'<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:%s name="f"><ui:Label name="k" /></ui:%s></ui:UXML>' % [tag, tag],
@@ -1014,8 +1018,12 @@ func test_recognized_but_unmapped_controls_warn() -> void:
 		)
 		eq(_count_kind(doc.warnings, "unsupported-control"), 0, "%s is a mapped control" % tag)
 		check(doc.find_by_name("k") != null, "%s children preserved" % tag)
+	var known := UxmlLoader.load_source(
+		'<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements"><uie:ColorField name="c" /></ui:UXML>',
+		"inline/test.uxml", _resolver(FIXTURES + "/options"))
+	eq(_count_kind(known.warnings, "unsupported-control"), 0, "an editor control is a mapped control")
 	var ed := UxmlLoader.load_source(
-		'<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:ColorField name="f"><ui:Label name="k" /></ui:ColorField></ui:UXML>',
+		'<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:FancyField name="f"><ui:Label name="k" /></ui:FancyField></ui:UXML>',
 		"inline/test.uxml", _resolver(FIXTURES + "/options"))
 	eq(_count_kind(ed.warnings, "unsupported-control"), 1, "an unmapped control warns")
 	check(ed.find_by_name("k") != null, "unmapped control children preserved")
