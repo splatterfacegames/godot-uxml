@@ -32,6 +32,18 @@ var _warned: Dictionary = {}
 # or not.
 var _tex_cache: Dictionary = {}
 var _font_cache: Dictionary = {}
+## Last insets apply_resolved_insets wrote per control; cleared whenever
+## _apply_themed swaps the control's styleboxes. A repeat call with the same
+## insets on the same styleboxes is a no-op and is skipped.
+var _inset_memo: Dictionary = {}
+## Fresh-stylebox content margins per themed control ([l, t, r, b], or null
+## when the fresh stylebox does not carry the px estimate — texture boxes).
+var _estimate: Dictionary = {}
+## Controls whose freshly applied stylebox margins differ from the resolved
+## layout insets (percentage padding, texture styleboxes): re-applying them
+## changes what the next measure sees, so the document keeps re-applying and
+## re-laying them out on every restyle exactly as a full restyle would.
+var drifting: Dictionary = {}
 
 
 func _init(
@@ -188,11 +200,18 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 			if sb.has_meta("uxml_margins"):
 				tsb.set_meta("uxml_margins", sb.get_meta("uxml_margins"))
 			sb = tsb
-		for slot in _stylebox_slots(c):
+		var slots := _stylebox_slots(c)
+		for slot in slots:
 			if sb != null:
 				c.add_theme_stylebox_override(slot, sb)
 			else:
 				c.remove_theme_stylebox_override(slot)
+		_inset_memo.erase(c)
+		if sb != null and not slots.is_empty():
+			_estimate[c] = sb.get_meta("uxml_margins") if sb.has_meta("uxml_margins") else null
+		else:
+			_estimate.erase(c)
+			drifting.erase(c)
 
 	var color := _color(style, "color", el)
 	for name in _font_color_names(c):
@@ -591,6 +610,16 @@ func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 ## also tracks resizes. The uxml_margins meta is updated in lockstep so
 ## the measure path keeps subtracting exactly what the stylebox adds.
 func apply_resolved_insets(c: Control, start: Vector2, end: Vector2) -> void:
+	var memo = _inset_memo.get(c)
+	if memo != null and memo[0] == start and memo[1] == end:
+		return
+	_inset_memo[c] = [start, end]
+	if _estimate.has(c):
+		var est = _estimate[c]
+		if est == null or est != [start.x, start.y, end.x, end.y]:
+			drifting[c] = true
+		else:
+			drifting.erase(c)
 	var seen := {}
 	for slot in [
 		"normal", "hover", "pressed", "disabled", "focus", "read_only", "slider"

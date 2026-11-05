@@ -1,5 +1,6 @@
 class_name RefFlexLayout
 extends RefCounted
+@warning_ignore_start("inference_on_variant", "unsafe_method_access", "untyped_declaration")
 ## The authored flex subset: turns the element tree plus computed USS styles
 ## into border-box Rect2s, in the coordinate space of each element's parent
 ## control.
@@ -106,7 +107,7 @@ func _num(el: UxmlElement, name: String, default: float) -> float:
 	var v = _prop(el, name)
 	if v == null:
 		return default
-	var n := UssValues.parse_number(String(v))
+	var n := RefUssValues.parse_number(String(v))
 	if is_nan(n):
 		_warn_once(el, name, '%s: "%s" is not a number; %s used' % [name, v, default])
 		return default
@@ -128,7 +129,7 @@ func _len(el: UxmlElement, name: String, base: float) -> Dictionary:
 	var raw = _prop(el, name)
 	if raw == null:
 		return {"auto": true, "v": 0.0}
-	var p := UssValues.parse_length(String(raw))
+	var p := RefUssValues.parse_length(String(raw))
 	match p["kind"]:
 		"px":
 			return {"auto": false, "v": p["value"]}
@@ -200,7 +201,7 @@ func _borders(el: UxmlElement, cb_width: float) -> Dictionary:
 		if raw == null:
 			out[side[0]] = 0.0
 			continue
-		var p := UssValues.parse_length(String(raw))
+		var p := RefUssValues.parse_length(String(raw))
 		if p["kind"] == "px":
 			out[side[0]] = maxf(0.0, p["value"])
 		else:
@@ -225,7 +226,7 @@ func _gap(el: UxmlElement, name: String, base: float) -> float:
 	var raw = _prop(el, name)
 	if raw == null:
 		return 0.0
-	var p := UssValues.parse_length(String(raw))
+	var p := RefUssValues.parse_length(String(raw))
 	match p["kind"]:
 		"px":
 			return maxf(0.0, p["value"])

@@ -84,6 +84,8 @@ var _fc: Array = []                    # for_children Dictionary per element
 var _fc_customs: Array = []            # custom-property value map of _fc (shared read-only)
 var _warn: Array = []                  # per element warnings
 var _computed_once := false
+## Previous computed Dictionary for each index update() returned (aligned).
+var last_old: Array = []
 var _opt_warnings: Array = []
 
 ## UxmlElement -> computed style (property -> {value, origin}), preorder.
@@ -498,6 +500,7 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 
 	var full := force or not _computed_once
 	var changed := PackedInt32Array()
+	last_old = []
 	var inh_dirty := PackedByteArray()
 	inh_dirty.resize(n)
 	var anc_until := -1
@@ -530,6 +533,7 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 		_compute(i)
 		if full or old == null or old != styles[el]:
 			changed.append(i)
+			last_old.append(old)
 		if old_fc == null or old_fc != _fc[i]:
 			var ch := i + 1
 			var e := _end[i]

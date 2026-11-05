@@ -70,6 +70,40 @@ var _layout_warned: Dictionary = {}    # shared dedupe for layout warnings
 var _effective_root: String = ""       # root the last successful load used
 var _root_box: UxmlBox = null
 var _restyle_queued := false
+var _cascade: UssCascade = null        # persistent incremental cascade per load
+var _full_apply := true                # next restyle re-applies every control
+var _force_layout := true              # next restyle lays out even if paint-only
+var _rects: Dictionary = {}            # last layout results, reused when a
+var _insets: Dictionary = {}           # paint-only restyle skips the layout
+# Settling. Theme overrides reach a control's minimum size through a
+# deferred engine update, so the layout right after an apply (and anything
+# an apply derives from control sizes, like UxmlField.natural_size) can see
+# stale measures; the original runtime corrected that on the next restyle
+# because every restyle re-applied and re-laid out everything. A pass that
+# applied controls therefore re-applies them on the next pass and keeps
+# laying out until a layout reproduces the previous rects — the same fixed
+# point the full re-apply/re-layout reaches — before paint-only restyles
+# are allowed to skip the layout.
+var _reapply: Array = []
+var _unsettled := true
+var _pending_fresh := false
+var _el_of: Dictionary = {}           # outer Control -> UxmlElement
+
+## Computed-style properties that can change neither the flex geometry nor
+## any control's intrinsic measure: a restyle that only changes these
+## re-applies the affected controls but skips the layout pass. Custom
+## properties (--*) are also paint-only — their effect arrives through the
+## properties that reference them.
+const PAINT_ONLY := {
+	"background-color": true, "color": true,
+	"border-top-color": true, "border-right-color": true,
+	"border-bottom-color": true, "border-left-color": true,
+	"border-top-left-radius": true, "border-top-right-radius": true,
+	"border-bottom-right-radius": true, "border-bottom-left-radius": true,
+	"-unity-background-image-tint-color": true,
+	"-unity-text-outline-color": true,
+	"-unity-text-align": true, "visibility": true,
+}
 
 
 func _init() -> void:
@@ -187,6 +221,15 @@ func _clear() -> void:
 	# rebuilt with the new one rather than warned into a dead array.
 	_applier = null
 	_layout_warned = {}
+	_cascade = null
+	_full_apply = true
+	_force_layout = true
+	_rects = {}
+	_insets = {}
+	_reapply = []
+	_unsettled = true
+	_pending_fresh = false
+	_el_of = {}
 	_doc = null
 	diagnostics = []
 
@@ -224,6 +267,8 @@ func _index() -> void:
 	_natives = factory.natives
 	_scroll = factory.scroll_contents
 	_controls[_doc.root] = _root_box
+	for el in _controls:
+		_el_of[_controls[el]] = el
 	for el in _controls:
 		if el == _doc.root:
 			continue
@@ -337,9 +382,12 @@ func _queue_restyle() -> void:
 	call_deferred("_restyle_now")
 
 
-## Re-resolve the cascade with the current runtime states, re-apply all
-## styles, and re-layout. Coalesced: several state changes in one frame
-## produce one pass.
+## Re-resolve the cascade with the current runtime states, re-apply the
+## controls whose style or effective state changed, and re-layout unless
+## every change was paint-only. Coalesced: several state changes in one
+## frame produce one pass. The cascade is incremental (only elements whose
+## inputs changed are recomputed), so the cost scales with what changed,
+## not with the document.
 func _restyle_now() -> void:
 	_restyle_queued = false
 	if _doc == null:
@@ -349,7 +397,6 @@ func _restyle_now() -> void:
 		var s: Dictionary = _states[el]
 		if not s.is_empty():
 			element_states[el] = s.keys()
-	_compute_disabled()
 	# The resolver gets the explicit runtime sets and descends them the same
 	# way it descends enabled="false"; enabled_elements carries the
 	# SetEnabled(true) override that cancels the attribute.
@@ -357,12 +404,19 @@ func _restyle_now() -> void:
 	var runtime_enabled := {}
 	for el in _disabled_rt:
 		(runtime_disabled if _disabled_rt[el] else runtime_enabled)[el] = true
-	var res := UssStyleResolver.resolve(_doc, {
+	if _cascade == null:
+		_cascade = UssCascade.new(_doc)
+		_full_apply = true
+		_force_layout = true
+	var changed := _cascade.update({
 		"element_states": element_states,
 		"disabled_elements": runtime_disabled,
 		"enabled_elements": runtime_enabled,
 	})
-	_styles = res["styles"]
+	_styles = _cascade.styles
+	var old_dis := _disabled_eff
+	var old_gone := _gone_eff
+	_compute_disabled()
 	_compute_gone()
 	# One applier per load: its warning dedupe and resource caches must
 	# survive restyles or every hover would re-report and re-load misses.
@@ -370,23 +424,108 @@ func _restyle_now() -> void:
 		_applier = UxmlStyleApplier.new(
 			_resolver, _doc.path, _doc.source, _rt_warnings
 		)
-	for el in _controls:
+	var need_layout := _force_layout or _full_apply or _unsettled
+	var applied: Array = []
+	var fresh := 0  # applied[0..fresh) changed this pass; the rest are re-applies
+	if _full_apply:
+		applied = _controls.keys()
+		fresh = applied.size()
+	else:
+		var els: Array = _cascade.els
+		var olds: Array = _cascade.last_old
+		var seen := {}
+		for k in changed.size():
+			var el: UxmlElement = els[changed[k]]
+			seen[el] = true
+			if not need_layout and not _paint_only(olds[k], _styles[el]):
+				need_layout = true
+		# Effective disabled / display:none changes (ancestors included).
+		# Disabled flips relayout too: native disabled styling may change
+		# a control's minimum size.
+		for el in old_dis:
+			if not _disabled_eff.has(el):
+				seen[el] = true
+				need_layout = true
+		for el in _disabled_eff:
+			if not old_dis.has(el):
+				seen[el] = true
+				need_layout = true
+		for el in old_gone:
+			if not _gone_eff.has(el):
+				seen[el] = true
+				need_layout = true
+		for el in _gone_eff:
+			if not old_gone.has(el):
+				seen[el] = true
+				need_layout = true
+		for el in seen:
+			if _controls.has(el):
+				applied.append(el)
+		fresh = applied.size()
+		for el in _reapply:
+			if not seen.has(el) and _controls.has(el):
+				seen[el] = true
+				applied.append(el)
+		for c in _applier.drifting:
+			var del = _el_of.get(c)
+			if del != null:
+				need_layout = true
+				if not seen.has(del):
+					seen[del] = true
+					applied.append(del)
+	_reapply = applied.slice(0, fresh)
+	for el in applied:
 		var c: Control = _controls[el]
 		var st: Dictionary = _styles.get(el, {})
 		_applier.apply(el, c, _natives.get(el, c), st,
 			_disabled_eff.has(el), _gone_eff.has(el))
-	_do_layout()
+	_full_apply = false
+	_force_layout = false
+	if need_layout:
+		_pending_fresh = fresh > 0
+		_do_layout()
+	else:
+		# Re-applied themed controls got fresh styleboxes: hand them the
+		# resolved insets of the (unchanged) last layout.
+		for el in applied:
+			_place_control(el)
 	# Runtime warnings accumulate during apply/layout — surface last so they
 	# are all included.
-	diagnostics = _doc.warnings + res["warnings"] + _rt_warnings
+	diagnostics = _doc.warnings + _cascade.collect_warnings() + _rt_warnings
+
+
+## True when two computed styles differ only in PAINT_ONLY properties.
+static func _paint_only(old, new: Dictionary) -> bool:
+	if old == null:
+		return false
+	var o: Dictionary = old
+	for prop in new:
+		var ne: Dictionary = new[prop]
+		var oe = o.get(prop)
+		if oe != null and oe["value"] == ne["value"]:
+			continue
+		if PAINT_ONLY.has(prop) or prop.begins_with("--"):
+			continue
+		return false
+	for prop in o:
+		if new.has(prop):
+			continue
+		if PAINT_ONLY.has(prop) or prop.begins_with("--"):
+			continue
+		return false
+	return true
 
 
 func _compute_disabled() -> void:
-	_disabled_eff.clear()
-	var stack: Array = [[_doc.root, false]]
-	while not stack.is_empty():
-		var frame: Array = stack.pop_back()
-		var el: UxmlElement = frame[0]
+	# Preorder walk over the cascade's index: parent before child.
+	_disabled_eff = {}
+	var els: Array = _cascade.els
+	var parent: PackedInt32Array = _cascade._parent
+	var n := els.size()
+	var dis := PackedByteArray()
+	dis.resize(n)
+	for i in n:
+		var el: UxmlElement = els[i]
 		# A set_enabled() call is an override: it wins over the enabled
 		# attribute for this element. A disabled ancestor still wins over
 		# everything — Unity's SetEnabled disables the whole subtree.
@@ -394,32 +533,34 @@ func _compute_disabled() -> void:
 			_disabled_rt[el] if _disabled_rt.has(el)
 			else el.get_attribute("enabled") == "false"
 		)
-		var dis: bool = frame[1] or own
-		if dis:
+		var p := parent[i]
+		if own or (p >= 0 and dis[p] == 1):
+			dis[i] = 1
 			_disabled_eff[el] = true
-		for child in el.children:
-			stack.append([child, dis])
 
 
 ## Effective display:none: display is not inherited in USS, but a hidden
 ## ancestor makes the whole subtree inert — descendants get the same
 ## focus/mouse/input suppression as the element itself.
 func _compute_gone() -> void:
-	_gone_eff.clear()
-	var stack: Array = [[_doc.root, false]]
-	while not stack.is_empty():
-		var frame: Array = stack.pop_back()
-		var el: UxmlElement = frame[0]
-		var st: Dictionary = _styles.get(el, {})
-		var disp = st.get("display")
-		var gone: bool = (
-			frame[1]
-			or (disp != null and String(disp["value"]) == "none")
-		)
-		if gone:
+	_gone_eff = {}
+	var els: Array = _cascade.els
+	var parent: PackedInt32Array = _cascade._parent
+	var n := els.size()
+	var gone := PackedByteArray()
+	gone.resize(n)
+	for i in n:
+		var el: UxmlElement = els[i]
+		var p := parent[i]
+		var g := p >= 0 and gone[p] == 1
+		if not g:
+			var st = _styles.get(el)
+			if st != null:
+				var disp = st.get("display")
+				g = disp != null and String(disp["value"]) == "none"
+		if g:
+			gone[i] = 1
 			_gone_eff[el] = true
-		for child in el.children:
-			stack.append([child, gone])
 
 
 func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vector2:
@@ -476,6 +617,7 @@ func _scroll_bar_width() -> float:
 func _do_layout() -> void:
 	if _doc == null:
 		return
+	var prev := _rects
 	var res := UxmlFlexLayout.compute(
 		_doc.root, _styles, size,
 		_measure_leaf, _rt_warnings,
@@ -484,46 +626,59 @@ func _do_layout() -> void:
 		 "warned": _layout_warned,
 		 "volatile": _volatile_measures()}
 	)
-	var rects: Dictionary = res["rects"]
-	var insets: Dictionary = res["insets"]
+	_rects = res["rects"]
+	_insets = res["insets"]
 	for el in _controls:
 		if el == _doc.root:
 			continue
-		var c: Control = _controls[el]
-		var r = rects.get(el)
-		if r == null:
-			continue  # display:none — already hidden by the applier
-		c.position = r.position
-		c.size = r.size
-		# Internal chrome the flex pass does not position lives inside the
-		# element's content box: field caption+native shift by the resolved
-		# padding/border insets, and an Image's anchored TextureRect gets
-		# matching anchor offsets. (ScrollView is deliberately excluded —
-		# its content children already carry the pad/border offset inside
-		# the scroll content control, so insetting the viewport would
-		# double-apply it.)
-		var pair = insets.get(el)
-		if pair == null:
-			continue
-		var start: Vector2 = pair[0]
-		var end: Vector2 = pair[1]
-		if c is UxmlField:
-			c.set_content_insets(start, end)
-		else:
-			var inner: Control = _natives.get(el)
-			if inner is TextureRect:
-				inner.offset_left = start.x
-				inner.offset_top = start.y
-				inner.offset_right = -end.x
-				inner.offset_bottom = -end.y
-			# Unwrapped themed controls draw their own text inside the
-			# stylebox's content margins — hand them the same resolved
-			# insets (percentage padding included) the box layout used.
-			if _applier != null:
-				_applier.apply_resolved_insets(c, start, end)
+		_place_control(el)
+	var sizes: Dictionary = res["content_sizes"]
 	for el in _scroll:
 		var content: Control = _scroll[el]
-		content.custom_minimum_size = res["content_sizes"].get(el, Vector2.ZERO)
+		content.custom_minimum_size = sizes.get(el, Vector2.ZERO)
+	# Not settled until a layout with no fresh applies reproduces the
+	# previous rects (see _reapply).
+	_unsettled = _pending_fresh or prev != _rects
+	_pending_fresh = false
+
+
+## Position/size one element's control from the last layout and inset its
+## internal chrome.
+func _place_control(el: UxmlElement) -> void:
+	if el == _doc.root:
+		return
+	var c: Control = _controls[el]
+	var r = _rects.get(el)
+	if r == null:
+		return  # display:none — already hidden by the applier
+	c.position = r.position
+	c.size = r.size
+	# Internal chrome the flex pass does not position lives inside the
+	# element's content box: field caption+native shift by the resolved
+	# padding/border insets, and an Image's anchored TextureRect gets
+	# matching anchor offsets. (ScrollView is deliberately excluded —
+	# its content children already carry the pad/border offset inside
+	# the scroll content control, so insetting the viewport would
+	# double-apply it.)
+	var pair = _insets.get(el)
+	if pair == null:
+		return
+	var start: Vector2 = pair[0]
+	var end: Vector2 = pair[1]
+	if c is UxmlField:
+		c.set_content_insets(start, end)
+	else:
+		var inner: Control = _natives.get(el)
+		if inner is TextureRect:
+			inner.offset_left = start.x
+			inner.offset_top = start.y
+			inner.offset_right = -end.x
+			inner.offset_bottom = -end.y
+		# Unwrapped themed controls draw their own text inside the
+		# stylebox's content margins — hand them the same resolved
+		# insets (percentage padding included) the box layout used.
+		if _applier != null:
+			_applier.apply_resolved_insets(c, start, end)
 
 
 # ---------------------------------------------------------------------------
@@ -600,4 +755,6 @@ func set_class(element_name: String, class_string: String) -> void:
 ## Re-resolve and re-lay out after changes the runtime cannot see — e.g.
 ## code mutating a Label's text directly.
 func refresh() -> void:
+	_full_apply = true
+	_force_layout = true
 	_queue_restyle()

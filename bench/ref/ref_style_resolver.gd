@@ -1,5 +1,6 @@
 class_name RefStyleResolver
 extends RefCounted
+@warning_ignore_start("inference_on_variant", "unsafe_method_access", "untyped_declaration")
 ## The cascade: what style actually applies to each element.
 ##
 ## Ported from vendor/uxml-preview/src/style/resolve.ts (Apache-2.0), narrowed
