@@ -41,6 +41,9 @@ const META_CONTENT := &"uxml_content"
 ## are fixed after load.
 const META_LIVE := &"uxml_live_text"
 const HIDDEN := "display: none;"
+## Author children of a control that live in its content container: the
+## control (WeakRef), their logical parent.
+const META_LOGICAL_PARENT := &"uxml_logical_parent"
 
 
 ## Build the part trees of every control in `doc` (once per load, before the
@@ -50,6 +53,8 @@ static func expand(doc: UxmlDocumentModel) -> void:
 	if doc == null or doc.root == null:
 		return
 	_mark_live(doc)
+	# Containers and collections: UxmlObjects (<Columns>) leave the tree.
+	UxmlContainerParts.before_expand(doc)
 	var todo: Array = []
 	var depth := {}  # Foldout -> number of Foldout ancestors
 	_foldout_depths(doc.root, 0, depth)
@@ -67,6 +72,8 @@ static func expand(doc: UxmlDocumentModel) -> void:
 			todo.append(el)
 	for el in todo:
 		build(el)
+	# Containers and collections: steps that need every part tree built.
+	UxmlContainerParts.after_expand(doc)
 
 
 ## Record the text attributes that <Bindings> write (META_LIVE).
@@ -128,6 +135,11 @@ static func build(el: UxmlElement) -> void:
 		el.set_meta(META_CONTENT, content.part_role)
 	for c in authored:
 		content.children.append(c)
+		if content != el:
+			# Unity's VisualElement.parent: the control, not the content
+			# container (selector combinators walk it). Weak: the control
+			# holds the child.
+			c.set_meta(META_LOGICAL_PARENT, weakref(el))
 	if el.local == "ToggleButtonGroup":
 		_button_group_classes(content)
 
@@ -149,6 +161,14 @@ static func _button_group_classes(container: UxmlElement) -> void:
 		elif i == n - 1:
 			pos = "right"
 		_add_control_classes(buttons[i], ["unity-button-group__button", "unity-button-group__button--" + pos])
+
+
+## The logical parent of an author child that a control moved into its
+## content container (Unity's VisualElement.parent), else null.
+static func logical_parent(el: UxmlElement) -> UxmlElement:
+	if not el.has_meta(META_LOGICAL_PARENT):
+		return null
+	return (el.get_meta(META_LOGICAL_PARENT) as WeakRef).get_ref()
 
 
 ## Where authored children of `el` live: a part, or `el` itself.
@@ -272,6 +292,10 @@ static func _add_control_classes(el: UxmlElement, classes: Array) -> void:
 
 
 static func _builder(local: String) -> Callable:
+	# Containers and collections live in uxml_container_parts.gd.
+	var cb := UxmlContainerParts.builder(local)
+	if cb.is_valid():
+		return cb
 	match local:
 		"Toggle":
 			return _build_toggle

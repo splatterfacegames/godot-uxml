@@ -1,0 +1,12 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:TabView name="tabs" style="width: 300px; height: 150px;">
+    <ui:Tab name="tab-a" label="First">
+      <ui:Label name="a-body" text="Alpha" />
+    </ui:Tab>
+    <ui:Tab name="tab-b" label="Second" closeable="true">
+      <ui:Label name="b-body" text="Beta" />
+    </ui:Tab>
+    <ui:Tab name="tab-c" label="Third" />
+  </ui:TabView>
+  <ui:Tab name="loose" label="Loose" />
+</ui:UXML>

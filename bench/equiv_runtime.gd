@@ -269,9 +269,8 @@ func _snap(d) -> Array:
 			e["box"] = [_res(c.box_style), _res(c.box_texture), _res(c.get("box_texture_style"))]
 		if n is TextureRect:
 			e["tr"] = [n.offset_left, n.offset_top, n.offset_right, n.offset_bottom]
-		var sc = d._scroll.get(el)
-		if sc != null:
-			e["scroll"] = sc.custom_minimum_size
+		if el.local == "ScrollView" and d._behaviors.has(el):
+			e["scroll"] = d._behaviors[el].offset()
 		out.append(e)
 	return out
 

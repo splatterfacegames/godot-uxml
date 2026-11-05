@@ -1,0 +1,3 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ListView name="lv" selection-type="Multiple" style="height: 100px; width: 160px;" />
+</ui:UXML>

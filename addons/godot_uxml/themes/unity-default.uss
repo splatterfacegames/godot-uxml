@@ -378,3 +378,274 @@ UXML {
   padding: 10px 12px;
   -unity-text-align: middle-center;
 }
+
+/* ======================================================================
+ * Containers and collections (runtime/controls/uxml_container_parts.gd):
+ * the look. Their geometry (direction, grow, position, part sizes,
+ * overflow) is in unity-structure.uss, which UxmlTheme also attaches
+ * without the theme. Measured: bench/parity/unity/ctl-scroll*.json,
+ * ctl-list*.json, ctl-tree*.json, ctl-multicolumn-*.json, ctl-tab*.json,
+ * ctl-twopane.json. The Scroller rules repeat the BaseField and BaseSlider
+ * values that the Scroller overrides, so other slider rules cannot leak
+ * into it.
+ * ====================================================================== */
+
+/* ---- Scroller -------------------------------------------------------- */
+
+.unity-scroller {
+  border-color: rgb(149, 149, 149);
+}
+
+.unity-scroller__low-button,
+.unity-scroller__high-button {
+  margin: 0;
+  padding: 0;
+  border-width: 1px;
+  border-color: rgb(149, 149, 149);
+  background-color: rgb(240, 240, 240);
+  -unity-background-image-tint-color: rgb(50, 50, 50);
+}
+
+.unity-scroller--vertical > .unity-scroller__low-button {
+  background-image: url("arrow-up.svg");
+}
+
+.unity-scroller--vertical > .unity-scroller__high-button {
+  background-image: url("arrow-down.svg");
+}
+
+.unity-scroller--horizontal > .unity-scroller__low-button {
+  background-image: url("arrow-left.svg");
+}
+
+.unity-scroller--horizontal > .unity-scroller__high-button {
+  background-image: url("arrow-right.svg");
+}
+
+.unity-scroller__slider {
+  padding: 0;
+}
+
+.unity-scroller__slider > .unity-base-slider__input {
+  margin: 0;
+  padding: 0;
+}
+
+.unity-scroller__slider .unity-base-slider__drag-container {
+  margin: 0;
+  padding: 0;
+}
+
+.unity-scroller__slider .unity-base-slider__tracker {
+  margin: 0;
+  border-color: rgb(149, 149, 149);
+  border-radius: 0;
+  background-color: rgb(188, 188, 188);
+}
+
+.unity-scroller--vertical .unity-base-slider__tracker {
+  border-width: 0 1px;
+}
+
+.unity-scroller--horizontal .unity-base-slider__tracker {
+  border-width: 1px 0;
+}
+
+.unity-scroller__slider .unity-base-slider__dragger {
+  margin: 0;
+  border-width: 1px;
+  border-color: rgba(0, 0, 0, 0);
+  border-radius: 0;
+  background-color: rgb(231, 231, 231);
+}
+
+/* ---- Collection views: ListView, TreeView, MultiColumn* --------------- */
+
+.unity-collection-view--with-border {
+  padding-top: 2px;
+  padding-bottom: 2px;
+  border-width: 1px;
+  border-radius: 3px;
+}
+
+/* A Label item (Unity's default makeItem) keeps the Label theme except
+   for its top and bottom (ctl-listview, ctl-listview-reorder). */
+.unity-collection-view__item.unity-label,
+.unity-list-view__reorderable-item__container > .unity-label {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+}
+
+.unity-collection-view__item--alternative-background {
+  background-color: rgb(188, 188, 188);
+}
+
+.unity-collection-view__item--selected {
+  background-color: rgb(174, 174, 174);
+}
+
+/* The selection of a focused view (ctl-listview-keys). */
+.unity-collection-view:focus .unity-collection-view__item--selected {
+  color: rgb(255, 255, 255);
+  background-color: rgb(58, 114, 176);
+}
+
+.unity-list-view__footer {
+  margin: -1px 24px 0 0;
+  padding: 0 8px;
+  border-width: 0 1px 1px 1px;
+  border-color: rgb(154, 154, 154);
+  border-radius: 0 0 3px 3px;
+  background-color: rgb(202, 202, 202);
+}
+
+.unity-list-view__footer > .unity-button {
+  margin: 0;
+  border-width: 0;
+  font-size: 18px;
+  background-color: rgba(0, 0, 0, 0);
+}
+
+.unity-list-view__size-field {
+  margin: 0;
+  padding-top: 1px;
+}
+
+.unity-list-view__reorderable-handle {
+  padding: 8px 0;
+}
+
+.unity-list-view__reorderable-handle-bar {
+  margin: 1px 2px 1px 3px;
+  background-color: rgb(231, 231, 231);
+}
+
+.unity-list-view__reorderable-item__container {
+  padding: 1px 5px 1px 13px;
+}
+
+.unity-tree-view__item-toggle {
+  margin: 2px 0;
+}
+
+/* ---- Multi-column header and cells ------------------------------------- */
+
+.unity-multi-column-view__header-container {
+  border-bottom-width: 1px;
+  border-color: rgb(149, 149, 149);
+  background-color: rgb(188, 188, 188);
+}
+
+.unity-multi-column-header__column {
+  border-right-width: 1px;
+  border-right-color: rgb(149, 149, 149);
+  background-color: rgb(188, 188, 188);
+}
+
+/* Sorted columns: godot-uxml's arrow (not measured). */
+.unity-multi-column-header__column--sorted-ascending .unity-multi-column-header__column__sort-indicator__arrow,
+.unity-multi-column-header__column--sorted-descending .unity-multi-column-header__column__sort-indicator__arrow {
+  background-image: url("sort-arrow.svg");
+  -unity-background-image-tint-color: rgb(50, 50, 50);
+}
+
+.unity-multi-column-header__column--sorted-ascending .unity-multi-column-header__column__sort-indicator__arrow {
+  rotate: 180deg;
+}
+
+.unity-multi-column-header__column__sort-indicator__index-label {
+  margin: 0;
+  padding: 2px 2px 4px 1px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.unity-multi-column-header__column__default-content {
+  padding: 2px 0 2px 6px;
+}
+
+.unity-multi-column-view__cell__label {
+  padding-left: 6px;
+  -unity-text-align: middle-left;
+  text-overflow: ellipsis;
+}
+
+/* ---- TabView, Tab ------------------------------------------------------ */
+
+.unity-tab__header {
+  padding: 0 20px;
+  color: rgb(50, 50, 50);
+  background-color: rgb(255, 255, 255);
+}
+
+.unity-tab__header:checked {
+  color: rgb(27, 27, 27);
+}
+
+.unity-tab__header:hover {
+  background-color: rgb(209, 209, 209);
+}
+
+.unity-tab__header__closeable {
+  padding-right: 0;
+}
+
+.unity-tab-view__reorderable .unity-tab__header {
+  padding-left: 0;
+}
+
+.unity-tab__header-label {
+  margin: 4px 0 3px 0;
+  padding: 0;
+}
+
+.unity-tab__header:checked > .unity-tab__header-underline {
+  background-color: rgb(27, 27, 27);
+}
+
+.unity-tab__close-button {
+  margin: 0 5px;
+  opacity: 0;
+  background-image: url("close.svg");
+}
+
+.unity-tab-view__next-button,
+.unity-tab-view__previous-button {
+  background-color: rgb(255, 255, 255);
+  -unity-background-image-tint-color: rgb(50, 50, 50);
+  -unity-background-scale-mode: scale-to-fit;
+}
+
+.unity-tab-view__next-button {
+  background-image: url("arrow-right.svg");
+}
+
+.unity-tab-view__previous-button {
+  background-image: url("arrow-left.svg");
+}
+
+.unity-tab__reorderable-handle {
+  margin: 0 2px;
+}
+
+.unity-tab__reorderable-handle-bar {
+  margin: 1px 0;
+  opacity: 0;
+  background-color: rgb(27, 27, 27);
+}
+
+.unity-tab__reorderable-handle-bar--left {
+  margin-right: 2px;
+  padding-right: 1px;
+}
+
+.unity-tab__header:hover .unity-tab__reorderable-handle-bar {
+  opacity: 0.5;
+}
+
+/* ---- TwoPaneSplitView -------------------------------------------------- */
+
+.unity-two-pane-split-view__dragline-anchor {
+  background-color: rgb(149, 149, 149);
+}

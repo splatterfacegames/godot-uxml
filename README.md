@@ -159,9 +159,11 @@ status of each item. A summary:
   `TemplateContainer`, `Box`, `Label`, `TextElement`, `Image`, `Button`,
   `RepeatButton`, `Toggle`, `RadioButton`, `RadioButtonGroup`,
   `ToggleButtonGroup`, `GroupBox`, `HelpBox`, `PopupWindow`, `Foldout`,
-  `ProgressBar`.
+  `ProgressBar`, `ScrollView`, `Scroller`, `ListView`, `TreeView`,
+  `MultiColumnListView`, `MultiColumnTreeView`, `TabView`, `Tab`,
+  `TwoPaneSplitView`, `IMGUIContainer` (hosts a Godot draw callback).
 - **Controls (native Godot widgets):** `Slider`, `SliderInt`,
-  `TextField`, `DropdownField`, `ScrollView`, `ListView`.
+  `TextField`, `DropdownField`.
 - **Selectors:** type, `.class`, `#name`, `*`, compounds, descendant and
   `>` child combinators, comma groups.
 - **Pseudo-classes:** `:hover`, `:active`, `:inactive`, `:focus`,
@@ -185,14 +187,14 @@ godot-uxml compares itself with Unity 6000.3 directly:
 `tools/unity-dump` runs UXML/USS cases through Unity's default runtime
 theme and records every element, control parts included.
 `bench/parity.gd` compares structure, geometry and resolved style.
-Controls in the first part-tree set (Button, Toggle, RadioButton, Foldout,
-ProgressBar, HelpBox and more) build Unity's own part elements and use a
-default theme written from the measured values. Most remaining
+Controls with part trees (Button, Toggle, RadioButton, Foldout,
+ProgressBar, HelpBox, ScrollView, ListView, TreeView, the multi-column
+views, TabView, TwoPaneSplitView and more) build Unity's own part
+elements and use a default theme written from the measured values. Most remaining
 differences are Unity's pixel-grid rounding (at most half a pixel). The
 numbers and every known cause are in [docs/parity.md](docs/parity.md).
 
-Slider, TextField, DropdownField, ScrollView and ListView still use
-native Godot widgets.
+Slider, TextField and DropdownField still use native Godot widgets.
 
 ## Tests and benchmarks
 

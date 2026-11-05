@@ -1,0 +1,4 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ListView name="lv-head" show-foldout-header="true" header-title="Things" show-add-remove-footer="true" show-bound-collection-size="true" style="height: 160px; width: 200px;" />
+  <ui:ListView name="lv-footer" show-add-remove-footer="true" style="height: 100px; width: 200px;" />
+</ui:UXML>

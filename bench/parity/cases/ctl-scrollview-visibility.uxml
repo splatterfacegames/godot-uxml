@@ -1,0 +1,12 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ScrollView name="sv-always" mode="VerticalAndHorizontal" horizontal-scroller-visibility="AlwaysVisible" vertical-scroller-visibility="AlwaysVisible" style="height: 90px; width: 160px;">
+    <ui:VisualElement name="al-a" style="height: 20px;" />
+  </ui:ScrollView>
+  <ui:ScrollView name="sv-hidden" vertical-scroller-visibility="Hidden" style="height: 60px; width: 160px;">
+    <ui:VisualElement name="hd-a" style="height: 100px;" />
+  </ui:ScrollView>
+  <ui:ScrollView name="sv-padded" style="height: 80px; width: 160px; padding: 5px; border-width: 2px; border-color: rgb(0, 0, 255);">
+    <ui:Label name="pd-l" text="Label in a scroll view" />
+    <ui:VisualElement name="pd-a" style="height: 70px; margin: 3px;" />
+  </ui:ScrollView>
+</ui:UXML>

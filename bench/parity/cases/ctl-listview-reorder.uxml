@@ -1,0 +1,4 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ListView name="lv-anim" reorderable="true" reorder-mode="Animated" style="height: 100px; width: 200px;" />
+  <ui:ListView name="lv-simple" reorderable="true" style="height: 80px; width: 200px;" />
+</ui:UXML>

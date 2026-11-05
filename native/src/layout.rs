@@ -16,7 +16,7 @@ use godot::prelude::*;
 use crate::cascade::Cascade;
 
 const EPS: f64 = 0.01;
-pub const LAYOUT_PROPS: [&str; 36] = [
+pub const LAYOUT_PROPS: [&str; 37] = [
     "width", "height", "min-width", "min-height", "max-width", "max-height", "flex-basis",
     "padding-top", "padding-right", "padding-bottom", "padding-left",
     "margin-top", "margin-right", "margin-bottom", "margin-left",
@@ -24,7 +24,7 @@ pub const LAYOUT_PROPS: [&str; 36] = [
     "row-gap", "column-gap", "flex-grow", "flex-shrink",
     "top", "right", "bottom", "left", "aspect-ratio",
     "display", "flex-direction", "flex-wrap", "justify-content", "align-items", "align-content", "align-self",
-    "position",
+    "position", "overflow",
 ];
 const P_W: usize = 0;
 const P_H: usize = 1;
@@ -51,7 +51,8 @@ const E_ALIGN_ITEMS: usize = 32;
 const E_ALIGN_CONTENT: usize = 33;
 const E_ALIGN_SELF: usize = 34;
 const E_POSITION: usize = 35;
-const NE: usize = 8;
+const E_OVERFLOW: usize = 36;
+const NE: usize = 9;
 const T: usize = 0;
 const R: usize = 1;
 const B: usize = 2;
@@ -401,7 +402,6 @@ pub struct Pass<'a> {
     io: &'a LayoutIn,
     recs: &'a [Rec],
     kinds: Vec<CtlKind>,
-    sbw: f64,
     warned: VarDictionary,
     warnings: VarArray,
     out: Out,
@@ -439,7 +439,7 @@ pub struct Pass<'a> {
 }
 
 impl<'a> Pass<'a> {
-    pub fn new(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], sbw: f64, warned: VarDictionary, warnings: VarArray) -> Self {
+    pub fn new(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], _sbw: f64, warned: VarDictionary, warnings: VarArray) -> Self {
         let n = c.len();
         let mut kinds = vec![CtlKind::None; n];
         let mut volatile = vec![false; n];
@@ -468,7 +468,6 @@ impl<'a> Pass<'a> {
             io,
             recs,
             kinds,
-            sbw,
             warned,
             warnings,
             out: Out { rects: vec![None; n], content: vec![None; n], insets: vec![None; n] },
@@ -860,7 +859,13 @@ impl<'a> Pass<'a> {
     /// UxmlFlexLayout._stretch_hint: the border-box width hint of a
     /// best-fit text item in a column whose cross axis stretches it.
     fn stretch_hint(&mut self, ch: usize, row: bool, align_items: &str, ac: f64, m: &Edges) -> f64 {
-        if row || !self.hinted[ch] || ac < 0.0 {
+        if row || ac < 0.0 {
+            return -1.0;
+        }
+        // Yoga measures a stretched child at the stretched width: a
+        // container whose content wraps gets its real height (a row-wrap
+        // grid in a ScrollView). Leaves: only best-fit text reads the hint.
+        if self.flex_children(ch).is_empty() && !self.hinted[ch] {
             return -1.0;
         }
         let mut al: &str = self.str_(ch, E_ALIGN_SELF, "auto");
@@ -885,9 +890,8 @@ impl<'a> Pass<'a> {
         if k[P_H] == K::Pct || k[P_MINH] == K::Pct || k[P_MAXH] == K::Pct {
             s |= 2;
         }
-        if self.flex_children(i).is_empty() {
-            s |= 4;
-        }
+        // Leaves and containers both read the width hint (see stretch_hint).
+        s |= 4;
         self.sens_m[i] = s;
         s
     }
@@ -1034,7 +1038,10 @@ impl<'a> Pass<'a> {
             bw = if w >= 0.0 { w } else { d(intr.x) + in_w };
             bh = if h >= 0.0 { h } else { d(intr.y) + in_h };
         } else {
-            let cw = if w >= 0.0 { w - in_w } else { -1.0 };
+            let mut cw = if w >= 0.0 { w - in_w } else { -1.0 };
+            if cw < 0.0 && hint >= 0.0 {
+                cw = gmax(0.0, hint - in_w);
+            }
             let ch = if h >= 0.0 { h - in_h } else { -1.0 };
             let nat = self.measure_content(i, Vector2::new(f(cw), f(ch)));
             let chrome = self.measure_call(i, cw);
@@ -1129,8 +1136,6 @@ impl<'a> Pass<'a> {
         let abs = self.abs_children(i);
         if kids.is_empty() {
             self.out.content[i] = Some(Vector2::ZERO);
-        } else if self.c.is_scroll_view(i) {
-            self.layout_scroll(i, content, pad, bor, &kids[..]);
         } else {
             let ext = self.place(i, content, &kids[..]);
             self.out.content[i] = Some(ext);
@@ -1138,20 +1143,6 @@ impl<'a> Pass<'a> {
         if !abs.is_empty() {
             self.layout_abs(i, rect.size, pad, bor, &abs[..]);
         }
-    }
-
-    fn layout_scroll(&mut self, i: usize, content: Rect2, pad: Edges, bor: Edges, kids: &[usize]) {
-        let pad_bor = Vector2::new(f(pad[L] + bor[L]), f(pad[T] + bor[T]));
-        let mut avail_w = d(content.size.x);
-        let mut nat = self.measure_content(i, Vector2::new(f(avail_w), -1.0));
-        if d(nat.y) > d(content.size.y) + EPS && self.sbw > 0.0 {
-            avail_w = gmax(0.0, avail_w - self.sbw);
-            nat = self.measure_content(i, Vector2::new(f(avail_w), -1.0));
-        }
-        let content_h = gmax(d(nat.y), d(content.size.y));
-        let area = Rect2::new(pad_bor, Vector2::new(f(avail_w), f(content_h)));
-        self.place(i, area, kids);
-        self.out.content[i] = Some(Vector2::new(f(avail_w), nat.y) + pad_bor);
     }
 
     fn place(&mut self, i: usize, area: Rect2, kids: &[usize]) -> Vector2 {
@@ -1437,6 +1428,12 @@ impl<'a> Pass<'a> {
                     it_cross[k] = gclamp(gmax(0.0, lc - mct), smin, gmax(mxb, smin));
                 } else {
                     it_cross[k] = it_ncross[k];
+                    // Yoga: an overflow: scroll box sized by its content on
+                    // the cross axis stays inside a definite available size
+                    // (Unity's ScrollView viewport).
+                    if ac >= 0.0 && self.str_(ch, E_OVERFLOW, "visible") == "scroll" && self.dim(ch, cross_prop, ac) < 0.0 {
+                        it_cross[k] = gmax(f64::min(it_cross[k], ac - mct), it_inc[k]);
+                    }
                 }
                 let mc_start = it_m[k][cs_i];
                 let mc_end = it_m[k][ce_i];

@@ -173,6 +173,10 @@ pub struct Cascade {
     // element index
     els: Vec<Elem>,
     parent: Vec<i32>,
+    /// Selector parent per element: the logical parent Unity's combinators
+    /// walk (VisualElement.parent). An author child that a control keeps
+    /// in its content container has the control as selector parent.
+    sel_parent: Vec<i32>,
     end: Vec<i32>,
     index: HashMap<i64, usize>,
     source_file: GString,
@@ -449,6 +453,7 @@ impl Cascade {
             inline_origins: vec![],
             els: vec![],
             parent: vec![],
+            sel_parent: vec![],
             end: vec![],
             index: HashMap::new(),
             source_file: path,
@@ -508,6 +513,7 @@ impl Cascade {
         // Element index (preorder, from the GDScript side).
         let els = get("els").to::<VarArray>();
         let parent = get("_parent").to::<PackedInt32Array>();
+        let sel_parent = get("_sel_parent").to::<PackedInt32Array>();
         let end = get("_end").to::<PackedInt32Array>();
         let n = els.len();
         let sn_local = StringName::from("local");
@@ -540,6 +546,7 @@ impl Cascade {
             c.els.push(Elem { obj, var, local: lid, local_var: local.to_variant(), local_name: local.clone(), leaf, tag, line, column, offset });
         }
         c.parent = parent.as_slice().to_vec();
+        c.sel_parent = sel_parent.as_slice().to_vec();
         c.end = end.as_slice().to_vec();
         c.cls_set = vec![vec![]; n];
         c.name = vec![None; n];
@@ -1027,7 +1034,7 @@ impl Cascade {
         if k == 0 {
             return true;
         }
-        let mut p = self.parent[i];
+        let mut p = self.sel_parent[i];
         if cp.child {
             return p >= 0 && self.match_from(parts, k - 1, p as usize, scope_idx);
         }
@@ -1035,7 +1042,7 @@ impl Cascade {
             if self.match_from(parts, k - 1, p as usize, scope_idx) {
                 return true;
             }
-            p = self.parent[p as usize];
+            p = self.sel_parent[p as usize];
         }
         false
     }
@@ -1416,16 +1423,12 @@ impl Cascade {
         out
     }
 
-    pub fn non_visual(&self, i: usize) -> bool {
-        self.els[i].local_name == "UXML" || self.els[i].local_name == "Style"
-    }
-
-    pub fn is_scroll_view(&self, i: usize) -> bool {
-        self.els[i].local_name == "ScrollView" || self.els[i].local_name == "ListView"
-    }
-
     pub fn element_var(&self, i: usize) -> Variant {
         self.els[i].var.clone()
+    }
+
+    pub fn non_visual(&self, i: usize) -> bool {
+        self.els[i].local_name == "UXML" || self.els[i].local_name == "Style"
     }
 
     pub fn file(&self) -> GString {
@@ -1582,8 +1585,7 @@ impl UxmlNativeCascade {
     /// Layout + native placement in one call (UxmlDocument._do_layout).
     /// `force`: indices re-applied since the last placement (their inset
     /// hooks must run); `force_all` for a full apply. Returns [rects
-    /// changed vs the previous layout, {element: content size} for
-    /// ScrollView elements].
+    /// changed vs the previous layout].
     #[func]
     fn layout_place(
         &mut self,
@@ -1604,12 +1606,6 @@ impl UxmlNativeCascade {
             Some(prev) => prev.rects != out.rects,
             None => true,
         };
-        let mut scroll = VarDictionary::new();
-        for i in 0..c.len() {
-            if c.is_scroll_view(i) {
-                scroll.set(&c.element_var(i), out.content[i].unwrap_or(Vector2::ZERO));
-            }
-        }
         self.placement.last = Some(out);
         let applier = applier.try_to::<Gd<Object>>().ok();
         let n = c.len();
@@ -1622,7 +1618,7 @@ impl UxmlNativeCascade {
         for i in 0..n {
             self.placement.place(io, i, &applier, forced[i]);
         }
-        args(&[changed.to_variant(), scroll.to_variant()])
+        args(&[changed.to_variant()])
     }
 
     /// Re-place (with inset hooks) the given elements from the last layout —

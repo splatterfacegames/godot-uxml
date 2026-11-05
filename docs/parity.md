@@ -67,15 +67,29 @@ on structure only.
 
 ### Unity
 
-**41 of 64 cases match exactly. 13 more differ only by pixel-grid
-rounding. Structure: 572/719 elements. Geometry: 2137/2268 values, and
-74 more within 0.5px. Style: 14663/14690 values.** Before the theme had
-the disabled opacity: 36 and 11.
+**55 of 81 cases match exactly. 13 more differ only by pixel-grid
+rounding. Structure: 1496/1499 elements. Geometry: 4224/4396 values, and
+78 more within 0.5px. Style: 28574/28574 values.** Before the container
+and collection part trees: 41 of 64 and 13 (structure 572/719). Before
+the theme had the disabled opacity: 36 and 11.
+
+The container cases (`ctl-scroll*`, `ctl-list*`, `ctl-tree*`,
+`ctl-multicolumn-*`, `ctl-tab*`, `ctl-twopane`, `ctl-imgui`) use sidecar
+actions that give a control data: `items`, `tree-items`, `select`,
+`scroll`, `wheel` (`tools/unity-dump/Assets/Editor/UxmlDump.cs`).
+`bench/parity.gd` applies the same actions to the model, then runs
+Unity's post-layout updates (`UxmlContainerParts.after_layout`) and a
+new layout until the model settles, and gives each collection view
+Unity's row count (`floor(viewport / item height) + 2`). Panel-space
+rects include a px `translate`, as Unity's `worldBound` does.
 
 | difference | cases | cause |
 | --- | --- | --- |
 | up to 0.5px | most `ctl-*` cases with centred parts (checkmarks, help box labels, progress titles) | Unity rounds every layout edge to the pixel grid (Yoga's RoundToPixelGrid). godot-uxml keeps fractions. |
-| ScrollView parts (`unity-content-and-vertical-scroll-container`, `unity-content-viewport`, ...) | `scrollview-*`, `child-combinator-through-parts`, `inventory` | ScrollView still maps to a native `ScrollContainer`; the ScrollView part tree is the next task. |
+| Label height in a short row | `ctl-treeview*`, `ctl-multicolumn-*`, `ctl-listview-reorder` | Unity clamps a text measure to the height the Label has (14px in a 20px row); godot-uxml measures the full text (25px). |
+| auto-height ScrollView with a wrapping grid | `inventory` | the intrinsic measure passes no width bound to children (Yoga: at most the container width), so the grid measures as one line when the column sizes the ScrollView (header 40px, Unity 35px). |
+| TextField parts of the ListView size field | `ctl-listview-chrome` | TextField is not a part tree yet (it keeps its native `UxmlField`). |
+| Tab underline outside a TabView | `ctl-tabview` | Unity's underline of a lone Tab is as wide as the Tab (400px); godot-uxml makes it as wide as the header (81px). |
 | help box label width | `ctl-helpbox` | deliberate theme deviation: the label grows, because godot-uxml measures a wrapping Label without a max-content width. |
 | narrow field | `ctl-basefield` (150px container) | Unity clamps a text measure to the available width, so a long field label shrinks to its 150px minimum and the input collapses. godot-uxml measures the full text. |
 | `/Assets/…` image size | `absolute-import-assets`, `absolute-import-project` | resource resolution, not controls (unchanged from before). |
@@ -96,11 +110,19 @@ geometry and theme style):
 | Foldout | match except pixel rounding; depth classes, collapse |
 | ProgressBar | match except pixel rounding; fill = value / high-value |
 | BaseField label rule | match (min-width 150px, grows with text); narrow fields differ |
+| ScrollView, Scroller | match: modes, scroller visibility, scrolled offset, wheel, padding, hierarchy, overflowing, child combinator through the parts |
+| ListView | match: rows, selection, border, alternating rows, keys; header and footer match except the TextField parts of the size field |
+| ListView reorder (Animated) | structure matches; Label height (text clamp) |
+| TreeView, MultiColumnTreeView | structure matches; Label height in rows (text clamp) |
+| MultiColumnListView | structure matches; pixel rounding of the header icon, Label height in cells |
+| TabView, Tab | match, except the underline of a Tab outside a TabView |
+| TwoPaneSplitView, IMGUIContainer | match |
 
 ### Reference engine
 
-**28 match exactly, 4 match except Unity's internal control parts, 12
-differ.** Before the default theme: 31 / 4 / 9.
+**31 match exactly, 0 match except Unity's internal control parts, 13
+differ.** Before the container part trees: 28 / 4 / 12. Before the
+default theme: 31 / 4 / 9.
 
 | difference | cases | verdict |
 | --- | --- | --- |
@@ -108,7 +130,8 @@ differ.** Before the default theme: 31 / 4 / 9.
 | `position: absolute` / offsets | none | in scope since the absolute-positioning change; all match. |
 | percentage against an unsized parent | `percent-without-parent-size` | **reference is wrong**: the reference's own accuracy log confirms that Unity does not resolve the percentage. |
 | `/Packages/…` resolved from the project root vs from each importing sheet | `absolute-import-packages` | unverified against Unity (skipped by the dump tool); godot-uxml follows the documented resolution rule in docs/design.md. |
-| ScrollView parts + absolute layout of an inventory screen | `inventory` | ScrollView parts are not modeled yet. |
+| ScrollView scroller width | `scrollview-overflowing` | **match Unity 6000.3**: the runtime theme's Scroller is 24px wide. The reference snapshot records Unity 6000.0's editor scroller (13px). |
+| auto-height ScrollView with a wrapping grid | `inventory` | the parts match now; the grid height in the measure differs (see the Unity table). |
 | Label theme | `inherit-vs-direct`, `text-size`, `text-align`, `inventory` | **match Unity 6000.3**: the runtime theme gives `.unity-label` `margin: 4px 4px 2px 2px` and `padding: 4px 2px 4px 1px`. The reference snapshots record the 6000.0 editor theme, where a Label has no margin. |
 
 The reference engine also splices the reference theme at equal rank with author
@@ -123,5 +146,6 @@ Unity.
   GDScript and the native layout alike.
 - A max-content width for wrapping Labels, and Unity's clamp of a text
   measure to the available width.
-- ScrollView, ListView, TreeView, TabView and the field controls as part
-  trees (the framework in docs/design.md, "Control parts").
+- The field controls as part trees (the framework in docs/design.md,
+  "Control parts").
+- Yoga's width bound in intrinsic measures (`inventory`).

@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ListView name="lv" fixed-item-height="20" style="height: 100px; width: 160px;" />
+  <ui:ListView name="lv-border" show-border="true" show-alternating-row-backgrounds="ContentOnly" style="height: 80px; width: 160px;" />
+  <ui:ListView name="lv-empty" style="height: 40px; width: 160px;" />
+</ui:UXML>

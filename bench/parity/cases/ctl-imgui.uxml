@@ -1,0 +1,4 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:IMGUIContainer name="imgui" style="height: 40px; width: 100px;" />
+  <ui:IMGUIContainer name="imgui-auto" />
+</ui:UXML>

@@ -35,7 +35,6 @@ extends SceneTree
 const REF := "res://bench/parity/reference.json"
 const UNITY_DIR := "res://bench/parity/unity/"
 const CASES_DIR := "res://bench/parity/cases/"
-const SCROLLBAR := 13.0
 const STATES := ["hover", "active", "focus", "checked", "selected"]
 
 var _verbose := false
@@ -84,7 +83,8 @@ func _corpus_names() -> Array:
 # ---------------------------------------------------------------------------
 
 ## Write a case to user://, load it with the default theme and part trees.
-func _load_case(name: String, uxml: String, uss: String, files: Dictionary, values: Dictionary = {}) -> UxmlDocumentModel:
+func _load_case(name: String, uxml: String, uss: String, files: Dictionary, values: Dictionary = {},
+		actions: Array = []) -> UxmlDocumentModel:
 	var root := "user://godot_uxml_parity/%s" % name
 	var dir := root + "/Assets/GoldenCases/"
 	DirAccess.make_dir_recursive_absolute(dir)
@@ -105,7 +105,112 @@ func _load_case(name: String, uxml: String, uss: String, files: Dictionary, valu
 				el.set_attribute("value", values[String(n)])
 	UxmlTheme.attach(doc, UxmlTheme.DEFAULT)
 	UxmlParts.expand(doc)
+	_model_actions(doc, actions)
 	return doc
+
+
+## The sidecar actions that give a control data instead of input (Unity's
+## itemsSource, SetRootItems, SetSelection, scrollOffset), applied to the
+## model the way the runtime applies them.
+func _model_actions(doc: UxmlDocumentModel, actions: Array) -> void:
+	var lists := {}  # element -> {texts, infos, selection}
+	for act in actions:
+		var op := String(act.get("op", ""))
+		var el: UxmlElement = null
+		if act.has("target"):
+			el = doc.root.find_by_name(String(act["target"]))
+		if el == null:
+			continue
+		match op:
+			"items":
+				var texts: Array = []
+				if act.has("values"):
+					for v in act["values"]:
+						texts.append(str(v))
+				else:
+					for i in int(act.get("count", 0)):
+						texts.append("Item %d" % i)
+				var st: Dictionary = lists.get(el, {"selection": []})
+				st["texts"] = texts
+				st["infos"] = []
+				lists[el] = st
+			"tree-items":
+				var roots: Array = act.get("items", [])
+				var open := UxmlContainerParts.tree_ids(roots) if act.get("expand", false) else {}
+				var flat := UxmlContainerParts.flatten_tree(roots, open)
+				var texts: Array = []
+				for f in flat:
+					texts.append(str(f["data"]))
+				var st: Dictionary = lists.get(el, {"selection": []})
+				st["texts"] = texts
+				st["infos"] = flat
+				lists[el] = st
+			"select":
+				var st: Dictionary = lists.get(el, {"texts": [], "infos": []})
+				st["selection"] = act.get("indices", [])
+				lists[el] = st
+			"scroll":
+				var sv := el if el.local == "ScrollView" else UxmlParts.find_part(el, "scroll-view")
+				if sv != null:
+					UxmlContainerParts.set_scroll_offset(sv,
+						Vector2(float(act.get("x", 0)), float(act.get("y", 0))), false)
+			"wheel":
+				# The after-layout pass clamps the offset to the range.
+				var sv := el if el.local == "ScrollView" else UxmlParts.find_part(el, "scroll-view")
+				if sv != null:
+					var m := UxmlContainerParts.scroll_mode(sv)
+					UxmlContainerParts.set_scroll_offset(sv, UxmlContainerParts.wheel_offset(sv,
+						Vector2(float(act.get("dx", 0)), float(act.get("dy", 0))),
+						m != "horizontal", m != "vertical"), false)
+	for el in lists:
+		var st: Dictionary = lists[el]
+		var texts: Array = st["texts"]
+		var rows := UxmlContainerParts.rows_of(el)
+		var sel: Array = []
+		for i in st["selection"]:
+			sel.append(int(i))
+		for k in rows.size():
+			var idx := k if k < texts.size() else -1
+			var info: Dictionary = st["infos"][k] if k < st["infos"].size() else {}
+			UxmlContainerParts.bind_row(el, rows[k], idx, sel.has(k), info)
+			if idx >= 0:
+				UxmlContainerParts.bind_text(rows[k], texts[k])
+		UxmlContainerParts.content_height(el, texts.size())
+		el.set_meta(&"parity_count", texts.size())
+
+
+## Unity's post-layout control updates, then a new layout, until the model
+## stops changing: ScrollView scrollers (UxmlContainerParts.after_layout)
+## and the row count of collection views, which Unity sizes to the
+## viewport (floor(viewport / item height) + 2).
+func _settle(doc: UxmlDocumentModel, resolve: Callable, layout: Callable) -> Array:
+	var styles: Dictionary = resolve.call()
+	var res: Dictionary = layout.call(styles)
+	for pass_i in 8:
+		var rects: Dictionary = res["rects"]
+		var size_of := func(el: UxmlElement):
+			var r = rects.get(el)
+			return null if r == null else (r as Rect2).size
+		var changed := UxmlContainerParts.after_layout(doc.root, size_of)
+		for el in doc.root.walk():
+			if not UxmlContainerParts.is_collection(el.local) or el.part_of != null:
+				continue
+			var rows := UxmlContainerParts.rows_of(el)
+			var sv := UxmlParts.find_part(el, "scroll-view")
+			var vp: UxmlElement = null if sv == null else UxmlParts.find_part(sv, "viewport")
+			var vs = null if vp == null else size_of.call(vp)
+			if vs == null:
+				continue
+			var want := mini(int(el.get_meta(&"parity_count", 0)),
+				int(floor((vs as Vector2).y / UxmlContainerParts.item_height(el))) + 2)
+			if rows.size() > want:
+				UxmlContainerParts.trim_rows(el, want)
+				changed = true
+		if not changed:
+			break
+		styles = resolve.call()
+		res = layout.call(styles)
+	return [styles, res]
 
 
 func _measure_fixed(el: UxmlElement, style: Dictionary, _hint: float) -> Vector2:
@@ -128,12 +233,12 @@ func _measure_fixed(el: UxmlElement, style: Dictionary, _hint: float) -> Vector2
 func _run_case(c: Dictionary, panel: Vector2) -> Dictionary:
 	var name: String = c["name"]
 	var doc := _load_case(name, c["uxml"], c["uss"], c["files"])
-	var styles: Dictionary = UssStyleResolver.resolve(doc)["styles"]
 	var warnings: Array = []
-	# Unity's vertical scroller is 13px wide; the runtime uses Godot's own.
-	var res := UxmlFlexLayout.compute(doc.root, styles, panel, _measure_fixed, warnings,
-		{"scroll_bar_width": SCROLLBAR})
-	var ours := _named_rects(doc.root, res["rects"])
+	var settled := _settle(doc,
+		func(): return UssStyleResolver.resolve(doc)["styles"],
+		func(st: Dictionary): return UxmlFlexLayout.compute(doc.root, st, panel, _measure_fixed, warnings, {}))
+	var res: Dictionary = settled[1]
+	var ours := _named_rects(doc.root, res["rects"], settled[0])
 	var out := {"name": name, "question": c["question"], "ours": ours,
 		"measures_text": c["measuresText"], "missing_parts": [], "missing": [],
 		"diffs": [], "status": "no-reference"}
@@ -152,7 +257,7 @@ func _run_case(c: Dictionary, panel: Vector2) -> Dictionary:
 ## Named authored elements' panel-space rects, keyed like the reference
 ## harness: a name that appears once keeps it, repeats get #1..#n in tree
 ## order. Parts count too (the reference names Unity's parts).
-func _named_rects(root: UxmlElement, rects: Dictionary) -> Dictionary:
+func _named_rects(root: UxmlElement, rects: Dictionary, styles: Dictionary = {}) -> Dictionary:
 	var collected: Array = []
 	var stack: Array = [[root, Vector2.ZERO]]
 	while not stack.is_empty():
@@ -162,7 +267,7 @@ func _named_rects(root: UxmlElement, rects: Dictionary) -> Dictionary:
 		var r = rects.get(el)
 		var abs_pos := origin
 		if r != null:
-			abs_pos = origin + (r as Rect2).position
+			abs_pos = origin + (r as Rect2).position + _translate(styles.get(el, {}), (r as Rect2).size)
 			var n = el.get_attribute("name")
 			if n != null and el != root:
 				collected.append([String(n), Rect2(abs_pos, (r as Rect2).size)])
@@ -339,7 +444,13 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 			continue
 		if String(u["type"]) in ["Toggle", "Foldout", "RadioButton"]:
 			values[n] = "true" if props["value"] else "false"
-	var doc := _load_case("unity-" + name, c["uxml"], c["uss"], c["files"], values)
+	var actions: Array = []
+	var side := CASES_DIR + name + ".json"
+	if FileAccess.file_exists(side):
+		var sj = JSON.parse_string(FileAccess.get_file_as_string(side))
+		if sj is Dictionary:
+			actions = sj.get("actions", [])
+	var doc := _load_case("unity-" + name, c["uxml"], c["uss"], c["files"], values, actions)
 	var ours := _paths(doc.root)
 	# Unity's pseudo-states, applied to the elements at the same paths.
 	var es := {}
@@ -353,7 +464,7 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 				st.append(String(s))
 		if not st.is_empty():
 			es[el] = st
-	var styles: Dictionary = UssStyleResolver.resolve(doc, {"element_states": es})["styles"]
+	var styles: Dictionary = {}
 	var measures := {}
 	for u in uels:
 		var el = ours.get(String(u["path"]))
@@ -367,9 +478,13 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 			return measures[el]
 		return _measure_fixed(el, style, hint)
 	var panel := Vector2(dump["panel"]["width"], dump["panel"]["height"])
-	var res := UxmlFlexLayout.compute(doc.root, styles, panel, measurer, [],
-		{"scroll_bar_width": SCROLLBAR})
-	var abs := _abs_rects(doc.root, res["rects"])
+	var settled := _settle(doc,
+		func(): return UssStyleResolver.resolve(doc, {"element_states": es})["styles"],
+		func(st: Dictionary): return UxmlFlexLayout.compute(doc.root, st, panel, measurer, [], {}))
+	styles = settled[0]
+	var res: Dictionary = settled[1]
+	ours = _paths(doc.root)
+	var abs := _abs_rects(doc.root, res["rects"], styles)
 	var out := {"name": name, "status": "match", "notes": [], "elements": 0, "struct_ok": 0, "geo_half": 0,
 		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0, "pairs": []}
 	var seen := {}
@@ -444,7 +559,19 @@ func _ulabel(u: Dictionary) -> String:
 	return "%s[%s]" % [u["type"], u["path"]] + ("#" + n if not n.is_empty() else "")
 
 
-func _abs_rects(root: UxmlElement, rects: Dictionary) -> Dictionary:
+## Unity's worldBound includes the element's translate (ScrollView
+## content and Scroller draggers move by translate).
+func _translate(style: Dictionary, size: Vector2) -> Vector2:
+	var e = style.get("translate")
+	if e == null:
+		return Vector2.ZERO
+	var t := UssValues.parse_translate(String(e["value"]))
+	if not t["ok"]:
+		return Vector2.ZERO
+	return t["px"] + t["ratio"] * size
+
+
+func _abs_rects(root: UxmlElement, rects: Dictionary, styles: Dictionary = {}) -> Dictionary:
 	var out := {}
 	var stack: Array = [[root, Vector2.ZERO]]
 	while not stack.is_empty():
@@ -454,7 +581,7 @@ func _abs_rects(root: UxmlElement, rects: Dictionary) -> Dictionary:
 		var r = rects.get(el)
 		var p := origin
 		if r != null:
-			p = origin + (r as Rect2).position
+			p = origin + (r as Rect2).position + _translate(styles.get(el, {}), (r as Rect2).size)
 			if el != root:
 				out[el] = Rect2(p, (r as Rect2).size)
 		for ch in el.children:

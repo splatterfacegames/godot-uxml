@@ -793,18 +793,19 @@ func test_view_data_round_trip() -> void:
 	var doc := _open("view", body)
 	await h.process_frame
 	await h.process_frame
-	var sc := doc.get_native("sv") as ScrollContainer
-	sc.scroll_vertical = 300
+	# Updated with unity/controls-containers: the ScrollView is a part tree;
+	# its offset is set and read through the document.
+	doc.set_scroll_offset("sv", Vector2(0, 300))
 	var vd := doc.get_view_data()
 	h.eq(vd.keys(), ["page__list"], "full hierarchical key")
 	h.eq(vd["page__list"]["scroll_offset"], Vector2(0, 300), "scroll offset captured")
 	doc.reload()
 	await h.process_frame
 	await h.process_frame
-	h.eq((doc.get_native("sv") as ScrollContainer).scroll_vertical, 300, "restored after reload")
+	h.eq(doc.get_scroll_offset("sv"), Vector2(0, 300), "restored after reload")
 	doc.set_view_data({"page__list": {"scroll_offset": Vector2(0, 120)}})
 	await h.process_frame
-	h.eq((doc.get_native("sv") as ScrollContainer).scroll_vertical, 120, "set_view_data applies")
+	h.eq(doc.get_scroll_offset("sv"), Vector2(0, 120), "set_view_data applies")
 	_close(doc)
 	var fresh := UxmlDocument.new()
 	h.root.add_child(fresh)
@@ -813,5 +814,5 @@ func test_view_data_round_trip() -> void:
 	fresh.load_document("Assets/UI/main.uxml", "%s/view" % ROOT)
 	await h.process_frame
 	await h.process_frame
-	h.eq((fresh.get_native("sv") as ScrollContainer).scroll_vertical, 90, "view data given before the load is restored")
+	h.eq(fresh.get_scroll_offset("sv"), Vector2(0, 90), "view data given before the load is restored")
 	_close(fresh)

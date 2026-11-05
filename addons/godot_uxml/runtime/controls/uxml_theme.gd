@@ -15,15 +15,27 @@ extends RefCounted
 ## in Unity 6000.3 with tools/unity-dump; it is not Unity's file.
 
 const DEFAULT := "res://addons/godot_uxml/themes/unity-default.uss"
+## The geometry of the container and collection parts (ScrollView,
+## Scroller, ListView, TreeView, MultiColumn*, TabView, TwoPaneSplitView):
+## attached ahead of the theme, and also when the theme is disabled, so
+## these controls work without the Unity look (unity-structure.uss).
+const STRUCTURE := "res://addons/godot_uxml/themes/unity-structure.uss"
 
 static var _cache := {}  # path -> [source, items, warnings]
 
 
-## Splice the theme sheet at `path` ahead of `doc`'s sheets. An empty path
-## attaches nothing (theme disabled). A missing theme is a diagnostic.
+## Splice the structure sheet and the theme sheet at `path` ahead of
+## `doc`'s sheets. An empty path attaches the structure sheet only (theme
+## disabled). A missing theme is a diagnostic.
 static func attach(doc: UxmlDocumentModel, path: String) -> void:
-	if doc == null or path.is_empty():
+	if doc == null:
 		return
+	if not path.is_empty():
+		_attach_sheet(doc, path)
+	_attach_sheet(doc, STRUCTURE)
+
+
+static func _attach_sheet(doc: UxmlDocumentModel, path: String) -> void:
 	var hit = _cache.get(path)
 	if hit == null:
 		if not FileAccess.file_exists(path):

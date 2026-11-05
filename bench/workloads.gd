@@ -8,7 +8,7 @@ extends SceneTree
 ##              hover, select (set_class), count change + relayout
 ##   dialog     portrait, name, wrapping paragraph, 4 choices; typewriter
 ##              text growth + relayout per frame, choice hover
-##   list1k     1000-row list in a ScrollView (no virtualization yet):
+##   list1k     1000-row list in a ScrollView (not virtualized):
 ##              load, hover a row, update one row's text
 ##
 ##   Godot --headless --path <project> -s res://bench/workloads.gd [-- --quick] [-- --no-theme]
@@ -169,9 +169,8 @@ func _listview() -> void:
 	_stats(name, "load + 10k items + first layout", s)
 	for k in 3:
 		await process_frame
-	var sc := d.get_native("list") as ScrollContainer
 	await _time_op(name, "scroll 3 rows (rebind + relayout)", d, func(i):
-		sc.scroll_vertical = (i * 72) % 200000, 120)
+		d.set_scroll_offset("list", Vector2(0, (i * 72) % 200000)), 120)
 	await _time_op(name, "hover row", d, func(i):
 		var rows: Array = d.get_list_rows("list")
 		var row: UxmlListRow = rows[i % 20]

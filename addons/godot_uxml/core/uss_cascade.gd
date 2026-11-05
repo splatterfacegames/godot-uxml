@@ -80,6 +80,11 @@ var _rule_warnings: Array = []
 var els: Array = []                    # preorder UxmlElement list
 var index := {}                        # UxmlElement -> preorder index
 var _parent: PackedInt32Array
+## Selector parent per element (UxmlParts.logical_parent): the parent that
+## Unity's `>` and descendant combinators walk. An author child that a
+## control keeps in its content container has the control as selector
+## parent; style inheritance follows _parent.
+var _sel_parent: PackedInt32Array
 var _end: PackedInt32Array             # subtree end (exclusive)
 var _local: PackedStringArray
 var _cls_set: Array = []               # per element Dictionary class -> true (explicit + implicit)
@@ -180,6 +185,11 @@ func _index_tree() -> void:
 			parents.append(i)
 			k -= 1
 	var n := els.size()
+	_sel_parent = _parent.duplicate()
+	for i in n:
+		var lp := UxmlParts.logical_parent(els[i])
+		if lp != null and index.has(lp):
+			_sel_parent[i] = index[lp]
 	_end.resize(n)
 	for i in n:
 		_end[i] = i + 1
@@ -255,7 +265,59 @@ func _add_rule(f: Dictionary) -> void:
 		_rule_scope_idx.append(si)
 		_rule_scope_lo.append(si)
 		_rule_scope_hi.append(_end[si] if si >= 0 else -1)
+	# The compiled form of a rule depends only on the rule and its layer.
+	# Theme sheets are parsed once and shared by every load (UxmlTheme), so
+	# their compiled rules are kept on the shared rule (key CC) and reused.
+	var theme := bool(doc.sheets[f["sheet"]].get("theme", false))
+	var cc = rule.get(CC) if theme else null
+	if cc == null:
+		cc = _compile_rule(rule, 0 if theme else AUTHOR_LAYER)
+		if theme:
+			rule[CC] = cc
+	_rule_dprop.append(cc[0])
+	_rule_dval.append(cc[1])
+	_rule_dflag.append(cc[2])
+	_rule_dexp.append(cc[3])
+	for sc in cc[4]:
+		var s := _sel_rule.size()
+		_sel_rule.append(r)
+		for c in sc[5]:
+			_anc_classes[c] = true
+		for nm in sc[6]:
+			_anc_names[nm] = true
+		_anc_states |= int(sc[7])
+		for req in sc[8]:
+			var rk := "%s|%s|%s|%d" % [",".join(req[0]), ",".join(req[1]), ",".join(req[2]), req[3]]
+			if not _anc_state_seen.has(rk):
+				_anc_state_seen[rk] = true
+				_anc_state_reqs.append(req)
+		_sel_parts.append(sc[0])
+		_sel_need.append(sc[1])
+		_sel_entries.append(null)
+		_sel_spec.append(sc[2])
+		_sel_states.append(sc[3])
+		_sel_origins.append(null)
+		var bk: int = sc[4][0]
+		if bk == 0:
+			_bucket_add(_b_name, sc[4][1], s)
+		elif bk == 1:
+			_bucket_add(_b_class, sc[4][1], s)
+		elif bk == 2:
+			_bucket_add(_b_type, sc[4][1], s)
+		else:
+			_b_any.append(s)
 
+
+## Key of a theme rule's compiled form (see _add_rule).
+const CC := "_uxml_compiled"
+
+
+## The compiled form of `rule`: [declaration properties, values, flags,
+## expansions, selectors]. Each selector: [parts, ancestor bloom need,
+## specificity key, required states, [bucket kind (0 name, 1 class,
+## 2 type, 3 any), key], ancestor classes, ancestor names, ancestor state
+## mask, ancestor state requirements]. Read-only once built.
+static func _compile_rule(rule: Dictionary, layer: int) -> Array:
 	var dp := PackedStringArray()
 	var dv := PackedStringArray()
 	var df := PackedInt32Array()
@@ -274,19 +336,16 @@ func _add_rule(f: Dictionary) -> void:
 		else:
 			de.append(_expand(prop, val))
 		df.append(fl)
-	_rule_dprop.append(dp)
-	_rule_dval.append(dv)
-	_rule_dflag.append(df)
-	_rule_dexp.append(de)
-
-	var layer := 0 if bool(doc.sheets[f["sheet"]].get("theme", false)) else AUTHOR_LAYER
+	var sels: Array = []
 	for sel in rule["selectors"]:
-		var s := _sel_rule.size()
-		_sel_rule.append(r)
 		var parts: Array = []
 		var names := 0
 		var classes := 0
 		var types := 0
+		var anc_c: Array = []
+		var anc_n: Array = []
+		var anc_s := 0
+		var anc_r: Array = []
 		var sel_parts: Array = sel["parts"]
 		for pi in sel_parts.size():
 			var part: Dictionary = sel_parts[pi]
@@ -315,17 +374,11 @@ func _add_rule(f: Dictionary) -> void:
 			var is_child: bool = part["combinator"] == "child"
 			parts.append([ptypes, pnames, pclasses, mask, root, is_child])
 			if pi < sel_parts.size() - 1:
-				for c in pclasses:
-					_anc_classes[c] = true
-				for nm in pnames:
-					_anc_names[nm] = true
-				_anc_states |= mask
+				anc_c.append_array(pclasses)
+				anc_n.append_array(pnames)
+				anc_s |= mask
 				if mask != 0:
-					var rk := "%s|%s|%s|%d" % [",".join(ptypes), ",".join(pnames), ",".join(pclasses), mask]
-					if not _anc_state_seen.has(rk):
-						_anc_state_seen[rk] = true
-						_anc_state_reqs.append([ptypes, pnames, pclasses, mask])
-		_sel_parts.append(parts)
+					anc_r.append([ptypes, pnames, pclasses, mask])
 		var need := 0
 		for pi2 in parts.size() - 1:
 			var cp2: Array = parts[pi2]
@@ -335,20 +388,17 @@ func _add_rule(f: Dictionary) -> void:
 				need |= _fbits("#" + x)
 			for x in cp2[2]:
 				need |= _fbits("." + x)
-		_sel_need.append(need)
-		_sel_entries.append(null)
-		_sel_spec.append((names << 40) | (classes << 20) | types | layer)
-		_sel_states.append(UssSelector.states_required_by(sel))
-		_sel_origins.append(null)
 		var right: Array = parts[parts.size() - 1]
+		var bucket: Array = [3, ""]
 		if not (right[1] as PackedStringArray).is_empty():
-			_bucket_add(_b_name, right[1][0], s)
+			bucket = [0, right[1][0]]
 		elif not (right[2] as PackedStringArray).is_empty():
-			_bucket_add(_b_class, right[2][0], s)
+			bucket = [1, right[2][0]]
 		elif not (right[0] as PackedStringArray).is_empty():
-			_bucket_add(_b_type, right[0][0], s)
-		else:
-			_b_any.append(s)
+			bucket = [2, right[0][0]]
+		sels.append([parts, need, (names << 40) | (classes << 20) | types | layer,
+			UssSelector.states_required_by(sel), bucket, anc_c, anc_n, anc_s, anc_r])
+	return [dp, dv, df, de, sels]
 
 
 ## Two bloom-filter bits for a feature key ("<Type", "#name", ".class").
@@ -518,7 +568,7 @@ func _key_bits(options: Dictionary) -> PackedInt32Array:
 	if not entries.is_empty():
 		var parents := {}
 		for i in range(1, n):
-			parents[els[i]] = els[_parent[i]]
+			parents[els[i]] = els[_sel_parent[i]]
 		var base_ctx := {"parents": parents, "states": {}, "root": doc.root}
 		for i in n:
 			var node: UxmlElement = els[i]
@@ -939,13 +989,13 @@ func _match_from(parts: Array, k: int, i: int, scope_idx: int) -> bool:
 		return false
 	if k == 0:
 		return true
-	var p := _parent[i]
+	var p := _sel_parent[i]
 	if cp[5]:
 		return p >= 0 and _match_from(parts, k - 1, p, scope_idx)
 	while p >= 0:
 		if _match_from(parts, k - 1, p, scope_idx):
 			return true
-		p = _parent[p]
+		p = _sel_parent[p]
 	return false
 
 

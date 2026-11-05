@@ -13,9 +13,9 @@ extends Control
 ##   doc.get_element("play-button").pressed.connect(_on_play)
 ##
 ## `get_element(name)` returns the element's box — for wrapped controls
-## (Slider/TextField/DropdownField/Image/ScrollView) that is a UxmlField or
-## UxmlBox; `get_native(name)` returns the interactive native inside
-## (HSlider, LineEdit, TextureRect, ScrollContainer). Native signals stay
+## (Slider/TextField/DropdownField/Image) that is a UxmlField or UxmlBox;
+## `get_native(name)` returns the interactive native inside (HSlider,
+## LineEdit, TextureRect). Native signals stay
 ## native; the document adds convenience signals that carry the authored
 ## `name` attribute.
 ##
@@ -41,6 +41,21 @@ signal transition_end(element_name, property, elapsed_time)
 signal transition_cancel(element_name, property, elapsed_time)
 ## A rich text <link="id"> or <a href="url"> was clicked in a Label.
 signal link_clicked(element_name, link_id)
+## Collection views (ListView, TreeView, MultiColumnListView/TreeView):
+## Unity's selectionChanged / selectedIndicesChanged (`indices`: Array of
+## int), itemsChosen (double click, Enter, controller A), itemIndexChanged
+## (reorder), itemsAdded / itemsRemoved (footer, size field),
+## columnSortingChanged (`descriptions`: [{column_name, column_index,
+## direction}]) and a TreeView item opened or closed.
+signal selection_changed(element_name, indices)
+signal items_chosen(element_name, indices)
+signal item_index_changed(element_name, from_index, to_index)
+signal items_added(element_name, indices)
+signal items_removed(element_name, indices)
+signal column_sorting_changed(element_name, descriptions)
+signal item_expanded_changed(element_name, id, expanded)
+## A closeable Tab of a TabView was closed (Unity Tab.closed).
+signal tab_closed(element_name, index)
 
 ## The UXML file to load. Setting it while the node is inside the tree
 ## reloads the document.
@@ -73,7 +88,6 @@ var _resolver: UxmlResourceResolver = null
 var _styles: Dictionary = {}
 var _controls: Dictionary = {}      # UxmlElement -> outer Control
 var _natives: Dictionary = {}       # UxmlElement -> interactive native
-var _scroll: Dictionary = {}        # UxmlElement -> scroll content Control
 var _by_name: Dictionary = {}       # String -> UxmlElement (first wins)
 var _el_names: Dictionary = {}      # UxmlElement -> String
 var _parents: Dictionary = {}       # UxmlElement -> UxmlElement
@@ -114,14 +128,16 @@ var _layout_records: Dictionary = {}  # flex layout's parsed-style cache
 var _layout_xcache: Dictionary = {}   # flex layout's validated cross-pass cache
 var _attr_dirty: Dictionary = {}      # UxmlElement -> true (set_attribute since last restyle)
 var _placed_force: Array = []         # elements re-applied this restyle (inset hooks must run)
-# Virtualized ListViews: list element -> {rows: Array[UxmlListRow], h, count,
-# bind, first, applied, alt}. Rows are pooled copies of the item template.
+# Collection views (ListView, TreeView, ...): element -> {rows:
+# Array[UxmlListRow], h, count, bind, first}, kept by the collection
+# behavior (UxmlContainerBehaviors.CollectionBehavior).
 var _lists: Dictionary = {}
 var _pooled: Dictionary = {}          # UxmlElement -> true (inside a pooled row)
+## Behaviors with after_layout(): Unity's post-layout control updates
+## (Scrollers, row positions, column widths).
+var _post_layout: Array = []
 var _behaviors: Dictionary = {}       # control UxmlElement -> UxmlBehaviors.Behavior
 
-## Unity's default ListView fixed-item-height.
-const LIST_DEFAULT_ITEM_HEIGHT := 22.0
 var _scan_all := true                 # next restyle re-reads every element's attributes
 var _transitions: UssTransitions = null  # running USS transitions (per load)
 
@@ -213,6 +229,13 @@ func _notification(what: int) -> void:
 		_do_layout()
 	elif what == NOTIFICATION_ENTER_TREE or what == NOTIFICATION_EXIT_TREE:
 		_binding.set_active(what == NOTIFICATION_ENTER_TREE)
+		var vp := get_viewport()
+		if vp != null:
+			var cb := Callable(self, "_on_focus_changed")
+			if what == NOTIFICATION_ENTER_TREE and not vp.gui_focus_changed.is_connected(cb):
+				vp.gui_focus_changed.connect(cb)
+			elif what == NOTIFICATION_EXIT_TREE and vp.gui_focus_changed.is_connected(cb):
+				vp.gui_focus_changed.disconnect(cb)
 	elif what == NOTIFICATION_PREDELETE:
 		_binding.clear()
 
@@ -277,7 +300,6 @@ func _clear() -> void:
 		child.queue_free()
 	_controls.clear()
 	_natives.clear()
-	_scroll.clear()
 	_by_name.clear()
 	_el_names.clear()
 	_parents.clear()
@@ -306,6 +328,7 @@ func _clear() -> void:
 	_scan_all = true
 	_lists = {}
 	_pooled = {}
+	_post_layout = []
 	_transitions = null
 	set_process(false)
 	_binding.clear()
@@ -318,12 +341,18 @@ func _clear() -> void:
 ## Parent map, name index (first wins, duplicates diagnosed), runtime
 ## control tree, and signal wiring — everything keyed off the element tree.
 func _index() -> void:
-	_expand_lists()
-	if not _lists.is_empty():
-		_rt_warnings.append_array(UxmlBindings.extract(_doc))  # item templates
+	var collections := _prepare_collections()
 	# Control part trees (Toggle label/input/checkmark, Foldout content, ...)
 	# become real model elements before anything indexes the tree.
 	UxmlParts.expand(_doc)
+	if collections:
+		_rt_warnings.append_array(UxmlBindings.extract(_doc))  # item templates
+		for cel in _doc.root.walk():
+			if UxmlContainerParts.is_collection(cel.local) and cel.part_of == null:
+				for row in UxmlContainerParts.rows_of(cel):
+					for sub in row.walk():
+						if sub.part_of == null:
+							_pooled[sub] = true
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
@@ -355,14 +384,9 @@ func _index() -> void:
 		_root_box.add_child(factory.build(child))
 	_controls = factory.controls
 	_natives = factory.natives
-	_scroll = factory.scroll_contents
 	_controls[_doc.root] = _root_box
 	for el in _controls:
 		_el_of[_controls[el]] = el
-	for lel in _lists:
-		var lsc := _natives.get(lel) as ScrollContainer
-		if lsc != null:
-			lsc.get_v_scroll_bar().value_changed.connect(_on_list_scrolled.bind(lel))
 	# Observable model: set_attribute() on any element restyles just it.
 	var on_changed := _on_model_changed
 	for el in _doc.root.walk():
@@ -430,9 +454,9 @@ func _wire(el: UxmlElement, c: Control) -> void:
 
 
 ## Any left-button press on a control toggles :active — the USS "pressed"
-## state — for every element, not just buttons. A focused ScrollView also
-## scrolls on the navigation keys (native ScrollContainer only handles the
-## wheel); the keys are consumed so focus does not jump away.
+## state — for every element, not just buttons. A focused ScrollView
+## (focusable="true") also scrolls on the navigation keys; the keys are
+## consumed only while the view can scroll, so focus moves on at a bound.
 func _on_gui_input(ev: InputEvent, el: UxmlElement) -> void:
 	var mb := ev as InputEventMouseButton
 	if mb != null and mb.button_index == MOUSE_BUTTON_LEFT:
@@ -442,24 +466,12 @@ func _on_gui_input(ev: InputEvent, el: UxmlElement) -> void:
 		if el.part_of == null or pc is UxmlToggle or pc is BaseButton:
 			_set_state(el, "active", mb.pressed)
 		return
-	var sc := _natives.get(el) as ScrollContainer
-	if sc == null:
+	if el.local != "ScrollView" or mb != null or ev is InputEventMouseMotion:
 		return
-	var bar := sc.get_v_scroll_bar()
-	if bar == null or bar.max_value - bar.page <= 0.0:
-		return  # nothing to scroll: let navigation keys pass through
-	var line := maxf(16.0, bar.step)
-	if ev.is_action_pressed("ui_down"):
-		sc.scroll_vertical += line
-	elif ev.is_action_pressed("ui_up"):
-		sc.scroll_vertical -= line
-	elif ev.is_action_pressed("ui_page_down"):
-		sc.scroll_vertical += bar.page
-	elif ev.is_action_pressed("ui_page_up"):
-		sc.scroll_vertical -= bar.page
-	else:
-		return
-	sc.accept_event()
+	var b = _behaviors.get(el)
+	var c: Control = _controls.get(el)
+	if b != null and c != null and c.has_focus() and b.key_scroll(ev):
+		c.accept_event()
 
 
 func _set_state(el: UxmlElement, state: String, on: bool) -> void:
@@ -737,6 +749,14 @@ func _filter_defaults(index: int, ref: String, entry) -> Array:
 	return _applier.filter_interpolation_defaults(ref, entry if entry is Dictionary else {}, _cascade.els[index])
 
 
+## `overflow: scroll` takes part in the layout (a content-sized scroll box
+## stays inside the space of its parent), `hidden` and `visible` do not.
+static func _scroll_overflow(prop: String, oe, ne) -> bool:
+	if prop != "overflow":
+		return false
+	return (oe != null and String(oe["value"]) == "scroll") or (ne != null and String(ne["value"]) == "scroll")
+
+
 ## True when two computed styles differ only in PAINT_ONLY properties.
 static func _paint_only(old, new: Dictionary) -> bool:
 	if old == null:
@@ -747,13 +767,13 @@ static func _paint_only(old, new: Dictionary) -> bool:
 		var oe = o.get(prop)
 		if oe != null and oe["value"] == ne["value"]:
 			continue
-		if PAINT_ONLY.has(prop) or prop.begins_with("--"):
+		if (PAINT_ONLY.has(prop) or prop.begins_with("--")) and not _scroll_overflow(prop, oe, ne):
 			continue
 		return false
 	for prop in o:
 		if new.has(prop):
 			continue
-		if PAINT_ONLY.has(prop) or prop.begins_with("--"):
+		if (PAINT_ONLY.has(prop) or prop.begins_with("--")) and not _scroll_overflow(prop, o[prop], null):
 			continue
 		return false
 	return true
@@ -839,16 +859,6 @@ func _volatile_width(el: UxmlElement) -> float:
 	return (_controls[el] as Control).size.x
 
 
-func _scroll_bar_width() -> float:
-	for el in _scroll:
-		var sc: ScrollContainer = _natives.get(el)
-		if sc != null:
-			var v := sc.get_v_scroll_bar()
-			if v != null:
-				return v.get_combined_minimum_size().x
-	return 0.0
-
-
 ## Run the flex pass for `host` without touching controls' placement:
 ## the native pass when the extension is loaded, UxmlFlexLayout otherwise.
 func _compute_layout(host: Vector2) -> Dictionary:
@@ -856,13 +866,12 @@ func _compute_layout(host: Vector2) -> Dictionary:
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var r: Array = _cascade._native.call(
-			"layout", host, _scroll_bar_width(), _layout_warned, _rt_warnings)
+			"layout", host, 0.0, _layout_warned, _rt_warnings)
 		return {"rects": r[0], "content_sizes": r[1], "insets": r[2]}
 	return UxmlFlexLayout.compute(
 		_doc.root, _styles, host,
 		_measure_leaf, _rt_warnings,
 		{"source": _doc.source, "file": _doc.path,
-		 "scroll_bar_width": _scroll_bar_width(),
 		 "warned": _layout_warned,
 		 "volatile": _volatile_measures(),
 		 "volatile_width": _volatile_width,
@@ -891,14 +900,11 @@ func _do_layout() -> void:
 		for el in _placed_force:
 			force.append(cidx[el])
 		var r: Array = _cascade._native.call(
-			"layout_place", size, _scroll_bar_width(), _layout_warned, _rt_warnings,
+			"layout_place", size, 0.0, _layout_warned, _rt_warnings,
 			_applier, force, _placed_force.size() == _controls.size())
-		var sizes: Dictionary = r[1]
-		for el in _scroll:
-			(_scroll[el] as Control).custom_minimum_size = sizes.get(el, Vector2.ZERO)
 		_unsettled = _pending_fresh or bool(r[0])
 		_pending_fresh = false
-		_lists_after_layout()
+		_after_layout()
 		_update_elision()
 		return
 	var prev := _rects
@@ -909,15 +915,11 @@ func _do_layout() -> void:
 		if el == _doc.root:
 			continue
 		_place_control(el)
-	var sizes: Dictionary = res["content_sizes"]
-	for el in _scroll:
-		var content: Control = _scroll[el]
-		content.custom_minimum_size = sizes.get(el, Vector2.ZERO)
 	# Not settled until a layout with no fresh applies reproduces the
 	# previous rects (see _reapply).
 	_unsettled = _pending_fresh or prev != _rects
 	_pending_fresh = false
-	_lists_after_layout()
+	_after_layout()
 	_update_elision()
 
 
@@ -948,10 +950,7 @@ func _place_control(el: UxmlElement) -> void:
 	# Internal chrome the flex pass does not position lives inside the
 	# element's content box: field caption+native shift by the resolved
 	# padding/border insets, and an Image's anchored TextureRect gets
-	# matching anchor offsets. (ScrollView is deliberately excluded —
-	# its content children already carry the pad/border offset inside
-	# the scroll content control, so insetting the viewport would
-	# double-apply it.)
+	# matching anchor offsets.
 	var pair = _insets.get(el)
 	if pair == null:
 		return
@@ -978,7 +977,7 @@ func _place_control(el: UxmlElement) -> void:
 # ---------------------------------------------------------------------------
 
 ## The element's outer control, or null. For labeled fields this is the
-## UxmlField wrapper; for Image/ScrollView the host box.
+## UxmlField wrapper; for Image the host box.
 func get_element(element_name: String) -> Control:
 	var el: UxmlElement = _by_name.get(element_name)
 	return null if el == null else _controls.get(el)
@@ -989,8 +988,9 @@ func get_element_by_name(element_name: String) -> Control:
 
 
 ## The interactive native inside the element's box (HSlider, LineEdit,
-## CheckBox, OptionButton, Button, Label, TextureRect, ScrollContainer).
-## Same as get_element for unwrapped controls.
+## CheckBox, OptionButton, Button, Label, TextureRect). Same as
+## get_element for unwrapped controls and for part-tree containers
+## (ScrollView, ListView, TabView, ...).
 func get_native(element_name: String) -> Control:
 	var el: UxmlElement = _by_name.get(element_name)
 	if el == null:
@@ -1102,87 +1102,58 @@ func refresh() -> void:
 
 
 # ---------------------------------------------------------------------------
-# Virtualized ListView
+# Containers and collections (UxmlContainerParts, UxmlContainerBehaviors)
 # ---------------------------------------------------------------------------
 
-## Give a ListView its items: `count` items, `bind.call(row: UxmlListRow,
-## index: int)` fills a pooled row for an item. Only enough rows to cover
-## the viewport exist; scrolling re-binds them. Call again whenever the
-## item count changes or every row must be re-bound.
-func set_list_source(list_name: String, count: int, bind: Callable) -> void:
-	var el: UxmlElement = _by_name.get(list_name)
-	if el == null or not _lists.has(el):
-		return
-	var info: Dictionary = _lists[el]
-	info["count"] = maxi(0, count)
-	info["bind"] = bind
-	_list_refresh(el, true)
+## Unity's post-layout control updates (Scroller visibility and draggers,
+## collection row positions, column widths), after every layout.
+func _after_layout() -> void:
+	for b in _post_layout:
+		b.after_layout()
 
 
-## Re-bind every visible row of a list (item data changed in place).
-func refresh_list(list_name: String) -> void:
-	var el: UxmlElement = _by_name.get(list_name)
-	if el != null and _lists.has(el):
-		_list_refresh(el, true)
-
-
-## The pooled rows of a list (for games that want to style them directly).
-func get_list_rows(list_name: String) -> Array:
-	var el: UxmlElement = _by_name.get(list_name)
-	return [] if el == null or not _lists.has(el) else _lists[el]["rows"]
-
-
-## Instantiate each ListView's row pool from its item-template, before the
-## cascade and controls exist, so rows are ordinary elements: author
-## selectors, var() and states all reach them.
-func _expand_lists() -> void:
-	var lists: Array = []
+## Before UxmlParts.expand: the height that a row pool covers, and the item
+## and cell templates of the collection views. Returns true when the
+## document has a collection view.
+func _prepare_collections() -> bool:
+	var found := false
+	UxmlContainerParts.pool_height = _list_pool_height()
+	var views: Array = []
 	for el in _doc.root.walk():
-		if el.local == "ListView":
-			lists.append(el)
-	for el in lists:
-		var h := LIST_DEFAULT_ITEM_HEIGHT
+		if UxmlContainerParts.is_collection(el.local):
+			views.append(el)
+	for el in views:
+		found = true
 		var hv = el.get_attribute("fixed-item-height")
 		if hv != null:
 			var n := UssValues.parse_number(String(hv))
 			if is_nan(n) or n <= 0.0:
 				_rt_warnings.append(UxmlDiagnostic.make("unsupported-value",
-					'fixed-item-height="%s" is not a positive number; %s used' % [hv, LIST_DEFAULT_ITEM_HEIGHT],
+					'fixed-item-height="%s" is not a positive number; %s used' % [hv, UxmlContainerParts.DEFAULT_ITEM_HEIGHT],
 					_doc.source, el.open_tag_start, _doc.path))
-			else:
-				h = n
+				el.attributes = el.attributes.filter(func(a): return a["name"] != "fixed-item-height")
 		var vm = el.get_attribute("virtualization-method")
 		if vm != null and String(vm) != "FixedHeight":
 			_rt_warnings.append(UxmlDiagnostic.make("unsupported-value",
-				'virtualization-method="%s" is not supported; FixedHeight used' % vm,
+				'virtualization-method="%s" is not supported; FixedHeight used (rows keep fixed-item-height)' % vm,
 				_doc.source, el.open_tag_start, _doc.path))
-		var alt_v = el.get_attribute("show-alternating-row-backgrounds")
-		var alt: bool = alt_v != null and ["ContentOnly", "All", "true"].has(String(alt_v))
-		var template: Array = _load_item_template(el)
-		var pool := clampi(int(ceil(_list_pool_height() / h)) + 3, 3, 1000)
-		var rows: Array = []
-		for k in pool:
-			var row := UxmlElement.new()
-			row.prefix = el.prefix
-			row.local = "VisualElement"
-			row.open_tag_start = el.open_tag_start
-			row.open_tag_end = el.open_tag_end
-			row.attributes = [
-				{"name": "class", "value": "unity-collection-view__item unity-list-view__item", "offset": 0},
-				{"name": "style", "value": _row_style(h, false), "offset": 0},
-			]
-			for t in template:
-				row.children.append(_clone_element(t, el))
-			el.children.append(row)
-			for sub in row.walk():
-				_pooled[sub] = true
-			rows.append(UxmlListRow.new(self, row))
-		_lists[el] = {"rows": rows, "h": h, "count": 0, "bind": Callable(),
-			"first": 0, "applied": 0, "alt": alt}
-
-
-func _row_style(h: float, visible: bool) -> String:
-	return "height: %spx; flex-shrink: 0;%s" % [h, "" if visible else " display: none;"]
+		if el.has_attribute("item-template"):
+			el.set_meta(&"uxml_item_template", _load_template(el, String(el.get_attribute("item-template"))))
+		var k := 0
+		for c in el.children:
+			if c.local != "Columns":
+				continue
+			for col in c.children:
+				if col.local != "Column":
+					continue
+				var ct = col.get_attribute("cell-template")
+				if ct != null and not String(ct).is_empty():
+					el.set_meta(&"uxml_cell_template_%d" % k, _load_template(el, String(ct)))
+				var ht = col.get_attribute("header-template")
+				if ht != null and not String(ht).is_empty():
+					el.set_meta(&"uxml_header_template_%d" % k, _load_template(el, String(ht)))
+				k += 1
+	return found
 
 
 ## Rows must cover the tallest viewport a list can get: the document, the
@@ -1194,19 +1165,15 @@ func _list_pool_height() -> float:
 	return maxf(hgt, float(DisplayServer.screen_get_size().y))
 
 
-## The item template's visual top-level elements; its <Style> sheets are
-## attached to the document scoped to the ListView.
-func _load_item_template(el: UxmlElement) -> Array:
-	var src = el.get_attribute("item-template")
-	if src == null or String(src).is_empty():
-		_rt_warnings.append(UxmlDiagnostic.make("malformed",
-			"<ListView> has no item-template; it shows no rows",
-			_doc.source, el.open_tag_start, _doc.path))
+## A template's visual top-level elements; its <Style> sheets are attached
+## to the document scoped to the collection view `el`.
+func _load_template(el: UxmlElement, src: String) -> Array:
+	if src.is_empty():
 		return []
-	var res := _resolver.resolve_text(String(src), _doc.path_of(el))
+	var res := _resolver.resolve_text(src, _doc.path_of(el))
 	if not res["ok"]:
 		var d: Dictionary = res["diagnostic"].duplicate()
-		d["message"] = 'item-template "%s" could not be loaded: %s' % [src, d["message"]]
+		d["message"] = 'template "%s" could not be loaded: %s' % [src, d["message"]]
 		d["file"] = _doc.path
 		var lc := UxmlDiagnostic.line_col(_doc.source, el.open_tag_start)
 		d["offset"] = el.open_tag_start
@@ -1229,98 +1196,236 @@ func _load_item_template(el: UxmlElement) -> Array:
 	return out
 
 
-## Deep copy of a template element; diagnostics point at the ListView.
-func _clone_element(t: UxmlElement, at: UxmlElement) -> UxmlElement:
-	var c := UxmlElement.new()
-	c.prefix = t.prefix
-	c.local = t.local
-	c.open_tag_start = at.open_tag_start
-	c.open_tag_end = at.open_tag_end
-	for a in t.attributes:
-		c.attributes.append({"name": a["name"], "value": a["value"], "offset": 0})
-	for ch in t.children:
-		c.children.append(_clone_element(ch, at))
-	return c
+func _behavior_of(element_name: String, kind: String = "") -> Variant:
+	var el: UxmlElement = _by_name.get(element_name)
+	if el == null:
+		return null
+	var b = _behaviors.get(el)
+	if b == null or (not kind.is_empty() and not b.has_method(kind)):
+		return null
+	return b
 
 
-func _on_list_scrolled(_value: float, el: UxmlElement) -> void:
-	_list_refresh(el, false)
-
-
-## Map pool slots onto items from the current scroll position. Item i
-## lives in slot i % pool (Unity-style recycling): when scrolling, rows that
-## stay in view keep their item and only rows that scrolled out are re-bound
-## (all of them when `rebind_all`). Slots past the end are hidden.
+## Re-bind the visible rows of a collection view (UxmlBinding itemsSource).
 func _list_refresh(el: UxmlElement, rebind_all: bool) -> void:
-	var info: Dictionary = _lists[el]
-	var rows: Array = info["rows"]
-	var pool := rows.size()
-	var h: float = info["h"]
-	var count: int = info["count"]
-	var sc := _natives.get(el) as ScrollContainer
-	var scroll := 0.0 if sc == null else float(sc.scroll_vertical)
-	var first := clampi(int(floor(scroll / h)), 0, maxi(0, count - pool))
-	info["first"] = first
-	var bind: Callable = info["bind"]
-	var rebound := false
-	for k in pool:
-		var row: UxmlListRow = rows[k]
-		# The item in [first, first + pool) that maps to slot k.
-		var idx := first + posmod(k - first, pool)
-		var visible := idx < count
-		row.element.set_attribute("style", _row_style(h, visible))
-		if not visible:
-			row.index = -1
-			continue
-		if row.index != idx or rebind_all:
-			row.index = idx
-			if info["alt"]:
-				row.element.set_attribute("class",
-					"unity-collection-view__item unity-list-view__item"
-					+ (" unity-collection-view__item--alternative-background" if idx % 2 == 1 else ""))
-			if bind.is_valid():
-				bind.call(row, idx)
-			rebound = true
-	if rebound:
-		relayout()  # bound content may change rows' internal layout
-	_list_place(el)
+	var b = _behaviors.get(el)
+	if b != null and b.has_method("refresh"):
+		b.refresh(rebind_all)
 
 
-## Rows are laid out in pool-slot order (slot k at its layout y); each is
-## shifted by (item - slot) * h to its item's position, and the scroll
-## content is sized for every item.
-func _list_place(el: UxmlElement) -> void:
-	var info: Dictionary = _lists[el]
-	var h: float = info["h"]
-	var rows: Array = info["rows"]
-	var applied: Dictionary = info["applied_rows"] if info.has("applied_rows") else {}
-	for k in rows.size():
-		var row: UxmlListRow = rows[k]
-		var want := 0 if row.index < 0 else row.index - k
-		var have: int = applied.get(k, 0)
-		if want != have:
-			var c: Control = _controls.get(row.element)
-			if c != null:
-				c.position.y += (want - have) * h
-			applied[k] = want
-	info["applied_rows"] = applied
-	var content := _scroll.get(el) as Control
-	if content != null:
-		var cnt: int = info["count"]
-		var top := 0.0
-		if not rows.is_empty() and cnt > 0:
-			var c0: Control = _controls.get((rows[0] as UxmlListRow).element)
-			if c0 != null:
-				top = c0.position.y - float(applied.get(0, 0)) * h
-		content.custom_minimum_size = Vector2(
-			content.custom_minimum_size.x, top + cnt * h if cnt > 0 else 0.0)
+## Give a collection view its items: `count` items, `bind.call(row:
+## UxmlListRow, index: int)` fills a pooled row for an item. Only enough
+## rows to cover the viewport exist; scrolling re-binds them. Call again
+## whenever the item count changes or every row must be re-bound. Without
+## an item-template a row is a Label (Unity's default makeItem).
+func set_list_source(list_name: String, count: int, bind: Callable) -> void:
+	var b = _behavior_of(list_name, "set_source")
+	if b != null:
+		b.set_source(count, bind)
 
 
-## A layout pass put every row back at its slot position.
-func _lists_after_layout() -> void:
-	for el in _lists:
-		_lists[el]["applied_rows"] = {}
-		_list_place(el)
+## Unity itemsSource without data binding: an Array whose items the rows
+## show. Without a bind callable a Label row shows the item's text; the
+## footer, the size field, reordering and sorting-mode="Default" change
+## the Array in place.
+func set_items_source(list_name: String, items: Array, bind: Callable = Callable()) -> void:
+	var b = _behavior_of(list_name, "set_source")
+	if b != null:
+		b.set_items(items)
+		b.set_source(items.size(), bind)
+
+
+## Re-bind every visible row of a list (item data changed in place).
+func refresh_list(list_name: String) -> void:
+	var b = _behavior_of(list_name, "refresh")
+	if b != null:
+		b.refresh(true)
+
+
+## The pooled rows of a list (for games that want to style them directly).
+func get_list_rows(list_name: String) -> Array:
+	var b = _behavior_of(list_name, "set_source")
+	return [] if b == null else b._rows
+
+
+## TreeView / MultiColumnTreeView data: `roots` are Dictionaries {id, data,
+## children: Array}. `bind.call(row: UxmlListRow, index)` fills a row;
+## get_tree_item(name, index) gives the item of a visible index. Without
+## a bind callable the row shows `data` as text.
+func set_tree_source(tree_name: String, roots: Array, bind: Callable = Callable()) -> void:
+	var b = _behavior_of(tree_name, "set_tree")
+	if b != null:
+		b.set_tree(roots, bind)
+
+
+## {id, data, depth, children, expanded, item} of visible tree index `index`.
+func get_tree_item(tree_name: String, index: int) -> Dictionary:
+	var b = _behavior_of(tree_name, "tree_item")
+	return {} if b == null else b.tree_item(index)
+
+
+## Unity ExpandItem / CollapseItem (with all children when `all_children`).
+func set_tree_item_expanded(tree_name: String, id: Variant, expanded: bool, all_children: bool = false) -> void:
+	var b = _behavior_of(tree_name, "set_expanded")
+	if b != null:
+		b.set_expanded(id, expanded, all_children)
+
+
+## Selected item indices of a collection view, in selection order.
+func get_selected_indices(list_name: String) -> Array:
+	var b = _behavior_of(list_name, "selected")
+	return [] if b == null else b.selected()
+
+
+## Unity SetSelection: emits selection_changed when the selection changed.
+func set_selection(list_name: String, indices: Array) -> void:
+	var b = _behavior_of(list_name, "set_selection")
+	if b != null:
+		b.set_selection(indices)
+
+
+## Unity ScrollToItem.
+func scroll_to_item(list_name: String, index: int) -> void:
+	var b = _behavior_of(list_name, "scroll_to_item")
+	if b != null:
+		b.scroll_to_item(index)
+
+
+## Multi-column views: `bind.call(cell: Control, index)` fills the cell of
+## `column` (the Column `name`) for an item. A cell is a Label unless the
+## Column has a cell-template.
+func set_column_cell_bind(view_name: String, column: String, bind: Callable) -> void:
+	var b = _behavior_of(view_name, "set_cell_bind")
+	var ci := _column_index(view_name, column)
+	if b != null and ci >= 0:
+		b.set_cell_bind(ci, bind)
+
+
+## sorting-mode="Default": `cmp.call(a, b) -> int` orders two items of the
+## items source for `column` (Unity Column.comparison).
+func set_column_comparison(view_name: String, column: String, cmp: Callable) -> void:
+	var b = _behavior_of(view_name, "set_comparison")
+	var ci := _column_index(view_name, column)
+	if b != null and ci >= 0:
+		b.set_comparison(ci, cmp)
+
+
+## Set the width of `column`, as a drag of its resize handle does.
+func set_column_width(view_name: String, column: String, width: float) -> void:
+	var b = _behavior_of(view_name, "set_column_width")
+	var ci := _column_index(view_name, column)
+	if b != null and ci >= 0:
+		b.set_column_width(ci, width)
+
+
+## Unity sortColumnDescriptions: [{column_name, column_index, direction}].
+func get_sort_descriptions(view_name: String) -> Array:
+	var b = _behavior_of(view_name, "sort_descriptions")
+	return [] if b == null else b.sort_descriptions()
+
+
+func _column_index(view_name: String, column: String) -> int:
+	var el: UxmlElement = _by_name.get(view_name)
+	if el == null:
+		return -1
+	for c in UxmlContainerParts.columns_of(el):
+		if c["name"] == column or c["title"] == column:
+			return c["index"]
+	return -1
+
+
+## The ScrollView's (or collection view's) scroll offset.
+func get_scroll_offset(element_name: String) -> Vector2:
+	var b = _scroll_behavior(element_name)
+	return Vector2.ZERO if b == null else b.offset()
+
+
+## Unity scrollOffset: clamped to the scroll range.
+func set_scroll_offset(element_name: String, offset: Vector2) -> void:
+	var b = _scroll_behavior(element_name)
+	if b != null:
+		b.set_offset(offset)
+
+
+## Unity ScrollView.ScrollTo: the smallest scroll that shows the element
+## named `child_name`.
+func scroll_to(element_name: String, child_name: String) -> void:
+	var b = _scroll_behavior(element_name)
+	var child = get_element(child_name)
+	if b != null and child != null:
+		b.scroll_to(child)
+
+
+func _scroll_behavior(element_name: String) -> Variant:
+	var el: UxmlElement = _by_name.get(element_name)
+	if el == null:
+		return null
+	if el.local != "ScrollView":
+		el = UxmlContainerParts.get_part(el, "scroll-view")
+	return null if el == null else _behaviors.get(el)
+
+
+## Follow focus (controller and keyboard navigation): a focused control
+## inside a ScrollView scrolls into view, innermost ScrollView first.
+func _on_focus_changed(c: Control) -> void:
+	if _doc == null or c == null or not is_ancestor_of(c):
+		return
+	var n: Node = c
+	var el = null
+	while n != null and el == null:
+		el = _el_of.get(n)
+		n = n.get_parent()
+	while el != null:
+		if el.local == "ScrollView":
+			var b = _behaviors.get(el)
+			if b != null:
+				b.scroll_to(c)
+		el = _parents.get(el)
+
+
+## TabView: select the tab at `index` (emits value_changed).
+func select_tab(view_name: String, index: int) -> void:
+	var b = _behavior_of(view_name, "select")
+	if b != null:
+		b.select(index)
+
+
+func get_selected_tab(view_name: String) -> int:
+	var b = _behavior_of(view_name, "selected_index")
+	return -1 if b == null else b.selected_index()
+
+
+## Close the closeable tab at `index` (emits tab_closed).
+func close_tab(view_name: String, index: int) -> void:
+	var b = _behavior_of(view_name, "close")
+	if b != null:
+		b.close(index)
+
+
+## TwoPaneSplitView: the size of the fixed pane.
+func set_split_dimension(view_name: String, dimension: float) -> void:
+	var b = _behavior_of(view_name, "set_dimension")
+	if b != null:
+		b.set_dimension(dimension)
+
+
+func get_split_dimension(view_name: String) -> float:
+	var b = _behavior_of(view_name, "dimension")
+	return 0.0 if b == null else b.dimension()
+
+
+## IMGUIContainer: Unity's onGUIHandler is C# IMGUI code, which Godot cannot
+## run. `draw.call(box: UxmlImguiBox, rect: Rect2)` draws into the element
+## (Godot CanvasItem draw_* calls on `box`, after its USS background);
+## `input.call(box, event: InputEvent)` receives its gui_input. Call
+## get_element(name).queue_redraw() to draw again.
+func set_imgui_handler(element_name: String, draw: Callable, input: Callable = Callable()) -> void:
+	var c := get_element(element_name) as UxmlImguiBox
+	if c == null:
+		return
+	c.on_draw = draw
+	c.on_input = input
+	c.queue_redraw()
 
 
 ## Re-lay out only — for content changes that cannot affect styling, e.g.

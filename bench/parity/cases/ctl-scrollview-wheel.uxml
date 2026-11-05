@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ScrollView name="sv" mouse-wheel-scroll-size="25" style="height: 100px; width: 150px;">
+    <ui:VisualElement name="wh-a" style="height: 300px;" />
+  </ui:ScrollView>
+  <ui:ScrollView name="sv2" style="height: 100px; width: 150px;">
+    <ui:VisualElement name="wh-b" style="height: 300px;" />
+  </ui:ScrollView>
+</ui:UXML>

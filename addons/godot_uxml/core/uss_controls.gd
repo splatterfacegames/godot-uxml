@@ -36,6 +36,21 @@ const IMPLICIT_CLASSES := {
 	"FloatField": ["unity-float-field", "unity-base-text-field", "unity-base-field"],
 	"Slider": ["unity-slider", "unity-base-slider", "unity-base-slider--horizontal", "unity-base-field"],
 	"SliderInt": ["unity-slider-int", "unity-base-slider", "unity-base-slider--horizontal", "unity-base-field"],
+	# Containers and collections (runtime/controls/uxml_container_parts.gd).
+	"Scroller": ["unity-scroller"],
+	"TreeView": ["unity-collection-view", "unity-tree-view"],
+	"MultiColumnListView": ["unity-collection-view", "unity-list-view"],
+	"MultiColumnTreeView": ["unity-collection-view", "unity-tree-view"],
+	"Tab": ["unity-tab"],
+	"TabView": ["unity-tab-view"],
+	"TwoPaneSplitView": ["unity-two-pane-split-view"],
+	"IMGUIContainer": ["unity-imgui-container"],
+	# Column UxmlObjects of the multi-column views: the builder takes them
+	# out of the tree at load (UxmlContainerParts.read_columns).
+	"Columns": [],
+	"Column": [],
+	"SortColumnDescriptions": [],
+	"SortColumnDescription": [],
 }
 
 ## Tags that carry no pixels but are part of the document model, not
@@ -90,6 +105,29 @@ const KNOWN_ATTRIBUTES := {
 	"view-data-key": true, "usage-hints": true, "language-direction": true,
 	# ListView AutoAssign: rows get the bound itemsSource as data source.
 	"binding-source-selection-mode": true,
+	# ScrollView, Scroller and the collection views (ListView, TreeView,
+	# MultiColumnListView/TreeView, Column), TabView, Tab, TwoPaneSplitView
+	# (runtime/controls/uxml_container_parts.gd).
+	"mode": true, "horizontal-scroller-visibility": true,
+	"vertical-scroller-visibility": true, "elasticity": true,
+	"touch-scroll-type": true, "scroll-deceleration-rate": true,
+	"horizontal-page-size": true, "vertical-page-size": true,
+	"mouse-wheel-scroll-size": true, "nested-interaction-kind": true,
+	"show-horizontal-scroller": true, "show-vertical-scroller": true,
+	"direction": true,
+	"show-border": true, "reorderable": true, "reorder-mode": true,
+	"show-foldout-header": true, "header-title": true,
+	"show-add-remove-footer": true, "allow-add": true, "allow-remove": true,
+	"show-bound-collection-size": true, "horizontal-scrolling": true,
+	"auto-expand": true, "sorting-mode": true, "sorting-enabled": true,
+	"width": true, "min-width": true, "max-width": true,
+	"stretchable": true, "sortable": true, "resizable": true,
+	"optional": true, "visible": true, "cell-template": true,
+	"header-template": true, "icon": true, "column-name": true,
+	"column-index": true,
+	"icon-image": true, "closeable": true,
+	"fixed-pane-index": true, "fixed-pane-initial-dimension": true,
+	"orientation": true,
 	# TextElement (Label, Button): rich text, escapes, elided tooltips.
 	"enable-rich-text": true, "parse-escape-sequences": true,
 	"display-tooltip-when-elided": true,

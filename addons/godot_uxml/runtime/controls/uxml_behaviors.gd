@@ -25,12 +25,19 @@ static func attach_all(doc) -> Dictionary:
 		b.doc = doc
 		b.el = el
 		out[el] = b
+	# Behaviors may look up each other in setup() (a ListView connects to
+	# its ScrollView's behavior).
+	doc._behaviors = out
 	for el in out:
 		out[el].setup()
 	return out
 
 
 static func _create(el: UxmlElement) -> Behavior:
+	# Containers and collections live in uxml_container_behaviors.gd.
+	var cb := UxmlContainerBehaviors.create(el)
+	if cb != null:
+		return cb
 	match el.local:
 		"Toggle", "RadioButton":
 			return ToggleBehavior.new()
