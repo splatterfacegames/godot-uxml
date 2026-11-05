@@ -884,9 +884,10 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 			# longest paragraph. The layout clamps the measure to the space
 			# the Label has (Yoga AtMost).
 			ms.x = UxmlStyleApplier.label_max_content(c)
-		if c.has_meta(&"uxml_fit"):
+		if _applier != null and not _applier.fitted.is_empty() and _applier.fitted.has(c):
 			# A Label fitted into a box shorter than its line measures as
-			# without the fit (UxmlStyleApplier.fit_label).
+			# without the fit (UxmlStyleApplier.fit_label; the native
+			# measurer reads the `uxml_fit` meta that fit_label sets with it).
 			ms.y = UxmlStyleApplier.unfitted_height(c)
 	# A USS stylebox carries padding+border as content margins, which the
 	# minimum size already counts — the flex pass adds the same insets on

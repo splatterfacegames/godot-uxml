@@ -305,6 +305,7 @@ pub struct LayoutIn {
 pub struct Placement {
     pub last: Option<Out>,
     hooked: Vec<Option<(Vector2, Vector2)>>,
+    sn_fit: Option<StringName>,
 }
 
 impl Placement {
@@ -336,7 +337,8 @@ impl Placement {
         if let (Some(lbl), Some(a)) = (&io.labels[i], applier) {
             // UxmlDocument._place_control: Godot floors a Label at one text
             // line; Unity's box can be shorter (UxmlStyleApplier.fit_label).
-            if d(c.get_size().y) > d(r.size.y) + 0.01 || lbl.has_meta("uxml_fit") {
+            let sn_fit = self.sn_fit.get_or_insert_with(|| StringName::from("uxml_fit"));
+            if d(c.get_size().y) > d(r.size.y) + 0.01 || lbl.has_meta(&*sn_fit) {
                 let mut a = a.clone();
                 a.call("fit_label", &[c.to_variant(), r.size.to_variant()]);
             }

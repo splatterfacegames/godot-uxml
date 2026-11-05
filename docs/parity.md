@@ -92,7 +92,11 @@ on structure only.
 
 ### Unity
 
-**@UNITY_RESULT@**
+**105 of 109 cases match exactly. 1 more differs only by pixel-grid
+rounding (`ctl-slider-click`). Structure: 2225/2225 elements. Geometry:
+7129/7136 values, and 2 more within 0.5px. Style: 46384/46384 values.**
+The totals grew because the inner ScrollView of `ctl-textfield-multiline`
+now matches element by element.
 
 Before the fidelity work (unity/fidelity): 94 of 109 exact; structure
 2201/2225, geometry 6997/7092, style 46096/46098. The changes that closed
