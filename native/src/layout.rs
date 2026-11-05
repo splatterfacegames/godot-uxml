@@ -16,13 +16,15 @@ use godot::prelude::*;
 use crate::cascade::Cascade;
 
 const EPS: f64 = 0.01;
-pub const LAYOUT_PROPS: [&str; 30] = [
+pub const LAYOUT_PROPS: [&str; 35] = [
     "width", "height", "min-width", "min-height", "max-width", "max-height", "flex-basis",
     "padding-top", "padding-right", "padding-bottom", "padding-left",
     "margin-top", "margin-right", "margin-bottom", "margin-left",
     "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
     "row-gap", "column-gap", "flex-grow", "flex-shrink",
+    "top", "right", "bottom", "left",
     "display", "flex-direction", "flex-wrap", "justify-content", "align-items", "align-content", "align-self",
+    "position",
 ];
 const P_W: usize = 0;
 const P_H: usize = 1;
@@ -38,14 +40,17 @@ const P_RGAP: usize = 19;
 const P_CGAP: usize = 20;
 const P_GROW: usize = 21;
 const P_SHRINK: usize = 22;
-const NP: usize = 23;
-const E_DISPLAY: usize = 23;
-const E_DIR: usize = 24;
-const E_WRAP: usize = 25;
-const E_JUSTIFY: usize = 26;
-const E_ALIGN_ITEMS: usize = 27;
-const E_ALIGN_CONTENT: usize = 28;
-const E_ALIGN_SELF: usize = 29;
+const P_POS: usize = 23; // 23..26 top,right,bottom,left
+const NP: usize = 27;
+const E_DISPLAY: usize = 27;
+const E_DIR: usize = 28;
+const E_WRAP: usize = 29;
+const E_JUSTIFY: usize = 30;
+const E_ALIGN_ITEMS: usize = 31;
+const E_ALIGN_CONTENT: usize = 32;
+const E_ALIGN_SELF: usize = 33;
+const E_POSITION: usize = 34;
+const NE: usize = 8;
 const T: usize = 0;
 const R: usize = 1;
 const B: usize = 2;
@@ -56,6 +61,7 @@ const ALIGN: [&str; 5] = ["flex-start", "center", "flex-end", "stretch", "baseli
 const ALIGN_CONTENT: [&str; 7] = ["flex-start", "center", "flex-end", "stretch", "space-between", "space-around", "space-evenly"];
 const DIRECTIONS: [&str; 4] = ["column", "row", "column-reverse", "row-reverse"];
 const WRAPS: [&str; 3] = ["nowrap", "wrap", "wrap-reverse"];
+const POSITIONS: [&str; 2] = ["relative", "absolute"];
 const UNSUPPORTED_UNITS: [&str; 14] = ["em", "rem", "vh", "vw", "vmin", "vmax", "pt", "cm", "in", "ch", "ex", "pc", "mm", "q"];
 
 // Godot's macros.
@@ -177,7 +183,7 @@ pub struct Rec {
     vals: [f64; NP],
     raws: Vec<String>,
     probs: HashMap<usize, String>,
-    enums: [Option<String>; 7],
+    enums: [Option<String>; NE],
 }
 
 fn build_rec(vals_in: &[Option<GString>]) -> Rec {
@@ -220,7 +226,7 @@ fn build_rec(vals_in: &[Option<GString>]) -> Rec {
         }
         r.raws[pid] = raw;
     }
-    for e in 0..7 {
+    for e in 0..NE {
         r.enums[e] = vals_in[NP + e].as_ref().map(|g| g.to_string());
     }
     r
@@ -348,7 +354,8 @@ pub struct Pass<'a> {
     mar_m: Vec<Option<(f64, Edges)>>,
     bor_m: Vec<Option<Edges>>,
     kids_m: Vec<Option<Rc<Vec<usize>>>>,
-    enum_m: Vec<[Option<&'static str>; 7]>,
+    enum_m: Vec<[Option<&'static str>; NE]>,
+    abs_m: Vec<Option<Rc<Vec<usize>>>>,
     num_m: Vec<[Option<f64>; 2]>,
     sens_m: Vec<i32>,
     meas_m: Vec<Vec<MemoE>>,
@@ -394,6 +401,7 @@ impl<'a> Pass<'a> {
             mar_m: vec![None; n],
             bor_m: vec![None; n],
             kids_m: vec![None; n],
+            abs_m: vec![None; n],
             enum_m: (0..n).map(|_| Default::default()).collect(),
             num_m: vec![[None, None]; n],
             sens_m: vec![-1; n],
@@ -615,6 +623,7 @@ impl<'a> Pass<'a> {
             return k.clone();
         }
         let mut out = vec![];
+        let mut abs = vec![];
         for ch in self.c.children(i) {
             if self.c.non_visual(ch) {
                 continue;
@@ -626,11 +635,112 @@ impl<'a> Pass<'a> {
             if display != "flex" {
                 self.warn_once(ch, "display", format!("display: \"{display}\" is not supported; flex used"));
             }
-            out.push(ch);
+            if self.recs[ch].enums[E_POSITION - NP].is_some()
+                && self.enum_(ch, E_POSITION, &POSITIONS, "relative") == "absolute"
+            {
+                abs.push(ch);
+            } else {
+                out.push(ch);
+            }
         }
         let rc = Rc::new(out);
         self.kids_m[i] = Some(rc.clone());
+        self.abs_m[i] = Some(Rc::new(abs));
         rc
+    }
+
+    fn abs_children(&mut self, i: usize) -> Rc<Vec<usize>> {
+        self.flex_children(i);
+        self.abs_m[i].clone().unwrap()
+    }
+
+    /// flex_layout.gd _rel_offset.
+    fn rel_offset(&mut self, ch: usize, base: Vector2) -> Vector2 {
+        let mut out = [0.0f64; 2];
+        let lft = self.lenr(ch, P_POS + L, d(base.x));
+        if !lft.is_nan() {
+            out[0] = lft;
+        } else {
+            let rgt = self.lenr(ch, P_POS + R, d(base.x));
+            if !rgt.is_nan() {
+                out[0] = -rgt;
+            }
+        }
+        let top = self.lenr(ch, P_POS + T, d(base.y));
+        if !top.is_nan() {
+            out[1] = top;
+        } else {
+            let bot = self.lenr(ch, P_POS + B, d(base.y));
+            if !bot.is_nan() {
+                out[1] = -bot;
+            }
+        }
+        Vector2::new(f(out[0]), f(out[1]))
+    }
+
+    /// flex_layout.gd _layout_abs.
+    fn layout_abs(&mut self, i: usize, size: Vector2, pad: Edges, bor: Edges, kids: &[usize]) {
+        let sx = d(size.x);
+        let sy = d(size.y);
+        let cbw = gmax(0.0, sx - bor[L] - bor[R]);
+        let cbh = gmax(0.0, sy - bor[T] - bor[B]);
+        let row = self.is_row(i);
+        let reverse = self.reverse_main(i);
+        let justify = self.enum_(i, E_JUSTIFY, &JUSTIFY, "flex-start");
+        let align_items = self.enum_(i, E_ALIGN_ITEMS, &ALIGN, "stretch");
+        for &ch in kids {
+            let m = self.margins(ch, cbw);
+            let pads = self.padding(ch, cbw);
+            let bors = self.borders(ch);
+            let in_w = pads[L] + pads[R] + bors[L] + bors[R];
+            let in_h = pads[T] + pads[B] + bors[T] + bors[B];
+            let lft = self.lenr(ch, P_POS + L, cbw);
+            let rgt = self.lenr(ch, P_POS + R, cbw);
+            let top = self.lenr(ch, P_POS + T, cbh);
+            let bot = self.lenr(ch, P_POS + B, cbh);
+            let mut w = self.dim(ch, P_W, cbw);
+            if w < 0.0 && !lft.is_nan() && !rgt.is_nan() {
+                w = gmax(0.0, cbw - lft - rgt - m[L] - m[R]);
+            }
+            let mut h = self.dim(ch, P_H, cbh);
+            if h < 0.0 && !top.is_nan() && !bot.is_nan() {
+                h = gmax(0.0, cbh - top - bot - m[T] - m[B]);
+            }
+            if w < 0.0 || h < 0.0 {
+                let nat = self.measure(ch, Vector2::new(f(cbw), f(cbh)), w);
+                if w < 0.0 {
+                    w = d(nat.x);
+                }
+                if h < 0.0 {
+                    h = d(nat.y);
+                }
+            }
+            let lo = self.min_or(ch, P_MINW, cbw, 0.0);
+            let hi = self.bound(ch, P_MAXW, cbw, false);
+            w = gmax(gclamp(w, lo, hi), in_w);
+            let lo = self.min_or(ch, P_MINH, cbh, 0.0);
+            let hi = self.bound(ch, P_MAXH, cbh, false);
+            h = gmax(gclamp(h, lo, hi), in_h);
+            let mut al: &str = self.str_(ch, E_ALIGN_SELF, "auto");
+            if al == "auto" {
+                al = align_items;
+            }
+            let x = if !lft.is_nan() {
+                bor[L] + lft + m[L]
+            } else if !rgt.is_nan() {
+                sx - bor[R] - rgt - m[R] - w
+            } else {
+                abs_free(if row { justify } else { al }, row && reverse, sx, w, bor[L] + pad[L] + m[L])
+            };
+            let y = if !top.is_nan() {
+                bor[T] + top + m[T]
+            } else if !bot.is_nan() {
+                sy - bor[B] - bot - m[B] - h
+            } else {
+                abs_free(if row { al } else { justify }, !row && reverse, sy, h, bor[T] + pad[T] + m[T])
+            };
+            self.layout(ch, Rect2::new(Vector2::new(f(x), f(y)), Vector2::new(f(w), f(h))), cbw);
+        }
     }
 
     fn is_row(&mut self, i: usize) -> bool {
@@ -857,16 +967,18 @@ impl<'a> Pass<'a> {
             ),
         );
         let kids = self.flex_children(i);
+        let abs = self.abs_children(i);
         if kids.is_empty() {
             self.out.content[i] = Some(Vector2::ZERO);
-            return;
-        }
-        if self.c.is_scroll_view(i) {
+        } else if self.c.is_scroll_view(i) {
             self.layout_scroll(i, content, pad, bor, &kids[..]);
-            return;
+        } else {
+            let ext = self.place(i, content, &kids[..]);
+            self.out.content[i] = Some(ext);
         }
-        let ext = self.place(i, content, &kids[..]);
-        self.out.content[i] = Some(ext);
+        if !abs.is_empty() {
+            self.layout_abs(i, rect.size, pad, bor, &abs[..]);
+        }
     }
 
     fn layout_scroll(&mut self, i: usize, content: Rect2, pad: Edges, bor: Edges, kids: &[usize]) {
@@ -1143,7 +1255,12 @@ impl<'a> Pass<'a> {
                 let mut size = [0.0f32; 2];
                 size[main] = f(it_main[k]);
                 size[cross] = f(it_cross[k]);
-                self.layout(kids[k], Rect2::new(Vector2::new(pos[0], pos[1]), Vector2::new(size[0], size[1])), asx);
+                let kd = &self.recs[kids[k]].kinds;
+                let mut at = Vector2::new(pos[0], pos[1]);
+                if kd[P_POS] != K::None || kd[P_POS + 1] != K::None || kd[P_POS + 2] != K::None || kd[P_POS + 3] != K::None {
+                    at += self.rel_offset(kids[k], area.size);
+                }
+                self.layout(kids[k], Rect2::new(at, Vector2::new(size[0], size[1])), asx);
                 let mend = it_m[k][me_i];
                 let mcend = it_m[k][ce_i];
                 extent[main] = f(gmax(d(extent[main]), d(pos[main]) + d(size[main]) + mend - apos_main));
@@ -1266,4 +1383,16 @@ impl RecCache {
             }
         }
     }
+}
+
+/// flex_layout.gd _abs_free.
+fn abs_free(mode: &str, reverse: bool, outer: f64, sz: f64, lead: f64) -> f64 {
+    if mode == "center" {
+        return (outer - sz) / 2.0;
+    }
+    let mut at_end = mode == "flex-end";
+    if reverse {
+        at_end = !at_end;
+    }
+    if at_end { outer - sz } else { lead }
 }

@@ -63,6 +63,7 @@ const ALIGN := ["flex-start", "center", "flex-end", "stretch", "baseline"]
 const ALIGN_CONTENT := ["flex-start", "center", "flex-end", "stretch", "space-between", "space-around", "space-evenly"]
 const DIRECTIONS := ["column", "row", "column-reverse", "row-reverse"]
 const WRAPS := ["nowrap", "wrap", "wrap-reverse"]
+const POSITIONS := ["relative", "absolute"]
 
 # Edge arrays are [t, r, b, l].
 const T := 0
@@ -92,6 +93,7 @@ var _pad_m := {}      # el -> [cb_width, PackedFloat64Array]
 var _mar_m := {}      # el -> [cb_width, PackedFloat64Array]
 var _bor_m := {}      # el -> PackedFloat64Array
 var _kids_m := {}     # el -> Array
+var _abs_m := {}      # el -> Array (position:absolute children)
 var _enum_m := {}     # el -> {prop: String}
 var _num_m := {}      # el -> {prop: float}
 var _meas_m := {}     # el -> Array of [ax, ay, hint, Vector2]
@@ -201,17 +203,19 @@ const P_RGAP := 19
 const P_CGAP := 20
 const P_GROW := 21
 const P_SHRINK := 22
-const NP := 23
+const P_POS := 23     # 23..26 top,right,bottom,left (position offsets)
+const NP := 27
 const PNAMES := [
 	"width", "height", "min-width", "min-height", "max-width", "max-height", "flex-basis",
 	"padding-top", "padding-right", "padding-bottom", "padding-left",
 	"margin-top", "margin-right", "margin-bottom", "margin-left",
 	"border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
 	"row-gap", "column-gap", "flex-grow", "flex-shrink",
+	"top", "right", "bottom", "left",
 ]
 const ENUM_NAMES := [
 	"display", "flex-direction", "flex-wrap", "justify-content",
-	"align-items", "align-content", "align-self",
+	"align-items", "align-content", "align-self", "position",
 ]
 # kinds
 const K_NONE := 0     # property absent
@@ -475,6 +479,7 @@ func _flex_children(el: UxmlElement) -> Array:
 	if hit != null:
 		return hit
 	var out: Array = []
+	var abs: Array = []
 	for child in el.children:
 		var local: String = child.local
 		if local == "UXML" or local == "Style":
@@ -484,8 +489,12 @@ func _flex_children(el: UxmlElement) -> Array:
 			continue
 		if display != "flex":
 			_warn_once(child, "display", 'display: "%s" is not supported; flex used' % display)
-		out.append(child)
+		if _rec(child)[5].has("position") and _enum(child, "position", POSITIONS, "relative") == "absolute":
+			abs.append(child)
+		else:
+			out.append(child)
 	_kids_m[el] = out
+	_abs_m[el] = abs
 	return out
 
 
@@ -935,13 +944,104 @@ func _layout_body(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 		)
 	)
 	var kids := _flex_children(el)
+	var abs: Array = _abs_m[el]
 	if kids.is_empty():
 		_content_sizes[el] = Vector2.ZERO
-		return
-	if el.local == "ScrollView" or el.local == "ListView":
+	elif el.local == "ScrollView" or el.local == "ListView":
 		_layout_scroll(el, content, pad, bor, kids)
-		return
-	_content_sizes[el] = _place(el, content, kids)
+	else:
+		_content_sizes[el] = _place(el, content, kids)
+	if not abs.is_empty():
+		_layout_abs(el, rect.size, pad, bor, abs)
+
+
+## Relative-position offset of a flow item (Yoga: the leading offset wins,
+## else minus the trailing one). Percentages resolve against the containing
+## block's content box; an offset never moves siblings or the extent.
+func _rel_offset(child: UxmlElement, base: Vector2) -> Vector2:
+	var out := Vector2.ZERO
+	var lft := _len(child, P_POS + L, base.x)
+	if not is_nan(lft):
+		out.x = lft
+	else:
+		var rgt := _len(child, P_POS + R, base.x)
+		if not is_nan(rgt):
+			out.x = -rgt
+	var top := _len(child, P_POS + T, base.y)
+	if not is_nan(top):
+		out.y = top
+	else:
+		var bot := _len(child, P_POS + B, base.y)
+		if not is_nan(bot):
+			out.y = -bot
+	return out
+
+
+## position:absolute children: sized and placed against el's padding box
+## (Yoga). Offsets are measured from the padding-box edges; left+right (or
+## top+bottom) with an auto size stretch the box; without an offset on an
+## axis the child goes where the container's justify-content (main axis) /
+## align-items|align-self (cross axis) puts it: start at the content edge,
+## center and flex-end against the border box, as Yoga does.
+func _layout_abs(el: UxmlElement, size: Vector2, pad: PackedFloat64Array, bor: PackedFloat64Array, kids: Array) -> void:
+	var cbw := maxf(0.0, size.x - bor[L] - bor[R])
+	var cbh := maxf(0.0, size.y - bor[T] - bor[B])
+	var row := _is_row(el)
+	var reverse := _reverse_main(el)
+	var justify := _enum(el, "justify-content", JUSTIFY, "flex-start")
+	var align_items := _enum(el, "align-items", ALIGN, "stretch")
+	for child in kids:
+		var m := _margins(child, cbw)
+		var pads := _padding(child, cbw)
+		var bors := _borders(child)
+		var in_w: float = pads[L] + pads[R] + bors[L] + bors[R]
+		var in_h: float = pads[T] + pads[B] + bors[T] + bors[B]
+		var lft := _len(child, P_POS + L, cbw)
+		var rgt := _len(child, P_POS + R, cbw)
+		var top := _len(child, P_POS + T, cbh)
+		var bot := _len(child, P_POS + B, cbh)
+		var w := _dim(child, P_W, cbw)
+		if w < 0.0 and not is_nan(lft) and not is_nan(rgt):
+			w = maxf(0.0, cbw - lft - rgt - m[L] - m[R])
+		var h := _dim(child, P_H, cbh)
+		if h < 0.0 and not is_nan(top) and not is_nan(bot):
+			h = maxf(0.0, cbh - top - bot - m[T] - m[B])
+		if w < 0.0 or h < 0.0:
+			var nat := _measure(child, Vector2(cbw, cbh), w)
+			if w < 0.0:
+				w = nat.x
+			if h < 0.0:
+				h = nat.y
+		w = maxf(clampf(w, _min_or(child, P_MINW, cbw, 0.0), _bound(child, P_MAXW, cbw, false)), in_w)
+		h = maxf(clampf(h, _min_or(child, P_MINH, cbh, 0.0), _bound(child, P_MAXH, cbh, false)), in_h)
+		var al := _str(child, "align-self", "auto")
+		if al == "auto":
+			al = align_items
+		var x: float
+		if not is_nan(lft):
+			x = bor[L] + lft + m[L]
+		elif not is_nan(rgt):
+			x = size.x - bor[R] - rgt - m[R] - w
+		else:
+			x = _abs_free(justify if row else al, row and reverse, size.x, w, bor[L] + pad[L] + m[L])
+		var y: float
+		if not is_nan(top):
+			y = bor[T] + top + m[T]
+		elif not is_nan(bot):
+			y = size.y - bor[B] - bot - m[B] - h
+		else:
+			y = _abs_free(al if row else justify, (not row) and reverse, size.y, h, bor[T] + pad[T] + m[T])
+		_layout(child, Rect2(Vector2(x, y), Vector2(w, h)), cbw)
+
+
+## Free-axis position of an absolute child with no offset on that axis.
+static func _abs_free(mode: String, reverse: bool, outer: float, sz: float, lead: float) -> float:
+	if mode == "center":
+		return (outer - sz) / 2.0
+	var at_end := mode == "flex-end"
+	if reverse:
+		at_end = not at_end
+	return outer - sz if at_end else lead
 
 
 ## ScrollView children live inside a scroll content box that is as wide as
@@ -1275,7 +1375,12 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 			var size := Vector2.ZERO
 			size[main] = it_main[k]
 			size[cross] = it_cross[k]
-			_layout(kids[k], Rect2(pos, size), asx)
+			var kd: PackedByteArray = _rec(kids[k])[1]
+			if (kd[P_POS] != K_NONE or kd[P_POS + 1] != K_NONE
+					or kd[P_POS + 2] != K_NONE or kd[P_POS + 3] != K_NONE):
+				_layout(kids[k], Rect2(pos + _rel_offset(kids[k], area.size), size), asx)
+			else:
+				_layout(kids[k], Rect2(pos, size), asx)
 			var mk: PackedFloat64Array = it_m[k]
 			var mend: float = mk[me_i]
 			var mcend: float = mk[ce_i]
