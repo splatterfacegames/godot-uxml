@@ -353,3 +353,39 @@ Correctness after the change: `tests/run_tests.gd` 695 checks headless
 `bench/equiv_runtime.gd` now compares the incremental document with a
 full restyle of itself and with the GDScript path (see its header); the
 pre-optimization runtime in `bench/ref/` cannot build part trees.
+
+
+## Merge of the part trees with templates, transitions, binding and visual properties (`unity/merge-controls`)
+
+Method: `bench/bench.gd -- --quick`, one run with the default theme and one
+run with `-- --no-theme`, one after the other in separate processes. Other
+Godot processes ran on the machine at the same time, so cross-process
+numbers vary by about ±15 %.
+
+| op (native core, ms, median) | default theme | no theme |
+| --- | ---: | ---: |
+| `load_document(big)` full (1,531 elements) | 584.6 | 514.9 |
+| `load_document(runtime.uxml)` | 15.7 | 12.1 |
+| `load_document(Options.uxml)` | 10.2 | 6.0 |
+| `load_document(Menu.uxml)` | 5.9 | 2.4 |
+| hover toggle (button) | 1.45 | 1.26 |
+| hover toggle (card, desc sel) | 2.15 | 1.49 |
+| focus toggle (list item) | 2.19 | 1.38 |
+| `set_class` churn (card) | 17.8 | 14.1 |
+| resize relayout | 15.6 | 13.2 |
+| idle restyle | 0.93 | 0.87 |
+| transition frame (bg color) | 1.20 | 0.93 |
+| transition frame (width) | 13.7 | 11.3 |
+| HUD frame (8 labels + relayout) | 0.70 | 0.52 |
+
+The cost of the theme is the same as on `unity/controls-foundation`: the
+theme rules compile into each new cascade, and the theme gives each Label
+and Button more properties to apply. The merge adds no per-frame cost: a
+document without bindings, transitions or part-tree controls does the same
+work as before. A binding write to a part-tree control is one attribute
+write (`Behavior.bind_write`) and one incremental restyle of the control.
+
+Correctness after the merge: `tests/run_tests.gd` 1418 checks,
+`bench/equiv.gd` 1483 (native) / 1295 (`--gdscript`),
+`bench/equiv_layout.gd` 192 / 192, `bench/equiv_runtime.gd` 1158 / 1158,
+`bench/equiv_parse.gd` 2619 / 2619, 0 failures.
