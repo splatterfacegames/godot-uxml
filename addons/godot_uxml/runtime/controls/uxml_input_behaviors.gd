@@ -103,8 +103,10 @@ class InputBehavior extends UxmlBehaviors.Behavior:
 		var ci = doc._cascade.index.get(el)
 		return ci != null and ci < doc._dis.size() and doc._dis[ci] == 1
 
+	var _parts := {}  # role -> part (part trees are fixed after load)
+
 	func part(role: String) -> UxmlElement:
-		return UxmlParts.find_part(el, role)
+		return UxmlInputParts.part_cached(el, role, _parts)
 
 	## Write an attribute without re-entering on_model_changed.
 	func quiet_attr(n: String, v: String) -> void:
@@ -284,10 +286,10 @@ class SliderBehavior extends InputBehavior:
 				f.set_attribute("style", want)
 
 	func _update_dragger() -> void:
-		UxmlInputParts.layout_styles(el, size_of, style_of)
+		UxmlInputParts.layout_styles(el, size_of, style_of, _parts)
 
 	func _after_layout() -> void:
-		UxmlInputParts.layout_styles(el, size_of, style_of)
+		UxmlInputParts.layout_styles(el, size_of, style_of, _parts)
 
 	func _update_text_field() -> void:
 		var tf := part("text-field")
@@ -740,7 +742,7 @@ class MinMaxBehavior extends InputBehavior:
 		_hi = vals[3]
 
 	func _after_layout() -> void:
-		UxmlInputParts.layout_styles(el, size_of, style_of)
+		UxmlInputParts.layout_styles(el, size_of, style_of, _parts)
 
 	func _set_value(v: Vector2, notify: bool) -> void:
 		var hi := _hi
@@ -755,7 +757,7 @@ class MinMaxBehavior extends InputBehavior:
 		el.set_attribute("min-value", str(nv.x))
 		el.set_attribute("max-value", str(nv.y))
 		_syncing = false
-		UxmlInputParts.layout_styles(el, size_of, style_of)
+		UxmlInputParts.layout_styles(el, size_of, style_of, _parts)
 		if notify:
 			emit_value(_v)
 			var c := native() as UxmlSlider
@@ -908,7 +910,7 @@ class MinMaxBehavior extends InputBehavior:
 		if _syncing:
 			return
 		_read()
-		UxmlInputParts.layout_styles(el, size_of, style_of)
+		UxmlInputParts.layout_styles(el, size_of, style_of, _parts)
 
 	func bind_write(prop: String, v: Variant) -> int:
 		match prop:

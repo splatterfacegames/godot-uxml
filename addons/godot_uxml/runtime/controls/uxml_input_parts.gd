@@ -219,13 +219,13 @@ static func slider_translate(el: UxmlElement, container: Vector2, dragger: Vecto
 ## Write the dragger and dragger-border `translate` of a Slider from the
 ## laid-out sizes. Unity moves the dragger only when the new position is at
 ## least half a pixel away. Returns true when a style changed.
-static func slider_layout(el: UxmlElement, container: Vector2, dragger: Vector2, margins: float) -> bool:
+static func slider_layout(el: UxmlElement, container: Vector2, dragger: Vector2, margins: float, cache: Dictionary = {}) -> bool:
 	var tr := slider_translate(el, container, dragger, margins)
 	if tr.is_empty():
 		return false
 	var changed := false
 	for role in ["dragger", "dragger-border"]:
-		var p := UxmlParts.find_part(el, role)
+		var p := part_cached(el, role, cache)
 		if p == null:
 			continue
 		var want := "translate: %s;" % tr
@@ -314,11 +314,11 @@ static func _round_even(v: float) -> float:
 
 
 ## Write the MinMaxSlider inline styles; true when one changed.
-static func min_max_layout(el: UxmlElement, input_w: float, thumbs: Vector2, edges: Vector2) -> bool:
+static func min_max_layout(el: UxmlElement, input_w: float, thumbs: Vector2, edges: Vector2, cache: Dictionary = {}) -> bool:
 	var changed := false
 	var styles := min_max_styles(el, input_w, thumbs, edges)
 	for role in styles:
-		var p := UxmlParts.find_part(el, role)
+		var p := part_cached(el, role, cache)
 		if p == null:
 			continue
 		var cur = p.get_attribute("style")
@@ -642,6 +642,16 @@ static func nicify(n: String) -> String:
 # Layout-dependent styles
 # ---------------------------------------------------------------------------
 
+## `UxmlParts.find_part` through a role -> part cache (part trees are fixed
+## after load, so a behavior keeps one cache per control).
+static func part_cached(el: UxmlElement, role: String, cache: Dictionary) -> UxmlElement:
+	if cache.has(role):
+		return cache[role]
+	var p := UxmlParts.find_part(el, role)
+	cache[role] = p
+	return p
+
+
 ## The px value of `prop` in a computed style (0 when unset or not px).
 static func style_px(style: Dictionary, prop: String) -> float:
 	var e = style.get(prop)
@@ -655,28 +665,28 @@ static func style_px(style: Dictionary, prop: String) -> float:
 ## `el` from laid-out sizes: `size_of.call(el) -> Vector2` and
 ## `style_of.call(el) -> Dictionary` (computed style). Returns true when a
 ## style changed. The runtime behaviors and bench/parity.gd share it.
-static func layout_styles(el: UxmlElement, size_of: Callable, style_of: Callable) -> bool:
+static func layout_styles(el: UxmlElement, size_of: Callable, style_of: Callable, cache: Dictionary = {}) -> bool:
 	match el.local:
 		"Slider", "SliderInt":
-			var drag := UxmlParts.find_part(el, "drag-container")
-			var dragger := UxmlParts.find_part(el, "dragger")
+			var drag := part_cached(el, "drag-container", cache)
+			var dragger := part_cached(el, "dragger", cache)
 			if drag == null or dragger == null:
 				return false
 			var ds: Dictionary = style_of.call(dragger)
 			return slider_layout(el, size_of.call(drag), size_of.call(dragger),
-				style_px(ds, "margin-left") + style_px(ds, "margin-right"))
+				style_px(ds, "margin-left") + style_px(ds, "margin-right"), cache)
 		"MinMaxSlider":
-			var input := UxmlParts.find_part(el, "input")
-			var dragger2 := UxmlParts.find_part(el, "dragger")
-			var t0 := UxmlParts.find_part(el, "thumb-min")
-			var t1 := UxmlParts.find_part(el, "thumb-max")
+			var input := part_cached(el, "input", cache)
+			var dragger2 := part_cached(el, "dragger", cache)
+			var t0 := part_cached(el, "thumb-min", cache)
+			var t1 := part_cached(el, "thumb-max", cache)
 			if input == null or dragger2 == null or t0 == null or t1 == null:
 				return false
 			var st: Dictionary = style_of.call(dragger2)
 			var edges := Vector2(style_px(st, "border-left-width") + style_px(st, "margin-left"),
 				style_px(st, "border-right-width") + style_px(st, "margin-right"))
 			return min_max_layout(el, (size_of.call(input) as Vector2).x,
-				Vector2((size_of.call(t0) as Vector2).x, (size_of.call(t1) as Vector2).x), edges)
+				Vector2((size_of.call(t0) as Vector2).x, (size_of.call(t1) as Vector2).x), edges, cache)
 	return false
 
 
