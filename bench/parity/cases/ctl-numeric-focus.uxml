@@ -1,0 +1,4 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:FloatField name="nf" label="Float" value="2.5" />
+  <ui:Vector3Field name="nv" label="V3" />
+</ui:UXML>

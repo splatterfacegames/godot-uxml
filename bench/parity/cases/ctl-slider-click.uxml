@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Slider name="c-jump" low-value="0" high-value="10" value="5" />
+  <ui:Slider name="c-page" low-value="0" high-value="10" value="5" page-size="1" />
+  <ui:SliderInt name="c-int-page" low-value="0" high-value="10" value="5" page-size="2" />
+  <ui:Slider name="c-float" low-value="0" high-value="1" value="0" />
+</ui:UXML>

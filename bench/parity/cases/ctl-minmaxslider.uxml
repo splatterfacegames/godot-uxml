@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:MinMaxSlider name="mm-bare" min-value="2" max-value="6" low-limit="0" high-limit="10" />
+  <ui:MinMaxSlider name="mm-label" label="Range" min-value="-5" max-value="5" low-limit="-10" high-limit="10" />
+  <ui:MinMaxSlider name="mm-default" label="Default" />
+</ui:UXML>

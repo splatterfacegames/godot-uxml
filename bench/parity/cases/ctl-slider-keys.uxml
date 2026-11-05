@@ -1,0 +1,11 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Slider name="k-right" low-value="0" high-value="10" value="5" />
+  <ui:Slider name="k-left" low-value="0" high-value="10" value="5" />
+  <ui:Slider name="k-shift" low-value="0" high-value="1" value="0.33" />
+  <ui:SliderInt name="k-int" low-value="0" high-value="1000" value="500" />
+  <ui:Slider name="k-inv" low-value="0" high-value="10" value="5" inverted="true" />
+  <ui:Slider name="k-vert" direction="Vertical" low-value="0" high-value="10" value="5" style="height: 60px;" />
+  <ui:Slider name="k-end" low-value="0" high-value="10" value="5" />
+  <ui:Slider name="k-page" low-value="0" high-value="100" value="50" page-size="3" />
+  <ui:Slider name="k-submit" low-value="0" high-value="10" value="5" />
+</ui:UXML>

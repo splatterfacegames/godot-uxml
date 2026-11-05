@@ -170,6 +170,22 @@ public static class UxmlDump
             foreach (var child in host.hierarchy.Children())
                 WriteElement(w, child, host, index++.ToString(CultureInfo.InvariantCulture));
             w.EndArray();
+            // Elements a control adds to the document root (a popup menu):
+            // paths "overlay/N/...", rects relative to the host.
+            w.Key("overlay"); w.BeginArray();
+            int oi = 0;
+            var overlays = new List<VisualElement>();
+            foreach (var child in docRoot.hierarchy.Children())
+                if (child != host) overlays.Add(child);
+            // Menus attach to the root visual container, which may sit above
+            // the document root.
+            panel.visualTree.Query<VisualElement>(className: "unity-base-dropdown").ForEach(m =>
+            {
+                if (!overlays.Contains(m) && !IsUnder(m, host)) overlays.Add(m);
+            });
+            foreach (var child in overlays)
+                WriteElement(w, child, host, "overlay/" + (oi++).ToString(CultureInfo.InvariantCulture));
+            w.EndArray();
             w.EndObject();
             return w.ToString();
         }
@@ -293,6 +309,36 @@ public static class UxmlDump
                 if (ch != '\0') SendImgui(panel, EventType.KeyDown, Vector2.zero, KeyCode.None, ch);
                 SendImgui(panel, EventType.KeyUp, Vector2.zero, kc, '\0');
                 return "key " + kc;
+            }
+            case "navigate":
+            {
+                if (target != null) target.Focus();
+                var dir = (NavigationMoveEvent.Direction)Enum.Parse(typeof(NavigationMoveEvent.Direction),
+                    Convert.ToString(act["direction"], CultureInfo.InvariantCulture));
+                var focused = panel.focusController.focusedElement as VisualElement;
+                using (var ev = NavigationMoveEvent.GetPooled(dir))
+                {
+                    ev.target = focused;
+                    focused.SendEvent(ev);
+                }
+                return "navigate " + dir;
+            }
+            case "submit":
+            {
+                if (target != null) target.Focus();
+                var focused = panel.focusController.focusedElement as VisualElement;
+                using (var ev = NavigationSubmitEvent.GetPooled())
+                {
+                    ev.target = focused;
+                    focused.SendEvent(ev);
+                }
+                return "submit";
+            }
+            case "blur":
+            {
+                var focused = panel.focusController.focusedElement as VisualElement;
+                if (focused != null) focused.Blur();
+                return "blur";
             }
             case "force-state":
             {
@@ -423,8 +469,23 @@ public static class UxmlDump
             w.Key("text"); w.Value(te.text ?? "");
             var m = te.MeasureTextSize(te.text ?? "", 0, VisualElement.MeasureMode.Undefined, 0, VisualElement.MeasureMode.Undefined);
             w.Key("textMeasure"); w.BeginObject(); w.Key("width"); w.Value(m.x); w.Key("height"); w.Value(m.y); w.EndObject();
+            // What the layout measures (DoMeasure): the rendered text, that is
+            // a password mask, the placeholder, or one line for an empty input.
+            var dm = typeof(TextElement).GetMethod("DoMeasure", Any);
+            if (dm != null)
+            {
+                var lm = (Vector2)dm.Invoke(te, new object[] { float.NaN, VisualElement.MeasureMode.Undefined, float.NaN, VisualElement.MeasureMode.Undefined });
+                w.Key("layoutMeasure"); w.BeginObject(); w.Key("width"); w.Value(lm.x); w.Key("height"); w.Value(lm.y); w.EndObject();
+            }
         }
         WriteValueProperty(w, e);
+        w.Key("custom"); w.BeginObject();
+        foreach (var cn in CustomColors)
+            if (e.customStyle.TryGetValue(new CustomStyleProperty<Color>(cn), out var ccol))
+            {
+                w.Key(cn); WriteScalar(w, ccol);
+            }
+        w.EndObject();
 
         w.Key("style"); WriteResolved(w, e);
         w.Key("children"); w.BeginArray();
@@ -440,7 +501,16 @@ public static class UxmlDump
     static readonly string[] ValueProps = {
         "value", "lowValue", "highValue", "title", "label", "text", "delay", "interval",
         "messageType", "isMultipleSelection", "allowEmptySelection", "choices", "index",
+        // Input controls (sliders, text and numeric fields, popups).
+        "direction", "inverted", "pageSize", "showInputField", "fill", "minValue", "maxValue",
+        "lowLimit", "highLimit", "range", "isPasswordField", "maskChar", "multiline", "maxLength",
+        "isReadOnly", "isDelayed", "autoCorrection", "hideMobileInput", "keyboardType",
+        "selectAllOnFocus", "selectAllOnMouseUp", "doubleClickSelectsWord", "tripleClickSelectsLine",
+        "verticalScrollerVisibility", "formatString", "includeObsoleteValues",
     };
+
+    // Custom properties a control reads from its resolved custom style.
+    static readonly string[] CustomColors = { "--unity-cursor-color", "--unity-selection-color" };
 
     static void WriteValueProperty(JsonWriter w, VisualElement e)
     {
@@ -490,8 +560,10 @@ public static class UxmlDump
         // computedStyle-only values worth knowing.
         try
         {
-            var csp = typeof(VisualElement).GetProperty("computedStyle", Any);
-            object cs = csp != null ? csp.GetValue(e) : null;
+            // VisualElement.computedStyle returns by ref (reflection cannot
+            // read it); m_Style is the same struct.
+            var csf = typeof(VisualElement).GetField("m_Style", Any);
+            object cs = csf != null ? csf.GetValue(e) : null;
             if (cs != null)
             {
                 foreach (var n in new[] { "overflow", "cursor" })
@@ -500,11 +572,27 @@ public static class UxmlDump
                     if (f == null) continue;
                     w.Key(n); WriteScalar(w, f.GetValue(cs));
                 }
+                w.Key("computed"); w.BeginObject();
+                foreach (var n in ComputedLengths)
+                {
+                    var f = cs.GetType().GetProperty(n, Any);
+                    if (f == null) continue;
+                    object v = f.GetValue(cs);
+                    w.Key(Kebab(n)); w.Value(Convert.ToString(v, CultureInfo.InvariantCulture));
+                }
+                w.EndObject();
             }
         }
         catch { }
         w.EndObject();
     }
+
+    // Authored lengths (computedStyle), which resolvedStyle replaces with the
+    // layout result: "24px", "50%", "auto".
+    static readonly string[] ComputedLengths = {
+        "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "flexBasis",
+        "left", "top", "right", "bottom", "translate",
+    };
 
     static string Num(double d)
     {

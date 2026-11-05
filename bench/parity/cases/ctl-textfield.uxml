@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:TextField name="tf-bare" value="Hello" />
+  <ui:TextField name="tf-label" label="Name" value="Ada" />
+  <ui:TextField name="tf-empty" label="Empty" />
+  <ui:TextField name="tf-placeholder" label="Hint" placeholder-text="Type here" />
+  <ui:TextField name="tf-password" label="Password" value="secret" password="true" mask-character="#" />
+  <ui:TextField name="tf-readonly" label="Read only" value="fixed" readonly="true" />
+  <ui:TextField name="tf-max" label="Max" value="abcdef" max-length="3" />
+</ui:UXML>

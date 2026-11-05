@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="row" style="flex-direction: row; height: 200px;">
+    <ui:Slider name="sv-plain" direction="Vertical" low-value="0" high-value="10" value="3" />
+    <ui:Slider name="sv-label" label="V" direction="Vertical" low-value="0" high-value="10" value="7" fill="true" />
+    <ui:SliderInt name="sv-inv" direction="Vertical" low-value="0" high-value="10" value="2" inverted="true" />
+    <ui:Slider name="sv-input" direction="Vertical" low-value="0" high-value="10" value="5" show-input-field="true" />
+  </ui:VisualElement>
+</ui:UXML>

@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:TextField name="tm-multi" label="Multi" multiline="true" value="line one&#10;line two&#10;line three" />
+  <ui:TextField name="tm-sized" multiline="true" value="a&#10;b" style="height: 80px;" vertical-scroller-visibility="AlwaysVisible" />
+  <ui:TextField name="tm-hidden" multiline="true" value="x" vertical-scroller-visibility="Hidden" />
+</ui:UXML>

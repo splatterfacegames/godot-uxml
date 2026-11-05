@@ -1,0 +1,14 @@
+{"height": 500, "actions": [
+  {"op": "navigate", "target": "k-right", "direction": "Right"},
+  {"op": "navigate", "target": "k-left", "direction": "Left"},
+  {"op": "navigate", "target": "k-left", "direction": "Left"},
+  {"op": "navigate", "target": "k-shift", "direction": "Right"},
+  {"op": "navigate", "target": "k-int", "direction": "Right"},
+  {"op": "navigate", "target": "k-inv", "direction": "Right"},
+  {"op": "navigate", "target": "k-vert", "direction": "Up"},
+  {"op": "key", "target": "k-end", "key": "End"},
+  {"op": "key", "target": "k-page", "key": "PageDown"},
+  {"op": "submit", "target": "k-submit"},
+  {"op": "navigate", "target": "k-submit", "direction": "Right"},
+  {"op": "blur"}
+]}

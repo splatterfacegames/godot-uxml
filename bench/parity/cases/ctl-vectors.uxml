@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Vector2Field name="v2" label="Vector2" x="1" y="2" />
+  <ui:Vector2IntField name="v2i" label="Vector2Int" x="3" y="4" />
+  <ui:Vector3Field name="v3" label="Vector3" x="1" y="2" z="3" />
+  <ui:Vector3IntField name="v3i" label="Vector3Int" x="5" y="6" z="7" />
+  <ui:Vector4Field name="v4" label="Vector4" x="1" y="2" z="3" w="4" />
+  <ui:Vector3Field name="v3-bare" />
+</ui:UXML>

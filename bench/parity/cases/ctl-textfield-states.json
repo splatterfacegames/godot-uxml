@@ -1,0 +1,5 @@
+{"actions": [
+  {"op": "pointer-move", "path": "1/1"},
+  {"op": "pointer-move", "path": "4/0"},
+  {"op": "focus", "target": "ts-focus"}
+]}

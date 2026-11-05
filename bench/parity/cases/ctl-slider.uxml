@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Slider name="sl-bare" low-value="0" high-value="10" value="3" />
+  <ui:Slider name="sl-label" label="Slider" low-value="0" high-value="10" value="7.5" />
+  <ui:SliderInt name="sl-int" label="Int" low-value="0" high-value="10" value="4" />
+  <ui:Slider name="sl-fill" label="Fill" low-value="0" high-value="1" value="0.25" fill="true" />
+  <ui:Slider name="sl-inv" label="Inverted" low-value="0" high-value="10" value="3" inverted="true" fill="true" />
+</ui:UXML>

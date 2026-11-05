@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:IntegerField name="n-int" label="Integer" value="42" />
+  <ui:LongField name="n-long" label="Long" value="-9000000000" />
+  <ui:FloatField name="n-float" label="Float" value="1.5" />
+  <ui:DoubleField name="n-double" label="Double" value="0.125" />
+  <ui:UnsignedIntegerField name="n-uint" label="UInt" value="7" />
+  <ui:UnsignedLongField name="n-ulong" label="ULong" value="18000000000000000000" />
+  <ui:Hash128Field name="n-hash" label="Hash" value="0123456789abcdef0123456789abcdef" />
+  <ui:IntegerField name="n-bare" value="3" />
+</ui:UXML>

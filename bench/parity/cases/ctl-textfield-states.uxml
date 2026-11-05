@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:TextField name="ts-focus" label="Focus" value="abc" />
+  <ui:TextField name="ts-hover" label="Hover" value="abc" />
+  <ui:TextField name="ts-disabled" label="Disabled" value="abc" enabled="false" />
+  <ui:TextField name="ts-ph-focus" label="Hint" placeholder-text="Type" hide-placeholder-on-focus="true" />
+  <ui:IntegerField name="ts-int-hover" label="Int" value="5" />
+</ui:UXML>

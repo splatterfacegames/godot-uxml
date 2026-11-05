@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Slider name="si-float" label="Float" low-value="0" high-value="1" value="0.25" show-input-field="true" />
+  <ui:SliderInt name="si-int" label="Int" low-value="-5" high-value="5" value="2" show-input-field="true" />
+  <ui:Slider name="si-bare" low-value="0" high-value="100" value="50" show-input-field="true" />
+</ui:UXML>

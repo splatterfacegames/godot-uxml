@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:DropdownField name="dd-bare" choices="Low,Medium,High" index="1" />
+  <ui:DropdownField name="dd-label" label="Quality" choices="Low,Medium,High" value="High" />
+  <ui:DropdownField name="dd-empty" label="Empty" />
+  <ui:EnumField name="en" label="Align" type="UnityEngine.UIElements.Align, UnityEngine.UIElementsModule" value="Center" />
+  <ui:EnumField name="en-bare" />
+</ui:UXML>

@@ -30,12 +30,39 @@ const IMPLICIT_CLASSES := {
 	"PopupWindow": ["unity-text-element", "unity-popup-window"],
 	"Foldout": ["unity-foldout"],
 	"ProgressBar": ["unity-progress-bar"],
-	"DropdownField": ["unity-dropdown-field", "unity-base-popup-field", "unity-base-field"],
-	"TextField": ["unity-text-field", "unity-base-text-field", "unity-base-field"],
-	"IntegerField": ["unity-integer-field", "unity-base-text-field", "unity-base-field"],
-	"FloatField": ["unity-float-field", "unity-base-text-field", "unity-base-field"],
-	"Slider": ["unity-slider", "unity-base-slider", "unity-base-slider--horizontal", "unity-base-field"],
-	"SliderInt": ["unity-slider-int", "unity-base-slider", "unity-base-slider--horizontal", "unity-base-field"],
+	# ---- Input controls (runtime/controls/uxml_input_parts.gd) ----------
+	# Measured in Unity 6000.3 (bench/parity/unity/ctl-*.json). A Slider's
+	# direction class (--horizontal / --vertical) and a DropdownField's
+	# classes depend on attributes: UxmlInputParts adds them as control
+	# classes.
+	"DropdownField": ["unity-base-field", "unity-base-popup-field", "unity-popup-field"],
+	"EnumField": ["unity-base-field", "unity-enum-field"],
+	"TextField": ["unity-base-field", "unity-base-text-field", "unity-text-field"],
+	"IntegerField": ["unity-base-field", "unity-base-text-field", "unity-integer-field"],
+	"LongField": ["unity-base-field", "unity-base-text-field", "unity-long-field"],
+	"FloatField": ["unity-base-field", "unity-base-text-field", "unity-float-field"],
+	"DoubleField": ["unity-base-field", "unity-base-text-field", "unity-double-field"],
+	"UnsignedIntegerField": ["unity-base-field", "unity-base-text-field", "unity-unsigned-integer-field"],
+	"UnsignedLongField": ["unity-base-field", "unity-base-text-field", "unity-unsigned-long-field"],
+	"Hash128Field": ["unity-base-field", "unity-base-text-field", "unity-hash128-field"],
+	"Slider": ["unity-base-field", "unity-base-slider", "unity-slider"],
+	"SliderInt": ["unity-base-field", "unity-base-slider", "unity-slider-int"],
+	"MinMaxSlider": ["unity-base-field", "unity-min-max-slider"],
+	"Vector2Field": ["unity-base-field", "unity-composite-field", "unity-vector2-field"],
+	"Vector2IntField": ["unity-base-field", "unity-composite-field", "unity-vector2-int-field"],
+	"Vector3Field": ["unity-base-field", "unity-composite-field", "unity-vector3-field"],
+	"Vector3IntField": ["unity-base-field", "unity-composite-field", "unity-vector3-int-field"],
+	"Vector4Field": ["unity-base-field", "unity-composite-field", "unity-vector4-field"],
+	"RectField": ["unity-base-field", "unity-composite-field", "unity-composite-field--multi-line",
+		"unity-composite-field--two-lines", "unity-rect-field"],
+	"RectIntField": ["unity-base-field", "unity-composite-field", "unity-composite-field--multi-line",
+		"unity-composite-field--two-lines", "unity-rect-int-field"],
+	"BoundsField": ["unity-base-field", "unity-bounds-field"],
+	"BoundsIntField": ["unity-base-field", "unity-bounds-int-field"],
+	# Input parts with their own C# types (no classes of their own).
+	"TextInput": [], "IntegerInput": [], "LongInput": [], "FloatInput": [], "DoubleInput": [],
+	"UnsignedIntegerInput": [], "UnsignedLongInput": [], "Hash128Input": [],
+	"PopupTextElement": ["unity-text-element"],
 }
 
 ## Tags that carry no pixels but are part of the document model, not
@@ -57,7 +84,7 @@ const UNSUPPORTED_FEATURE_TAGS := {}
 ## they have no runtime mapping yet, so they diagnose `unsupported-control`
 ## like any unmapped tag and fall back to a plain container. Remove a name
 ## from this list once a milestone actually maps it to a native control.
-const RECOGNIZED_UNMAPPED := ["IntegerField", "FloatField"]
+const RECOGNIZED_UNMAPPED := []
 
 ## UXML attributes the addon consumes or accepts as part of the document
 ## grammar. Namespace declarations (`xmlns:*`) and any namespaced attribute
@@ -96,6 +123,18 @@ const KNOWN_ATTRIBUTES := {
 	# Controls built as Unity part trees (runtime/controls/)
 	"delay": true, "interval": true, "title": true, "message-type": true,
 	"is-multiple-selection": true, "allow-empty-selection": true,
+	# Input controls (runtime/controls/uxml_input_parts.gd)
+	"direction": true, "inverted": true, "page-size": true, "show-input-field": true,
+	"fill": true, "min-value": true, "max-value": true, "low-limit": true, "high-limit": true,
+	"password": true, "mask-character": true, "is-delayed": true, "hide-placeholder-on-focus": true,
+	"select-all-on-focus": true, "select-all-on-mouse-up": true,
+	"select-word-by-double-click": true, "select-line-by-triple-click": true,
+	"vertical-scroller-visibility": true, "auto-correction": true, "hide-mobile-input": true,
+	"keyboard-type": true, "emoji-fallback-support": true, "support-expressions": true,
+	"include-obsolete-values": true,
+	"x": true, "y": true, "z": true, "w": true, "h": true,
+	"cx": true, "cy": true, "cz": true, "ex": true, "ey": true, "ez": true,
+	"px": true, "py": true, "pz": true, "sx": true, "sy": true, "sz": true,
 }
 
 

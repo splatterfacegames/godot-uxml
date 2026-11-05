@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:DropdownField name="ds-focus" label="Focus" choices="A,B" index="0" />
+  <ui:DropdownField name="ds-hover" label="Hover" choices="A,B" index="0" />
+  <ui:DropdownField name="ds-disabled" label="Disabled" choices="A,B" index="0" enabled="false" />
+</ui:UXML>

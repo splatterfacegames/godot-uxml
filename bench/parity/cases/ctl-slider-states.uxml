@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Slider name="ss-focus" label="Focus" low-value="0" high-value="10" value="5" />
+  <ui:Slider name="ss-hover" label="Hover" low-value="0" high-value="10" value="5" />
+  <ui:Slider name="ss-press" label="Press" low-value="0" high-value="10" value="5" />
+  <ui:Slider name="ss-disabled" label="Disabled" low-value="0" high-value="10" value="5" enabled="false" fill="true" />
+  <ui:SliderInt name="ss-input-focus" label="Input" low-value="0" high-value="10" value="5" show-input-field="true" />
+</ui:UXML>

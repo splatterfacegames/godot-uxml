@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:RectField name="r" label="Rect" x="1" y="2" w="3" h="4" />
+  <ui:RectIntField name="ri" label="RectInt" x="1" y="2" w="3" h="4" />
+  <ui:BoundsField name="b" label="Bounds" cx="1" cy="2" cz="3" ex="4" ey="5" ez="6" />
+  <ui:BoundsIntField name="bi" label="BoundsInt" px="1" py="2" pz="3" sx="4" sy="5" sz="6" />
+</ui:UXML>

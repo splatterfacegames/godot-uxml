@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 native/target/
 /.scratch/
+/tools/unity-dump/Library/
+/tools/unity-dump/Logs/
+/tools/unity-dump/Temp/
+/tools/unity-dump/UserSettings/
+/tools/unity-dump/Assets/Cases/
+/tools/unity-dump/Assets/Cases.meta
