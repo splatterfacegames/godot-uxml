@@ -22,6 +22,7 @@ func _initialize() -> void:
 	for entry in [
 		["res://tests/test_layout.gd", "layout"],
 		["res://tests/test_runtime.gd", "runtime"],
+		["res://tests/test_templates.gd", "templates"],
 	]:
 		var cls = load(entry[0])
 		if cls == null:

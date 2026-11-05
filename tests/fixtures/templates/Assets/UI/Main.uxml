@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Template name="Row" src="components/Row.uxml" />
+  <ui:Template name="Card" path="Assets/UI/components/Card.uxml" />
+  <ui:Template name="Gone" src="components/Missing.uxml" />
+  <ui:Template name="Broken" src="components/Broken.uxml" />
+  <Style src="main.uss" />
+  <ui:Label name="outside" text="outside" />
+  <ui:Instance template="Row" name="row-a" class="instance-a">
+    <ui:AttributeOverrides element-name="title" text="Alpha" tooltip="first" />
+  </ui:Instance>
+  <ui:Instance template="Row" name="row-b">
+    <ui:AttributeOverrides element-name="title" text="Beta" style="color: red;" class="nope" />
+    <ui:AttributeOverrides element-name="no-such-element" text="x" />
+  </ui:Instance>
+  <ui:Instance template="Card" name="card-a">
+    <ui:AttributeOverrides element-name="title" text="Outer" />
+    <ui:Label name="card-content" text="content" />
+    <ui:Label name="card-slotted" slot="header" text="header" />
+  </ui:Instance>
+  <ui:Instance template="Gone" name="gone-a" />
+  <ui:Instance template="Gone" name="gone-b" />
+  <ui:Instance template="Undeclared" name="undeclared" />
+  <ui:Instance template="Broken" name="broken" />
+</ui:UXML>

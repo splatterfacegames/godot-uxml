@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Label name="broken-label" text="unclosed" mystery="1">
+  <Style />
+</ui:UXML>

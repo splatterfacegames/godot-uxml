@@ -54,6 +54,7 @@ UxmlResourceResolver ──────────────▶│ follows <S
 | `resource_resolver.gd` | `UxmlResourceResolver` | `project_root`; `resolve`, `resolve_text` |
 | `uxml_document.gd` | `UxmlDocumentModel` | `source`, `path`, `root`, `sheets`, `style_roots`, `warnings` |
 | `uxml_loader.gd` | `UxmlLoader` | `load_file(path, project_root)`, `load_source(source, path, resolver, uss)` |
+| `uxml_templates.gd` | `UxmlTemplates` | template expansion (`<Template>`, `<Instance>`, `<AttributeOverrides>`, `content-container`, slots) before the sheets load |
 | `style_resolver.gd` | `UssStyleResolver` | `resolve(doc, options) -> {styles, warnings}` (a one-shot `UssCascade`); var() substitution |
 | `uss_cascade.gd` | `UssCascade` | compiled, bucketed, incremental cascade: `update(options, force) -> changed indices`, `styles`, `collect_warnings()` |
 
@@ -69,8 +70,8 @@ UxmlResourceResolver ──────────────▶│ follows <S
   `unsupported-control` like any unknown tag until a milestone maps them.
   Unknown tags warn `unsupported-control` once per tag and keep their
   children. `UXML` and `Style` are non-visual document structure.
-  `Template`, `Instance`, `AttributeOverride`, `Slot` warn
-  `unsupported-feature`.
+  `Template`, `Instance` and `AttributeOverrides` are template syntax. The
+  loader expands the syntax (see "UXML templates" below).
 - Attributes preserved in source order with values XML-entity decoded
   (single-pass: `&#38;lt;` → literal `&lt;`, never `<`).
   Consumers read `name`, `class`, `style`, `enabled`, `text`, `label`,
@@ -83,6 +84,76 @@ UxmlResourceResolver ──────────────▶│ follows <S
   `malformed`.
 - Text between tags is ignored (UXML has no text nodes — Label text lives in
   the `text` attribute). Comments, CDATA, DOCTYPE and PIs are skipped.
+
+### UXML templates
+
+The loader expands templates after the parse and before the sheets load.
+The semantics are Unity 6 (6000.0) semantics.
+
+- `<ui:Template name="X" src="row.uxml"/>` declares a template. The older
+  `path="..."` attribute is also accepted; `src` wins when both are set. A
+  declaration must be a direct child of the root `<UXML>`. `src` resolves
+  relative to the declaring UXML file through `UxmlResourceResolver`, as
+  `<Style src>` does. A `?fileID=...&guid=...` query or a `#name` fragment
+  (UI Builder output) is removed before resolution. A declaration without
+  `name` or `src`, a duplicate name and a nested declaration warn
+  `malformed`. The first declaration of a name is used.
+- `<ui:Instance template="X" .../>` becomes a `TemplateContainer` element.
+  The container keeps every Instance attribute except `template`, and keeps
+  the source offsets of the `<Instance>`. The container holds deep clones of
+  the visual top-level elements of the template file. Nested Instances
+  expand recursively. `TemplateContainer` is a known control with no
+  implicit class. The runtime maps the control to a `UxmlBox`.
+- `<Template>` and `<AttributeOverrides>` are instructions. Expansion
+  removes both from the tree, so no layout or runtime code sees them.
+- Template `<Style>` elements are cloned with the content. A root-level
+  `<Style>` scopes the sheet to the `TemplateContainer`, so `:root` in that
+  sheet matches the container. A nested `<Style>` scopes the sheet to the
+  cloned parent element. `src` resolves relative to the template file.
+  Each template file loads and parses one time per document (cache by
+  resolved path). Each sheet loads one time. Each instance adds one scope.
+- `<ui:AttributeOverrides element-name="title" text="Hi"/>` inside an
+  Instance sets the attributes on every element named `title` in that
+  instance, nested templates included. The override of the outermost
+  instance wins (the Unity "shallowest override" rule). Overrides do not
+  apply to the Instance children of the same Instance. Unity ignores
+  `class`, `name` and `style` overrides. godot-uxml also ignores the three
+  and warns `override-ignored`. A target name that matches no element warns
+  `override-target-missing` with the list of available names. A missing
+  `element-name` warns `malformed`.
+- `content-container="..."` on an element of a template marks the element
+  that receives the other children of the Instance. The value is not used.
+  When more than one element has the attribute, the first element in
+  depth-first order is used and the others warn `malformed`. Without the
+  attribute, the children go to the `TemplateContainer` after the template
+  content.
+- `slot-name="s"` on an element of a template and `slot="s"` on an Instance
+  child put that child into the slot element (Unity 6000.0.40f1 measurement
+  in the reference corpus, case G3-12). A `slot` value with no matching
+  `slot-name` puts the child in the content container.
+- Clones get new unique `id`s. Clone offsets point at the outermost
+  `<Instance>` in the entry document, so layout and runtime diagnostics show
+  a valid location in the main file. `UxmlDocumentModel.element_paths` maps
+  each clone to its template file. Relative `image` and `item-template`
+  references in a clone resolve against that file.
+- Diagnostics:
+  - `template-not-declared`: an Instance names no declared template.
+  - `missing-file`, `path-outside-root` or `malformed-reference`: a
+    template `src` does not resolve. One diagnostic per declaration, at the
+    first Instance that uses the declaration.
+  - `template-cycle`: an Instance refers back to a template on the current
+    expansion path (the entry file included). The Instance stays empty.
+  - `template-depth-exceeded`: nesting deeper than 32 Instances. The
+    Instance stays empty.
+  - The location of each of these diagnostics is the file, line and column
+    of the `<Instance>`. Parse errors, unknown tags and attributes, and
+    broken `<Style>` elements in a template file are reported against that
+    file, one time per file.
+- Names inside instances are reachable through
+  `UxmlDocument.get_element(name)`. The first element in document order
+  wins. Repeated names warn `duplicate-name`.
+- A document without template syntax skips the expansion step and loads
+  exactly as before.
 
 ### Malformed-input policy (explicit)
 
@@ -201,7 +272,9 @@ declaration dropped, file skipped). Kinds: `malformed`,
 `unsupported-control`, `unsupported-feature`, `unsupported-selector`,
 `unsupported-property`, `unsupported-attribute`, `unresolved-var`,
 `import-unresolved`, `import-cycle`, `missing-file`, `path-outside-root`,
-`malformed-reference`, `version-dependent`.
+`malformed-reference`, `version-dependent`, `template-not-declared`,
+`template-cycle`, `template-depth-exceeded`, `override-ignored`,
+`override-target-missing`.
 
 ## Public API (milestone 1)
 
@@ -242,7 +315,7 @@ UxmlDocument (Control)
 
 ### Control mapping
 
-`VisualElement`/unknown tag → `UxmlBox`; `Label` → `Label`; `Button` →
+`VisualElement`/`TemplateContainer`/unknown tag → `UxmlBox`; `Label` → `Label`; `Button` →
 `Button`; `Image` → `UxmlBox` hosting a full-rect `TextureRect` (background
 and borders still paint); `Slider`/`SliderInt` → `UxmlField(HSlider)` —
 `SliderInt` gets `step=1, rounded`; `Toggle` → `CheckBox` (built-in caption
@@ -528,8 +601,9 @@ rows that scrolled out; slots past the item count are `display: none`.
 
 ## Unsupported / out of scope (diagnosed, not silent)
 
-- UXML templates (`Template`, `Instance`, `AttributeOverride`, `Slot`) —
-  `unsupported-feature`.
+- Inline `style` `url()` references inside template clones resolve
+  against the entry UXML file, not against the template file. Use a
+  stylesheet or a project-rooted path (`Assets/...`) for such references.
 - Unsupported at-rules (`@media`, `@supports`, other unknown at-rules) —
   `unsupported-feature`, contents never apply.
 - Transitions, transforms, animations — `unsupported-property` (cascade)
@@ -626,6 +700,11 @@ rows that scrolled out; slots past the item count are `display: none`.
    of being silently kept as unknown items.
 9. No Unity theme stylesheet or control-part cascade: native Godot controls
    take those roles from milestone 2.
+10. Templates follow Unity, not the reference: `content-container` and
+    `slot`/`slot-name` placement are implemented, `path=` is accepted,
+    `class` and `name` overrides are ignored like `style`, cycles are
+    detected by resolved template path, and an unresolved `src` is
+    reported at the Instance.
 
 ## Background slicing, image tint, text outline
 

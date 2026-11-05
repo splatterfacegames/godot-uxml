@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Template name="Row" src="Row.uxml" />
+  <ui:VisualElement name="card">
+    <ui:VisualElement name="card-header" slot-name="header" />
+    <ui:VisualElement name="card-body" content-container="body">
+      <Style src="card.uss" />
+      <ui:Label name="body-label" text="body" />
+    </ui:VisualElement>
+    <ui:Instance template="Row" name="card-row">
+      <ui:AttributeOverrides element-name="title" text="Inner" tooltip="inner" />
+    </ui:Instance>
+  </ui:VisualElement>
+</ui:UXML>

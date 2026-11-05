@@ -150,6 +150,8 @@ godot --path . --script res://examples/minimal/minimal.gd
 - **Controls:** `VisualElement`, `Label`, `Button`, `Image`, `Slider`,
   `SliderInt`, `Toggle`, `TextField`, `DropdownField`, `ScrollView`,
   `ListView`.
+- **Templates:** `<Template>`, `<Instance>` (as `TemplateContainer`),
+  `<AttributeOverrides>`, `content-container`, slots, template stylesheets.
 - **Selectors:** type, `.class`, `#name`, `*`, compounds, descendant and
   `>` child combinators, comma groups.
 - **Pseudo-classes:** `:hover`, `:active`, `:inactive`, `:focus`,
@@ -161,7 +163,7 @@ godot --path . --script res://examples/minimal/minimal.gd
 - **Paint:** background color and image, 9-slice backgrounds, image tint,
   border colors and radii, fonts, text color and text outline.
 
-Out of scope, with a diagnostic: UXML templates, `@media`, transitions,
+Out of scope, with a diagnostic: `@media`, transitions,
 transforms, absolute positioning, `em`/`rem`/`vh` units, `+` and `~`
 combinators and attribute selectors. The full list is in
 [docs/design.md](docs/design.md).
