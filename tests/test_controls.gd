@@ -518,3 +518,57 @@ func test_toggle_mouse_states() -> void:
 	h.check(not _states(doc, el).has("active"), "release clears :active")
 	await _mouse(Vector2(-50, -50))
 	_unload(doc)
+
+
+## Unity's disabled look: `unity-disabled` (on the element itself) resolves
+## opacity 0.5; the subtree is :disabled but does not get its own 0.5, so
+## it dims once through the painted opacity of the element.
+func test_disabled_opacity() -> void:
+	var doc := _doc('<ui:VisualElement name="p" enabled="false"><ui:Button name="inner" text="in" /></ui:VisualElement>'
+		+ '<ui:Button name="b" text="b" /><ui:Toggle name="t" label="T" />')
+	_flush(doc)
+	var p := doc.get_element_model("p")
+	var inner := doc.get_element_model("inner")
+	h.eq(_val(doc, p, "opacity"), "0.5", "enabled=false: opacity 0.5 on the element")
+	h.eq(_val(doc, inner, "opacity"), "", "no own opacity on the disabled subtree")
+	h.check((doc.get_native("inner") as Button).disabled, "the subtree is disabled")
+	h.eq(doc.get_element("p").modulate.a, 0.5, "painted on the element's control")
+	h.eq(doc.get_element("inner").modulate.a, 1.0, "the child control keeps its own alpha (it dims with the parent)")
+	doc.set_enabled("b", false)
+	doc.set_enabled("t", false)
+	_flush(doc)
+	h.eq(doc.get_element("b").modulate.a, 0.5, "set_enabled(false) dims the Button")
+	h.eq(doc.get_element("t").modulate.a, 0.5, "set_enabled(false) dims the Toggle")
+	h.eq(_val(doc, _part(doc, "t", "input"), "opacity"), "", "parts of a disabled control keep opacity 1")
+	doc.set_enabled("b", true)
+	_flush(doc)
+	h.eq(doc.get_element("b").modulate.a, 1.0, "set_enabled(true) restores")
+	var none := _doc('<ui:Button name="b" text="b" enabled="false" />', "", "")
+	_flush(none)
+	h.eq(none.get_element("b").modulate.a, 1.0, "no theme: no disabled opacity")
+	_unload(none)
+	_unload(doc)
+
+
+## Unity rich text in control text: a text part (Toggle label and text,
+## GroupBox label) with tags is a RichTextLabel like an authored Label; a
+## Button draws plain text (tags removed, one diagnostic).
+func test_rich_text_in_control_parts() -> void:
+	var doc := _doc('<ui:Toggle name="t" label="&lt;b&gt;Bold&lt;/b&gt; label" text="&lt;i&gt;it&lt;/i&gt;" />'
+		+ '<ui:GroupBox name="g" text="&lt;color=red&gt;G&lt;/color&gt;" />'
+		+ '<ui:Button name="b" text="&lt;b&gt;Go&lt;/b&gt;" />')
+	await h.process_frame
+	var lbl = doc._controls[_part(doc, "t", "label")]
+	h.check(lbl is RichTextLabel, "Toggle label part with tags is a RichTextLabel")
+	h.eq((lbl as RichTextLabel).get_parsed_text(), "Bold label", "the label part renders the styled runs")
+	h.eq(lbl.mouse_filter, Control.MOUSE_FILTER_PASS, "the label part passes the mouse to the Toggle")
+	h.check(doc._controls[_part(doc, "t", "text")] is RichTextLabel, "Toggle text part with tags")
+	h.check(doc._controls[_part(doc, "g", "label")] is RichTextLabel, "GroupBox label part with tags")
+	h.eq((doc.get_native("b") as Button).text, "Go", "Button text without tags")
+	var n := 0
+	for d in doc.diagnostics:
+		if String(d["message"]).find("rich text tags on a Button") >= 0:
+			n += 1
+	h.eq(n, 1, "one diagnostic for the Button tags")
+	h.check(doc.get_element("t").size.x > 0.0 and lbl.size.x > 0.0, "rich label parts lay out")
+	_unload(doc)

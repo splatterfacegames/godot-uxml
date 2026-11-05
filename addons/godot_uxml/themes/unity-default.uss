@@ -11,17 +11,20 @@
  * below every author rule, as Unity ranks its theme (measured:
  * states-disabled, ctl-styled-parts).
  *
- * Measured but not applied, because the runtime does not paint the
- * property yet (each would warn unsupported-property on every element):
- *   .unity-disabled { opacity: 0.5 }            (only the element whose
- *                                                enabled is false dims)
- *   .unity-base-field__label { text-overflow: ellipsis }
- *   .unity-help-box__icon { -unity-background-scale-mode: scale-to-fit }
+ * Disabled look: Unity's SetEnabled(false) adds `unity-disabled` to the
+ * element itself (not its subtree), and only that element resolves
+ * opacity 0.5 (ctl-disabled, states-disabled). The runtime paints opacity
+ * on the element's control, so the subtree dims once, as in Unity.
  *
  * Deliberate deviation: .unity-help-box__label also grows (see there).
  *
  * The images (check, arrows, help box icons) are godot-uxml's own SVGs.
  */
+
+/* SetEnabled(false) / enabled="false": the element itself dims. */
+.unity-disabled {
+  opacity: 0.5;
+}
 
 /* Root: Unity's panel root gives every document its text colour and size. */
 UXML {
@@ -89,6 +92,7 @@ UXML {
    shrinks (a narrow field lets the label overflow). */
 .unity-base-field__label {
   min-width: 150px;
+  text-overflow: ellipsis;
 }
 
 .unity-base-field__input {
@@ -271,6 +275,7 @@ UXML {
   max-width: 34px;
   min-height: 32px;
   max-height: 32px;
+  -unity-background-scale-mode: scale-to-fit;
 }
 
 .unity-help-box__icon--info {
