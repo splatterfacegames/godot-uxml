@@ -114,7 +114,7 @@ Layout (`runtime/flex_layout.gd`)
   documents, cold and with warm cross-pass caches over size sequences —
   rects, insets, content sizes, warnings, measurer side effects.
   112 checks, 0 failures.
-- `bench/equiv_runtime.gd`: the original `UxmlDocument` (wired to the
+- `bench/equiv_runtime.gd` (before the Unity part trees): the original `UxmlDocument` (wired to the
   original resolver/layout/applier/values) and the new one driven through
   identical random hover/focus/active/checked, `set_class`, `set_enabled`,
   `refresh`, resize, text changes with and without refresh, `relayout`
@@ -232,3 +232,54 @@ removable cost. With native scanners: UXML parse 62 -> 23 ms, USS parse
 (`bench/equiv_parse.gd`: 2,004 comparisons incl. fuzzed input, 0
 differences).
 
+
+## Unity part trees and default theme (`unity/controls-foundation`)
+
+Method. The machine ran other Godot processes during the measurement, so
+cross-process timings varied by up to ±50 % between identical runs (for
+example `parse_uss`, which this change does not touch). The numbers below
+are therefore same-process A/B pairs: one Godot process loads or restyles
+the same document with the default theme and with `theme_path = ""`,
+interleaved, median of the runs. `bench/bench.gd` and
+`bench/workloads.gd` take `-- --no-theme` for the same A/B across
+processes.
+
+| measurement | default theme | no theme |
+| --- | ---: | ---: |
+| `load_document(Menu.uxml)` | 8.34 ms | 3.65 ms |
+| `load_document(Options.uxml)` | 14.13 ms | 7.12 ms |
+| `load_document(runtime.uxml)` | 21.41 ms | 14.20 ms |
+| `load_document(controls.uxml)` (every control in scope) | 32.04 ms | 19.31 ms |
+| `load_document(big.uxml)` (1650 elements) | 730.5 ms | 623.4 ms |
+| idle restyle, `big.uxml` | 0.90–0.97 ms | 0.98–1.13 ms |
+| hover toggle (card), `big.uxml` | 3.02–3.09 ms | 2.52–2.77 ms |
+| `UssCascade.new` (Menu.uxml) | 3.1–4.7 ms | 0.7 ms |
+
+With the theme off, this branch measures like `main` across processes
+(within noise in every bench and workload row): the part framework itself
+(part synthesis, behaviors, extra elements only where controls have parts)
+costs no measurable time. The cost is the theme:
+
+- Per load, about 2.4 ms compiles the theme's rules into the new cascade
+  (`UssCascade.new`). A follow-up can cache the compiled theme rules across
+  loads.
+- Per element, the theme gives every Label and Button margins, padding, a
+  colour and a font size, so the applier builds more styleboxes and
+  overrides and the cascade carries more properties. Large documents load
+  about 15–40 % slower (`big.uxml`, `list1k`).
+- Restyles stay incremental. The theme's state selectors
+  (`.unity-toggle__input:hover > .unity-toggle__checkmark`) first made
+  every hover/focus change re-cascade the changed element's subtree; the
+  cascade now counts a state as an ancestor feature only for elements that
+  match the rest of such a compound (`UssCascade._anc_state_mask`, native
+  mirror in `cascade.rs`). After that change a hover toggle on `big.uxml`
+  costs about 10–20 % more with the theme, from the extra properties per
+  restyled element.
+
+Correctness after the change: `tests/run_tests.gd` 695 checks headless
+(706 windowed), `bench/equiv.gd` 1416 (native) / 1228 (`--gdscript`),
+`bench/equiv_layout.gd` 168 / 168, `bench/equiv_parse.gd` 2086 / 2086,
+`bench/equiv_runtime.gd` 1158 / 1158 — 0 failures.
+`bench/equiv_runtime.gd` now compares the incremental document with a
+full restyle of itself and with the GDScript path (see its header); the
+pre-optimization runtime in `bench/ref/` cannot build part trees.

@@ -757,6 +757,10 @@ rows that scrolled out; slots past the item count are `display: none`.
   runtime showed some stale until its next restyle.
 - 100 repeated `load_document` calls hold `OBJECT_NODE_COUNT` flat in
   tests.
+- The default theme costs about 2.4 ms per load (rule compilation) and
+  extra apply work per Label/Button; see docs/performance.md. Set
+  `theme_path = ""` for a document that needs neither the Unity look nor
+  the cost.
 - Synthetic mouse *motion* is not delivered under a headless
   DisplayServer — hover/click behavior is covered by the windowed test
   run (577 checks) vs headless (572 checks).
