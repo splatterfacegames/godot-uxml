@@ -25,8 +25,8 @@ static func attach_all(doc) -> Dictionary:
 		b.doc = doc
 		b.el = el
 		out[el] = b
-	# Setup can find the behaviors of nested controls (a slider's input
-	# field, a vector field's components).
+	# Setup can find the behaviors of other controls (a slider's input
+	# field, a vector field's components, a ListView's ScrollView).
 	doc._behaviors = out
 	for el in out:
 		out[el].setup()
@@ -34,6 +34,10 @@ static func attach_all(doc) -> Dictionary:
 
 
 static func _create(el: UxmlElement) -> Behavior:
+	# Containers and collections live in uxml_container_behaviors.gd.
+	var cb := UxmlContainerBehaviors.create(el)
+	if cb != null:
+		return cb
 	match el.local:
 		"Toggle", "RadioButton":
 			return ToggleBehavior.new()

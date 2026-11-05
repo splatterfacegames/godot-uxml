@@ -9,8 +9,7 @@ extends Control
 ## layout positions every child explicitly, and a Container would fight it.
 ##
 ## UxmlBox is also the host for wrapped natives: Image puts a full-rect
-## TextureRect inside one (so `background-color` behind an image works), and
-## ScrollView puts its ScrollContainer inside one.
+## TextureRect inside one (so `background-color` behind an image works).
 
 ## Intrinsic content size used by the flex measure (Image: texture size;
 ## UxmlField: caption + field chrome). Kept OUT of custom_minimum_size on

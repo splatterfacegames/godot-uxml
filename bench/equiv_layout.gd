@@ -48,7 +48,7 @@ func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary,
 	for el in d._controls:
 		snap[el] = d._controls[el].size
 	var opts := {"source": d._doc.source, "file": d._doc.path,
-		"scroll_bar_width": d._scroll_bar_width(), "warned": {}}
+		"warned": {}}
 	var w1: Array = []
 	var a := RefFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w1, opts.duplicate())
 	var after_a := {}

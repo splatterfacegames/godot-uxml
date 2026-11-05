@@ -29,6 +29,7 @@ func _initialize() -> void:
 		["res://tests/test_visual63.gd", "visual63"],
 		["res://tests/test_controls.gd", "controls"],
 		["res://tests/test_inputs.gd", "inputs"],
+		["res://tests/test_containers.gd", "containers"],
 	]:
 		var cls = load(entry[0])
 		if cls == null:

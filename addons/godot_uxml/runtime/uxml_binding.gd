@@ -74,6 +74,11 @@ const PROPERTIES := {
 	"isReadOnly": "readonly", "readOnly": "readonly", "readonly": "readonly",
 	"maxLength": "max-length", "max-length": "max-length",
 	"itemsSource": "items-source",
+	# Containers and collections (UxmlContainerBehaviors).
+	"selectedIndex": "selected-index", "selected-index": "selected-index",
+	"selectedIndices": "selected-indices",
+	"selectedTabIndex": "selected-tab-index",
+	"headerTitle": "header-title", "header-title": "header-title",
 	"title": "title", "messageType": "message-type", "message-type": "message-type",
 	# Input controls (runtime/controls/uxml_input_behaviors.gd)
 	"pageSize": "page-size", "page-size": "page-size",
@@ -990,6 +995,11 @@ func _write_items(el: UxmlElement, v: Variant) -> int:
 		user_bind = cur_bind
 	var bind := _bind_row.bind(el)
 	_auto_lists[el] = {"items": items, "auto": auto, "user_bind": user_bind, "bind": bind}
+	var lb = _doc._behaviors.get(el)
+	if lb != null and lb.has_method("set_source"):
+		lb.set_items(items)
+		lb.set_source((items as Variant).size(), bind)
+		return 1
 	info["count"] = (items as Variant).size()
 	info["bind"] = bind
 	_doc._list_refresh(el, true)

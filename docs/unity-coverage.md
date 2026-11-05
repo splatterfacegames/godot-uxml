@@ -45,7 +45,7 @@ Status values:
 | Feature | Status |
 | --- | --- |
 | Type, `.class`, `#name`, `*` selectors, compounds, selector lists | done |
-| Descendant and `>` child combinators | done |
+| Descendant and `>` child combinators | done: they walk the logical parent, as Unity does (an author child of a ScrollView matches `#view > .child`) |
 | `:hover`, `:active`, `:inactive`, `:focus`, `:checked`, `:disabled`, `:enabled`, `:selected`, `:root` | done |
 | `var()` custom properties, `@import`, inline `style` | done |
 | `url()`, `resource()` | done: `resource()` searches every `Resources` folder under `Assets/` and `Packages/` (see design.md, "`resource()` lookup") |
@@ -64,7 +64,7 @@ Status values:
 | Data binding: `data-source`, `data-source-path`, `data-source-type` | done (see "Data binding") |
 | `<Bindings>` / `<DataBinding>` UxmlObjects | done; the elements leave the tree at load |
 | `binding-path` | done: maps to a TwoWay binding of the element value on its data source |
-| `Columns` / `Column` UxmlObjects | planned |
+| `Columns` / `Column` UxmlObjects | done: `name`, `title`, `width`, `min-width`, `max-width`, `stretchable`, `sortable`, `resizable`, `optional`, `visible`, `cell-template`, `header-template`, `icon`; `SortColumnDescriptions` / `SortColumnDescription` (`column-name`, `column-index`, `direction`) |
 | `tabindex`, `picking-mode`, `view-data-key`, `usage-hints`, `language-direction` | done (see "UXML attributes") |
 
 ## UXML attributes (VisualElement and BindableElement)
@@ -74,11 +74,17 @@ Status values:
 | `name`, `class`, `style`, `enabled`, `focusable`, `tooltip`, `content-container` | done |
 | `tabindex` | done: Unity focus ring order (positive first, then 0 in tree order; negative leaves the Tab ring) |
 | `picking-mode` | done: `Ignore` sets `mouse_filter` IGNORE; children stay pickable |
-| `view-data-key` | done: ScrollView and ListView scroll offset; `get_view_data()`/`set_view_data()`, restored on load and reload. Other view state follows when the controls exist (Foldout, TabView, TwoPaneSplitView, MultiColumn views) |
+| `view-data-key` | done: ScrollView and collection view scroll offset and selection, multi-column widths and sorting, TabView tab, TwoPaneSplitView pane size; `get_view_data()`/`set_view_data()`, restored on load and reload. Foldout open state: planned |
 | `usage-hints` | done: names validated, no effect (renderer hints) |
 | `language-direction` | done: `text_direction` on text controls, inherited |
 | `data-source`, `data-source-path`, `data-source-type`, `binding-path` | done |
 | `binding-source-selection-mode` (ListView) | done: `AutoAssign` gives each row `itemsSource` and `[index]` |
+| ScrollView: `mode`, `horizontal-scroller-visibility`, `vertical-scroller-visibility`, `mouse-wheel-scroll-size`, `horizontal-page-size`, `vertical-page-size`, `nested-interaction-kind`, `touch-scroll-type`, `elasticity`, `scroll-deceleration-rate` | done |
+| Scroller: `low-value`, `high-value`, `direction`, `value` | done |
+| Collection views: `fixed-item-height`, `selection-type`, `show-border`, `show-alternating-row-backgrounds`, `reorderable`, `reorder-mode`, `show-foldout-header`, `header-title`, `show-add-remove-footer`, `allow-add`, `allow-remove`, `show-bound-collection-size`, `horizontal-scrolling`, `item-template`, `sorting-mode`, `auto-expand` | done |
+| Collection views: `virtualization-method` | `FixedHeight` done; `DynamicHeight` is diagnosed (`unsupported-value`), rows keep `fixed-item-height` |
+| Tab: `label`, `icon-image`, `closeable`; TabView: `reorderable` | done (a drag of a header moves its Tab) |
+| TwoPaneSplitView: `fixed-pane-index`, `fixed-pane-initial-dimension`, `orientation` | done |
 
 ## Data binding
 
@@ -96,6 +102,7 @@ Status values:
 | Element targets (`text`, `value`, `label`, `lowValue`, `highValue`, `choices`, `index`, `tooltip`, `enabledSelf`, `visible`, `focusable`, `tabIndex`, `pickingMode`, `image`, ...) | done |
 | Targets of part-tree controls (Toggle, RadioButton, RadioButtonGroup, ToggleButtonGroup, Foldout, ProgressBar, GroupBox, HelpBox, PopupWindow: `value`, `text`, `label`, `title`, `lowValue`, `highValue`, `messageType`) | done: written through the control behaviors; two-way for the value controls |
 | Targets of the input controls (Slider, SliderInt, MinMaxSlider, TextField, numeric, composite, DropdownField, EnumField: `value`, `label`, `lowValue`, `highValue`, `pageSize`, `minValue`, `maxValue`, `lowLimit`, `highLimit`, `choices`, `index`, `placeholderText`, `isReadOnly`, `maxLength`, `isDelayed`, ...) | done: through the behaviors, two-way with typed values (see design.md, "Input controls") |
+| Container targets (`itemsSource`, `selectedIndex`, `selectedIndices` on collection views; `selectedTabIndex` on TabView; `value`, `lowValue`, `highValue` on Scroller; `headerTitle`) | done: written through the container behaviors; two-way for the selections |
 | `style.*` targets | done: written as inline USS |
 | Two-way write-back from user edits | done |
 | `SetBinding`/`ClearBinding` from code | done: `add_binding()`/`remove_binding()` |
@@ -128,6 +135,34 @@ Deviations from Unity:
 - RadioButtonGroup `choices` cannot be bound: the radio buttons are part
   elements, fixed at load (`binding-failed`).
 
+Container and collection differences to Unity:
+
+- Unity clamps a text measure to the space a Label has. godot-uxml
+  measures the full text, so a Label in a TreeView row or a table cell is
+  taller than in Unity (25px against 14px in a 20px row), and a Label row
+  keeps Godot's Label minimum height. The rows still sit
+  `fixed-item-height` apart.
+- The runtime keeps a pool of rows for the tallest viewport the document
+  can get; rows past the item count are `display: none`. Unity creates
+  `floor(viewport / item height) + 2` rows.
+- TabView headers are focusable so a controller can reach them. Unity's
+  headers are not focusable.
+- A focused child of a ScrollView scrolls into view (follow focus), for
+  keyboard and controller navigation.
+- The underline of a Tab outside a TabView is as wide as its header.
+  Unity makes it as wide as the Tab (400px against 81px in `ctl-tabview`).
+- A closed Tab stays in the tree with `display: none`; part trees are
+  fixed after load. Unity removes it.
+- An auto-height ScrollView in a sized column measures a row-wrap grid as
+  one line when the column computes the ScrollView's size (the layout
+  passes no width bound to children in an intrinsic measure). Inside a
+  sized ScrollView the grid has its full height.
+- The `ScrollView` keyboard scroll needs `focusable="true"`; Unity puts
+  the keys on the focusable Scroller sliders, which godot-uxml also
+  supports.
+- `nested-interaction-kind="ForwardScrolling"` acts like `Default` for the
+  wheel (the event goes on to an outer ScrollView at a bound).
+
 ## Controls (UnityEngine.UIElements)
 
 Controls are moving to Unity part trees: each control is built from
@@ -151,11 +186,12 @@ with Unity dumps (`docs/parity.md`).
 | Vector2Field, Vector2IntField, Vector3Field, Vector3IntField, Vector4Field | done: part trees and the runtime theme layout (stacked sub-fields), values, binding |
 | RectField, RectIntField, BoundsField, BoundsIntField | done: two-line groups, Bounds center/extents (`ex`..`ez` are the size, as in Unity), values (`Rect2`, `Rect2i`, `AABB`) |
 | DropdownField, EnumField | done: part trees, theme, `choices`/`index` (the UXML `value` selects nothing, as in Unity 6000.3), the menu (Unity's dropdown classes in a Godot Popup; keys, controller, pointer); EnumField types from `UxmlDocument.register_enum()` or from a bound enum property, `include-obsolete-values`. Differences: the menu does not scroll; author sheets do not style the menu |
-| ScrollView, Scroller | planned (native mapping works today for ScrollView) |
-| ListView | planned (virtualized list works today) |
-| TreeView, MultiColumnListView, MultiColumnTreeView | planned |
-| Tab, TabView, TwoPaneSplitView | planned |
-| IMGUIContainer | planned: IMGUI is Unity-only code, so the element can only host a Godot callback |
+| ScrollView, Scroller | done: part trees, structure and theme, Scroller visibility after layout, scrolling by `translate`, wheel, touch, keys, controller, follow focus, Scroller buttons, track and dragger, view data. Matches Unity in every measured case |
+| ListView | done: part trees (rows, foldout header, footer, size field, reorder handles), fixed-height virtualization, selection (mouse, keys, controller), `:checked`/`--selected`, `items_chosen`, footer add/remove, reorder, data binding. Size field parts follow TextField (planned). Differences: see below |
+| TreeView, MultiColumnListView, MultiColumnTreeView | done: tree rows (indent, toggle, content), expansion (toggle, keys), `<Columns>`, header, sorting (`sorting-mode`, `sort-column-descriptions`), header resizing, cell binders, tree data API |
+| Tab, TabView | done: part trees, header move, selection (mouse, `ui_accept`), close, drag reorder, `label` binding |
+| TwoPaneSplitView | done: part tree, fixed pane, draggable splitter |
+| IMGUIContainer | done: the element hosts a Godot draw and input callback (`set_imgui_handler`); Unity's C# IMGUI code cannot run |
 
 ## Controls (UnityEditor.UIElements)
 

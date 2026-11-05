@@ -18,7 +18,6 @@ extends RefCounted
 ##   container part -> UxmlBox
 ##   Image        -> UxmlBox host wrapping a full-rect TextureRect, so
 ##                   background-color/borders still paint behind the image
-##   ScrollView   -> UxmlBox host wrapping ScrollContainer + content Control
 ##   Slider, SliderInt, MinMaxSlider -> UxmlSlider (focusable box; its parts
 ##                   are boxes, runtime/controls/uxml_input_parts.gd)
 ##   DropdownField, EnumField -> UxmlPopupField (focusable box, opens
@@ -26,12 +25,16 @@ extends RefCounted
 ##   TextField, the numeric and composite fields -> UxmlBox; the text
 ##                   element part of a text field is the Godot LineEdit
 ##                   (TextEdit when multiline="true"), see UxmlTextInput
+##   ScrollView, Scroller, ListView, TreeView, MultiColumnListView,
+##   MultiColumnTreeView, TabView, Tab, TwoPaneSplitView
+##                -> UxmlBox (their Unity part trees, UxmlContainerParts)
+##   IMGUIContainer -> UxmlImguiBox (hosts a Godot draw callback)
 ##
 ## Control parts (UxmlParts) are ordinary elements here: each gets its own
 ## control. Parts never take focus; parts Unity does not pick (checkmarks,
 ## text labels) ignore the mouse, the others pass it to their control.
 ##
-## "Wrapper" elements (Image/ScrollView hosts, text fields) are what
+## "Wrapper" elements (Image hosts, text fields) are what
 ## UxmlDocument.get_element(name) returns; the interactive native inside is
 ## registered in `natives` and returned by get_native(name).
 ##
@@ -53,8 +56,6 @@ var _warned: Dictionary = {}
 var controls: Dictionary = {}
 ## element -> innermost interactive native Control (defaults to outer)
 var natives: Dictionary = {}
-## ScrollView element -> its scroll content Control (children's parent)
-var scroll_contents: Dictionary = {}
 ## Element cloned from a template file -> that file's path
 ## (UxmlDocumentModel.element_paths); relative image references in such an
 ## element resolve against its own file.
@@ -75,7 +76,7 @@ func _init(
 
 ## Build the control subtree for `el` and register it in `controls`.
 ## Children are created recursively and parented to the control that hosts
-## them (the element itself, or its scroll content).
+## them (the element itself).
 func build(el: UxmlElement) -> Control:
 	var c := _create(el)
 	if el.part_of != null:
@@ -84,7 +85,7 @@ func build(el: UxmlElement) -> Control:
 	if not natives.has(el):
 		natives[el] = c
 
-	var host: Control = scroll_contents.get(el, c)
+	var host: Control = c
 	for child in el.children:
 		if UssControls.is_non_visual(child.local):
 			continue
@@ -145,8 +146,8 @@ func _create(el: UxmlElement) -> Control:
 			return UxmlSlider.new()
 		"DropdownField", "EnumField":
 			return UxmlPopupField.new()
-		"ScrollView", "ListView":
-			return _create_scroll(el)
+		"IMGUIContainer":
+			return UxmlImguiBox.new()
 		"Toggle", "RadioButton":
 			var t := UxmlToggle.new()
 			t.radio = el.local == "RadioButton"
@@ -254,20 +255,6 @@ func _create_image(el: UxmlElement) -> Control:
 	return box
 
 
-func _create_scroll(el: UxmlElement) -> Control:
-	var box := UxmlBox.new()
-	var sc := ScrollContainer.new()
-	sc.set_anchors_preset(Control.PRESET_FULL_RECT)
-	sc.follow_focus = true
-	sc.focus_mode = Control.FOCUS_ALL
-	var content := Control.new()
-	content.name = "uxml-scroll-content"
-	content.mouse_filter = Control.MOUSE_FILTER_PASS
-	sc.add_child(content)
-	box.add_child(sc)
-	scroll_contents[el] = content
-	natives[el] = sc
-	return box
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +266,7 @@ func _apply_common_attributes(el: UxmlElement, c: Control) -> void:
 	if not tooltip.is_empty():
 		c.tooltip_text = tooltip
 	# `focusable` applies to the actual focus target — for wrapped controls
-	# (Slider/TextField/DropdownField/ScrollView/Image) that is the inner
+	# (Slider/TextField/DropdownField/Image) that is the inner
 	# native, not the wrapper. The wrapper itself never becomes a tab stop,
 	# so focusable="true" cannot add one and focusable="false" genuinely
 	# removes the element from focus navigation.
@@ -289,10 +276,19 @@ func _apply_common_attributes(el: UxmlElement, c: Control) -> void:
 			Control.FOCUS_ALL if _attr(el, "focusable") == "true"
 			else Control.FOCUS_NONE
 		)
-	elif (c is UxmlBox and not (c is UxmlToggle or c is UxmlSlider or c is UxmlPopupField)) 			or c is Label or c is RichTextLabel:
+	elif (c is UxmlBox and not (c is UxmlToggle or c is UxmlSlider or c is UxmlPopupField or c is UxmlImguiBox)) \
+			or c is Label or c is RichTextLabel:
 		c.focus_mode = Control.FOCUS_NONE
 	if target != c:
 		c.focus_mode = Control.FOCUS_NONE
+
+
+## Container and collection parts that Unity does not pick
+## (UxmlContainerParts).
+const UNPICKED_CONTAINER_PARTS := ["viewport", "slider", "sort-indicator", "sort-arrow",
+	"sort-index", "column-content", "column-icon", "column-title", "column-container",
+	"resize-handle-container", "content-viewport", "header-label", "header-image",
+	"header-underline", "reorderable-handle-bar"]
 
 
 ## Parts never take focus (Unity delegates it to the control), except the
@@ -307,7 +303,10 @@ func _part_input(el: UxmlElement, c: Control) -> void:
 		"checkmark", "text", "checkmark-background", "title", "title-container", "progress", "icon", "arrow":
 			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_:
-			c.mouse_filter = Control.MOUSE_FILTER_PASS
+			if UNPICKED_CONTAINER_PARTS.has(el.part_role):
+				c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			else:
+				c.mouse_filter = Control.MOUSE_FILTER_PASS
 
 
 func _attr(el: UxmlElement, name: String, default: String = "") -> String:

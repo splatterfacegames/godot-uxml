@@ -165,8 +165,10 @@ func test_load_builds_native_controls() -> void:
 	h.check(icon is TextureRect, "icon native is TextureRect")
 	h.check(icon != null and icon.texture != null, "icon.png resolved relative to UXML")
 
-	h.check(doc.get_native("scroller") is ScrollContainer, "scroller native is ScrollContainer")
-	h.check(doc.get_element("scroller") is UxmlBox, "scroller outer is the viewport box")
+	# Updated with unity/controls-containers: a ScrollView is Unity's part
+	# tree, not a Godot ScrollContainer; get_native returns its own box.
+	h.eq(doc.get_native("scroller"), doc.get_element("scroller"), "ScrollView native is its own box")
+	h.check(doc.get_element("scroller") is UxmlBox, "scroller outer is a UxmlBox")
 	h.check(doc.get_element("deep-button") is Button, "scroll children are native")
 
 	# Unknown tag falls back to a container that keeps its children.
@@ -201,33 +203,41 @@ func test_document_layout_geometry() -> void:
 
 
 # ScrollView: content is taller than the viewport and wheel/keys scroll it.
+# Updated with unity/controls-containers: the ScrollView is Unity's part
+# tree (no ScrollContainer). Scrolling is a translate on
+# #unity-content-container; the wheel and, for a focusable view, ui_down
+# scroll it.
 func test_scroll_view() -> void:
 	var doc := _load()
 	await h.process_frame
 	await h.process_frame
-	var sc: ScrollContainer = doc.get_native("scroller")
-	var content := sc.get_node("uxml-scroll-content") as Control
-	h.check(content != null, "scroll content control exists")
-	h.check(content.custom_minimum_size.y >= 399.0,
-		"content reports ~400 scroll height (got %s)" % content.custom_minimum_size.y)
-	var vbar := sc.get_v_scroll_bar()
-	h.check(vbar.max_value - vbar.page > 1.0,
-		"positive scroll range (max %s page %s)" % [vbar.max_value, vbar.page])
+	var sv := doc.get_element_model("scroller")
+	var content := UxmlParts.content_container(sv)
+	var cc: Control = doc._controls[content]
+	h.check(cc != null, "content container control exists")
+	h.check(cc.size.y >= 399.0, "content keeps its ~400 height (got %s)" % cc.size.y)
+	var vs: UxmlElement = UxmlContainerParts.get_part(sv, "vertical-scroller")
+	h.check(float(vs.get_attribute("high-value")) > 1.0,
+		"positive scroll range (%s)" % vs.get_attribute("high-value"))
 
-	var at := sc.get_global_rect().get_center()
+	var at := doc.get_element("scroller").get_global_rect().get_center()
 	_send_mouse_button(MOUSE_BUTTON_WHEEL_DOWN, true, at)
 	await h.process_frame
-	h.check(sc.scroll_vertical > 0, "wheel scrolls content (v=%s)" % sc.scroll_vertical)
-	var v := sc.scroll_vertical
+	doc._restyle_now()
+	var v: Vector2 = doc.get_scroll_offset("scroller")
+	h.check(v.y > 0, "wheel scrolls content (v=%s)" % v)
+	h.eq(cc.offset_transform_position, -v, "content moves by translate")
 	await h.process_frame
-	h.eq(sc.scroll_vertical, v, "scroll position survives an idle frame")
+	h.eq(doc.get_scroll_offset("scroller"), v, "scroll position survives an idle frame")
 
-	# Keyboard scroll while the ScrollContainer has focus.
-	sc.grab_focus()
-	var before := sc.scroll_vertical
+	# Keyboard scroll while a focusable ScrollView has the focus.
+	var box := doc.get_element("scroller")
+	box.focus_mode = Control.FOCUS_ALL
+	box.grab_focus()
+	var before: Vector2 = doc.get_scroll_offset("scroller")
 	_send_key(KEY_DOWN)
 	await h.process_frame
-	h.check(sc.scroll_vertical > before, "ui_down scrolls focused ScrollContainer")
+	h.check(doc.get_scroll_offset("scroller").y > before.y, "ui_down scrolls a focused ScrollView")
 	_unload(doc)
 
 
@@ -1103,13 +1113,16 @@ func test_list_view_virtualization() -> void:
 	h.eq(r0.index, 0, "slot 0 shows item 0")
 	h.eq((r0.get_native("title") as Label).text, "Item 0", "bind filled row 0")
 	h.check(bound.size() <= rows.size(), "only visible rows were bound (%d)" % bound.size())
-	var sc := doc.get_native("items") as ScrollContainer
-	var content := sc.get_node("uxml-scroll-content") as Control
-	h.check(absf(content.custom_minimum_size.y - 10000 * 24.0) < 1.0,
-		"content is as tall as every item (%s)" % content.custom_minimum_size.y)
+	# Updated with unity/controls-containers: the ListView is Unity's part
+	# tree (a ScrollView inside); its content container is as tall as every
+	# item, and scrolling is the ScrollView offset.
+	var sv: UxmlElement = UxmlContainerParts.get_part(doc.get_element_model("items"), "scroll-view")
+	var content: Control = doc._controls[UxmlContainerParts.get_part(sv, "content")]
+	h.check(absf(content.size.y - 10000 * 24.0) < 1.0,
+		"content is as tall as every item (%s)" % content.size.y)
 	var y0: float = (r0.get_element() as Control).position.y
 	# Scroll to item 100.
-	sc.scroll_vertical = 2400
+	doc.set_scroll_offset("items", Vector2(0, 2400))
 	await h.process_frame
 	await h.process_frame
 	# Rows recycle Unity-style: item i lives in slot i % pool, so rows still
@@ -1131,9 +1144,20 @@ func test_list_view_virtualization() -> void:
 			"row placed at its item's position (%s)" % (r100.get_element() as Control).position.y)
 	h.check(r0.element.class_list().has("unity-collection-view__item"),
 		"rows carry Unity's item class")
-	var r1: UxmlListRow = rows[1]
-	h.check(r1.element.class_list().has("unity-collection-view__item--alternative-background"),
+	# (Updated with unity/controls-containers: the pool size follows Unity's
+	# floor(height / item height) + 2, so look the odd item up by index.)
+	var odd: UxmlListRow = null
+	var even: UxmlListRow = null
+	for r in rows:
+		var rr: UxmlListRow = r
+		if rr.index >= 0 and rr.index % 2 == 1 and odd == null:
+			odd = rr
+		elif rr.index >= 0 and rr.index % 2 == 0 and even == null:
+			even = rr
+	h.check(odd != null and odd.element.class_list().has("unity-collection-view__item--alternative-background"),
 		"odd items get the alternating-row class")
+	h.check(even != null and not even.element.class_list().has("unity-collection-view__item--alternative-background"),
+		"even items do not")
 	# Fewer items than slots: the rest are display:none.
 	doc.set_list_source("items", 3, func(row: UxmlListRow, i: int):
 		(row.get_native("title") as Label).text = "Few %d" % i)

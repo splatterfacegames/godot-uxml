@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:MultiColumnListView name="mc" fixed-item-height="20" sorting-mode="Default" style="height: 120px; width: 300px;">
+    <ui:Columns>
+      <ui:Column name="c-name" title="Name" width="100" />
+      <ui:Column name="c-value" title="Value" width="80" min-width="40" />
+      <ui:Column name="c-stretch" title="Notes" stretchable="true" />
+    </ui:Columns>
+  </ui:MultiColumnListView>
+</ui:UXML>

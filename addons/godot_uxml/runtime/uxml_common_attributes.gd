@@ -24,9 +24,12 @@ extends RefCounted
 ##                       nearest ancestor's value.
 ##   usage-hints         Unity renderer performance hints. Validated, no
 ##                       effect.
-##   view-data-key       Per-key view state: ScrollView / ListView scroll
-##                       offset. get_view_data()/set_view_data(); the store
-##                       is captured before a load and restored after it.
+##   view-data-key       Per-key view state: ScrollView and collection
+##                       scroll offset and selection, TabView tab,
+##                       TwoPaneSplitView pane size, column widths and
+##                       sorting. get_view_data()/set_view_data(); the
+##                       store is captured before a load and restored
+##                       after it.
 
 const USAGE_HINTS := ["None", "DynamicTransform", "GroupTransform", "MaskContainer",
 	"DynamicColor", "DynamicPostProcessing", "LargePixelCoverage"]
@@ -34,15 +37,12 @@ const PICKING := ["Position", "Ignore"]
 const DIRECTIONS := ["Inherit", "LTR", "RTL"]
 
 var _doc: UxmlDocument = null
-## Full hierarchical view-data key -> {"scroll_offset": Vector2}.
+## Full hierarchical view-data key -> view state ({"scroll_offset":
+## Vector2, ...}).
 var _view_store: Dictionary = {}
-## ScrollContainer -> wanted offset, until the container's range allows it.
-var _pending_scroll: Dictionary = {}
 var _keyed: Array = []          # elements with a view-data-key (this load)
 var _ring: Array = []           # focus targets in Unity focus-ring order
 var _ring_index: Dictionary = {}
-var _setting_scroll := false
-var _watched: Dictionary = {}   # ScrollContainer -> true (signals connected)
 
 
 func _init(doc: UxmlDocument) -> void:
@@ -50,11 +50,9 @@ func _init(doc: UxmlDocument) -> void:
 
 
 func clear() -> void:
-	_pending_scroll.clear()
 	_keyed.clear()
 	_ring.clear()
 	_ring_index.clear()
-	_watched.clear()
 
 
 ## Apply the attributes to the controls of the freshly built tree.
@@ -283,16 +281,18 @@ func full_key(el: UxmlElement) -> String:
 	return "__".join(keys)
 
 
-## Record the live view state of the current tree into the store.
+## Record the live view state of the current tree into the store: the
+## view_state() of each keyed control behavior (ScrollView and collection
+## scroll offset and selection, TabView tab, TwoPaneSplitView pane size,
+## column widths and sorting).
 func capture_view_data() -> void:
 	for el in _keyed:
-		var sc := _doc._natives.get(el) as ScrollContainer
-		if sc == null or not is_instance_valid(sc):
+		var b = _doc._behaviors.get(el)
+		if b == null or not b.has_method("view_state"):
 			continue
-		var off := Vector2(sc.scroll_horizontal, sc.scroll_vertical)
-		if _pending_scroll.has(sc):
-			off = _pending_scroll[sc]
-		_view_store[full_key(el)] = {"scroll_offset": off}
+		var st: Dictionary = b.view_state()
+		if not st.is_empty():
+			_view_store[full_key(el)] = st
 
 
 func get_view_data() -> Dictionary:
@@ -305,48 +305,20 @@ func set_view_data(data: Dictionary) -> void:
 	restore_view_data()
 
 
-## Push the stored view state onto the current tree.
+## Push the stored view state onto the current tree. A scroll offset waits
+## for a layout whose scroll range holds it (ScrollViewBehavior), until the
+## user scrolls.
 func restore_view_data() -> void:
 	for el in _keyed:
 		var key := full_key(el)
 		if not _view_store.has(key):
 			continue
 		var entry = _view_store[key]
-		if not entry is Dictionary or not entry.has("scroll_offset"):
+		if not entry is Dictionary:
 			continue
-		var sc := _doc._natives.get(el) as ScrollContainer
-		if sc == null:
-			continue
-		var off = entry["scroll_offset"]
-		if not off is Vector2:
-			continue
-		_pending_scroll[sc] = off
-		if not _watched.has(sc):
-			_watched[sc] = true
-			sc.sort_children.connect(_apply_pending.bind(sc))
-			sc.get_h_scroll_bar().value_changed.connect(_on_user_scroll.bind(sc))
-			sc.get_v_scroll_bar().value_changed.connect(_on_user_scroll.bind(sc))
-		_apply_pending(sc)
-
-
-## The scroll range only grows once the ScrollContainer sorts its
-## children, so the wanted offset is re-applied on each sort until the
-## container reaches it (or the user scrolls).
-func _apply_pending(sc: ScrollContainer) -> void:
-	if not _pending_scroll.has(sc):
-		return
-	var off: Vector2 = _pending_scroll[sc]
-	_setting_scroll = true
-	sc.scroll_horizontal = int(off.x)
-	sc.scroll_vertical = int(off.y)
-	_setting_scroll = false
-	if sc.scroll_horizontal == int(off.x) and sc.scroll_vertical == int(off.y):
-		_pending_scroll.erase(sc)
-
-
-func _on_user_scroll(_v: float, sc: ScrollContainer) -> void:
-	if not _setting_scroll:
-		_pending_scroll.erase(sc)
+		var b = _doc._behaviors.get(el)
+		if b != null and b.has_method("restore_view_state"):
+			b.restore_view_state(entry)
 
 
 func _warn(el: UxmlElement, message: String) -> void:

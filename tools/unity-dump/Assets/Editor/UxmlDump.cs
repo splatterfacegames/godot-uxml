@@ -19,7 +19,13 @@
 //                  {"op": "pointer-up", "x": 10, "y": 10},
 //                  {"op": "click", "target": "name"},
 //                  {"op": "key", "target": "name", "key": "Space"},
-//                  {"op": "force-state", "target": "name", "states": ["hover"]} ] }
+//                  {"op": "force-state", "target": "name", "states": ["hover"]},
+//                  {"op": "items", "target": "list", "count": 20},
+//                  {"op": "items", "target": "list", "values": ["a", "b"]},
+//                  {"op": "tree-items", "target": "tree", "items": [{"id": 1, "data": "a", "children": [...]}], "expand": true},
+//                  {"op": "scroll", "target": "sv", "x": 0, "y": 40},
+//                  {"op": "select", "target": "list", "indices": [1]},
+//                  {"op": "wheel", "x": 10, "y": 10, "dy": 1} ] }
 // "target" names an element by `name`; "path" (e.g. "0/1/0") reaches parts.
 
 using System;
@@ -369,9 +375,79 @@ public static class UxmlDump
                 vp.SetValue(target, v);
                 return "set-value " + PathOf(target, host);
             }
+            case "items":
+            {
+                if (!(target is BaseVerticalCollectionView cv)) return "items: no collection view";
+                var list = new List<string>();
+                if (act.TryGetValue("values", out var vals) && vals is List<object> vl)
+                    foreach (var x in vl) list.Add(Convert.ToString(x, CultureInfo.InvariantCulture));
+                else
+                {
+                    int n = act.TryGetValue("count", out var c) ? Convert.ToInt32(c, CultureInfo.InvariantCulture) : 0;
+                    for (int i = 0; i < n; i++) list.Add("Item " + i.ToString(CultureInfo.InvariantCulture));
+                }
+                cv.itemsSource = list;
+                cv.Rebuild();
+                return "items " + PathOf(target, host) + " " + list.Count;
+            }
+            case "tree-items":
+            {
+                if (!(target is BaseTreeView tv)) return "tree-items: no tree view";
+                var roots = TreeItems(act.TryGetValue("items", out var ti) ? ti as List<object> : null);
+                var m = tv.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                    .First(x => x.Name == "SetRootItems" && x.IsGenericMethod);
+                m.MakeGenericMethod(typeof(string)).Invoke(tv, new object[] { roots });
+                if (act.TryGetValue("expand", out var ex) && Convert.ToBoolean(ex, CultureInfo.InvariantCulture)) tv.ExpandAll();
+                tv.Rebuild();
+                return "tree-items " + PathOf(target, host) + " " + roots.Count;
+            }
+            case "scroll":
+            {
+                ScrollView sv = target as ScrollView;
+                if (sv == null && target != null) sv = target.Q<ScrollView>();
+                if (sv == null) return "scroll: no scroll view";
+                float x = act.TryGetValue("x", out var sx) ? Convert.ToSingle(sx, CultureInfo.InvariantCulture) : 0f;
+                float y = act.TryGetValue("y", out var sy) ? Convert.ToSingle(sy, CultureInfo.InvariantCulture) : 0f;
+                sv.scrollOffset = new Vector2(x, y);
+                return "scroll " + PathOf(sv, host) + " " + sv.scrollOffset;
+            }
+            case "select":
+            {
+                if (!(target is BaseVerticalCollectionView cv)) return "select: no collection view";
+                var idx = new List<int>();
+                if (act.TryGetValue("indices", out var ii) && ii is List<object> il)
+                    foreach (var x in il) idx.Add(Convert.ToInt32(x, CultureInfo.InvariantCulture));
+                cv.SetSelection(idx);
+                return "select " + PathOf(target, host) + " " + string.Join(",", idx);
+            }
+            case "wheel":
+            {
+                var pos = PointOf(act, target);
+                float dy = act.TryGetValue("dy", out var wy) ? Convert.ToSingle(wy, CultureInfo.InvariantCulture) : 0f;
+                float dx = act.TryGetValue("dx", out var wx) ? Convert.ToSingle(wx, CultureInfo.InvariantCulture) : 0f;
+                SendImgui(panel, EventType.MouseMove, pos);
+                var e = new Event { type = EventType.ScrollWheel, mousePosition = pos, delta = new Vector2(dx, dy) };
+                using (var evt = WheelEvent.GetPooled(e)) panel.visualTree.SendEvent(evt);
+                return "wheel " + pos + " " + dx + "," + dy;
+            }
             default:
                 return "unknown op " + op;
         }
+    }
+
+    static List<TreeViewItemData<string>> TreeItems(List<object> src)
+    {
+        var outList = new List<TreeViewItemData<string>>();
+        if (src == null) return outList;
+        foreach (var o in src)
+        {
+            if (!(o is Dictionary<string, object> d)) continue;
+            int id = Convert.ToInt32(d["id"], CultureInfo.InvariantCulture);
+            string data = d.TryGetValue("data", out var dd) ? Convert.ToString(dd, CultureInfo.InvariantCulture) : id.ToString(CultureInfo.InvariantCulture);
+            var kids = TreeItems(d.TryGetValue("children", out var k) ? k as List<object> : null);
+            outList.Add(new TreeViewItemData<string>(id, data, kids));
+        }
+        return outList;
     }
 
     // -----------------------------------------------------------------------
@@ -507,6 +583,15 @@ public static class UxmlDump
         "isReadOnly", "isDelayed", "autoCorrection", "hideMobileInput", "keyboardType",
         "selectAllOnFocus", "selectAllOnMouseUp", "doubleClickSelectsWord", "tripleClickSelectsLine",
         "verticalScrollerVisibility", "formatString", "includeObsoleteValues",
+        // Containers and collections.
+        "scrollOffset", "mode", "horizontalScrollerVisibility",
+        "elasticity", "touchScrollBehavior", "scrollDecelerationRate", "mouseWheelScrollSize",
+        "horizontalPageSize", "verticalPageSize", "nestedInteractionKind",
+        "selectedIndex", "selectedIndices", "selectionType", "fixedItemHeight", "virtualizationMethod",
+        "showBorder", "showAlternatingRowBackgrounds", "reorderable", "reorderMode",
+        "showFoldoutHeader", "headerTitle", "showAddRemoveFooter", "showBoundCollectionSize",
+        "horizontalScrollingEnabled", "sortingMode", "orientation", "fixedPaneIndex",
+        "fixedPaneInitialDimension", "selectedTabIndex", "closeable", "viewDataKey",
     };
 
     // Custom properties a control reads from its resolved custom style.

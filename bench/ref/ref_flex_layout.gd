@@ -263,12 +263,102 @@ func _flex_children(el: UxmlElement) -> Array:
 			continue
 		if display != "flex":
 			_warn_once(child, "display", 'display: "%s" is not supported; flex used' % display)
+		if _is_absolute(child):
+			continue
 		out.append(child)
 	return out
 
 
-func _is_scroll(el: UxmlElement) -> bool:
-	return el.local == "ScrollView"
+## (unity/controls-containers) position: absolute children leave the flow
+## and are placed against the padding box, as in UxmlFlexLayout. The
+## original layout predates them; the Scroller parts (low/high buttons,
+## tracker, dragger) are the first absolute elements in the equivalence
+## documents.
+func _is_absolute(child: UxmlElement) -> bool:
+	return _prop(child, "position") != null and _enum(child, "position", ["relative", "absolute"], "relative") == "absolute"
+
+
+func _abs_children(el: UxmlElement) -> Array:
+	var out: Array = []
+	for child in el.children:
+		if UssControls.is_non_visual(child.local):
+			continue
+		if _str(child, "display", "flex") == "none":
+			continue
+		if _is_absolute(child):
+			out.append(child)
+	return out
+
+
+func _pos_len(el: UxmlElement, name: String, base: float) -> float:
+	var r := _len(el, name, base)
+	return NAN if r["auto"] else float(r["v"])
+
+
+func _layout_abs(el: UxmlElement, size: Vector2, pad: Dictionary, bor: Dictionary, kids: Array) -> void:
+	var cbw := maxf(0.0, size.x - bor["l"] - bor["r"])
+	var cbh := maxf(0.0, size.y - bor["t"] - bor["b"])
+	var row := _is_row(el)
+	var reverse := _reverse_main(el)
+	var justify := _enum(el, "justify-content", JUSTIFY, "flex-start")
+	var align_items := _enum(el, "align-items", ALIGN, "stretch")
+	for child in kids:
+		var m := _margins(child, cbw)
+		var pads := _edges(child, "padding", cbw)
+		var bors := _borders(child, cbw)
+		var in_w: float = pads["l"] + pads["r"] + bors["l"] + bors["r"]
+		var in_h: float = pads["t"] + pads["b"] + bors["t"] + bors["b"]
+		var lft := _pos_len(child, "left", cbw)
+		var rgt := _pos_len(child, "right", cbw)
+		var top := _pos_len(child, "top", cbh)
+		var bot := _pos_len(child, "bottom", cbh)
+		var w := _dim(child, "width", cbw)
+		if w < 0.0 and not is_nan(lft) and not is_nan(rgt):
+			w = maxf(0.0, cbw - lft - rgt - m["l"] - m["r"])
+		var h := _dim(child, "height", cbh)
+		if h < 0.0 and not is_nan(top) and not is_nan(bot):
+			h = maxf(0.0, cbh - top - bot - m["t"] - m["b"])
+		if w < 0.0 or h < 0.0:
+			var nat := _measure(child, Vector2(cbw, cbh), w)
+			if w < 0.0:
+				w = nat.x
+			if h < 0.0:
+				h = nat.y
+		w = maxf(clampf(w, _min_or(child, "min-width", cbw, 0.0), _max_or(child, "max-width", cbw)), in_w)
+		h = maxf(clampf(h, _min_or(child, "min-height", cbh, 0.0), _max_or(child, "max-height", cbh)), in_h)
+		var al := _str(child, "align-self", "auto")
+		if al == "auto":
+			al = align_items
+		var x: float
+		if not is_nan(lft):
+			x = bor["l"] + lft + m["l"]
+		elif not is_nan(rgt):
+			x = size.x - bor["r"] - rgt - m["r"] - w
+		else:
+			x = _abs_free(justify if row else al, row and reverse, size.x, w, bor["l"] + pad["l"] + m["l"])
+		var y: float
+		if not is_nan(top):
+			y = bor["t"] + top + m["t"]
+		elif not is_nan(bot):
+			y = size.y - bor["b"] - bot - m["b"] - h
+		else:
+			y = _abs_free(al if row else justify, (not row) and reverse, size.y, h, bor["t"] + pad["t"] + m["t"])
+		_layout(child, Rect2(Vector2(x, y), Vector2(w, h)), cbw)
+
+
+static func _abs_free(mode: String, reverse: bool, outer: float, sz: float, lead: float) -> float:
+	if mode == "center":
+		return (outer - sz) / 2.0
+	var at_end := mode == "flex-end"
+	if reverse:
+		at_end = not at_end
+	return outer - sz if at_end else lead
+
+
+## (unity/controls-containers) A ScrollView is Unity's part tree and lays
+## out through the ordinary rules; no element is a scroll special case.
+func _is_scroll(_el: UxmlElement) -> bool:
+	return false
 
 
 func _is_row(el: UxmlElement) -> bool:
@@ -314,6 +404,10 @@ func _measure(
 		bh = h if h >= 0.0 else intr.y + in_h
 	else:
 		var cw := w - in_w if w >= 0.0 else -1.0
+		# (unity/controls-containers) Yoga measures a stretched container at
+		# the stretched width (see _stretch_hint).
+		if cw < 0.0 and border_w_hint >= 0.0:
+			cw = maxf(0.0, border_w_hint - in_w)
 		var ch := h - in_h if h >= 0.0 else -1.0
 		var nat := _measure_content(el, Vector2(cw, ch))
 		# Native chrome (e.g. a ScrollContainer's scrollbars) can floor the
@@ -415,13 +509,15 @@ func _layout(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 		)
 	)
 	var kids := _flex_children(el)
+	var abs := _abs_children(el)
 	if kids.is_empty():
 		_content_sizes[el] = Vector2.ZERO
-		return
-	if _is_scroll(el):
+	elif _is_scroll(el):
 		_layout_scroll(el, content, pad, bor, kids)
-		return
-	_content_sizes[el] = _place(el, content, kids)
+	else:
+		_content_sizes[el] = _place(el, content, kids)
+	if not abs.is_empty():
+		_layout_abs(el, rect.size, pad, bor, abs)
 
 
 ## ScrollView children live inside a scroll content box that is as wide as
@@ -451,6 +547,20 @@ func _layout_scroll(
 	_content_sizes[el] = Vector2(avail_w, nat.y) + pad_bor
 
 
+## (unity/controls-containers) The border-box width of a container in a
+## column that stretches it (-1: none), for its measure: Yoga measures a
+## stretched child at the stretched width. Leaves keep their measures.
+func _stretch_hint(child: UxmlElement, row: bool, align_items: String, ac: float, m: Dictionary) -> float:
+	if row or ac < 0.0 or _flex_children(child).is_empty():
+		return -1.0
+	var al := _str(child, "align-self", "auto")
+	if al == "auto":
+		al = align_items
+	if al != "stretch" or _dim(child, "width", ac) >= 0.0:
+		return -1.0
+	return maxf(0.0, ac - m["l"] - m["r"])
+
+
 ## The flex algorithm proper: place `kids` inside `area` (positions are
 ## emitted relative to area's coordinate space) and return the used content
 ## extent. This one routine handles row/column, wrap, grow/shrink, justify
@@ -474,7 +584,7 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	var items: Array = []
 	for child in kids:
 		var m := _margins(child, area.size.x)
-		var nat := _measure(child, area.size)
+		var nat := _measure(child, area.size, _stretch_hint(child, row, align_items, ac, m))
 		var hyp: float
 		var basis := _len(child, "flex-basis", am)
 		if not basis["auto"]:
@@ -672,6 +782,10 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 				)
 			else:
 				it["cross"] = it["nat_cross"]
+				# (unity/controls-containers) Yoga: an overflow: scroll box
+				# sized by its content stays inside a definite cross size.
+				if ac >= 0.0 and _str(it["el"], "overflow", "visible") == "scroll" and _dim(it["el"], cross_prop, ac) < 0.0:
+					it["cross"] = maxf(minf(it["cross"], ac - mct), it["in_cross"])
 			var mc_start: float = it["m"]["t" if row else "l"]
 			var mc_end: float = it["m"]["b" if row else "r"]
 			match al:

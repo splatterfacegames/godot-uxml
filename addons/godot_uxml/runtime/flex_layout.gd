@@ -29,11 +29,9 @@ extends RefCounted
 ## display:none consumes no space; visibility:hidden lays out normally
 ## (the applier hides the control).
 ##
-## ScrollView elements lay their children out inside a scroll content box
-## whose width is the viewport width minus the vertical scrollbar (reserved
-## only when the content actually overflows — the same two-pass Unity uses).
-## Their computed content size is reported in "content_sizes" so the host
-## can size the scroll container's content child.
+## A ScrollView is its Unity part tree (UxmlContainerParts) and lays out
+## through the same flex rules as every other element; the runtime shows
+## and sizes its Scrollers after the layout, as Unity does.
 ##
 ## Performance notes (the algorithm above is unchanged, bit for bit):
 ##   * every per-element style read is memoized for the pass — padding /
@@ -263,7 +261,7 @@ const PNAMES := [
 ]
 const ENUM_NAMES := [
 	"display", "flex-direction", "flex-wrap", "justify-content",
-	"align-items", "align-content", "align-self", "position",
+	"align-items", "align-content", "align-self", "position", "overflow",
 ]
 # kinds
 const K_NONE := 0     # property absent
@@ -615,8 +613,8 @@ func _sens(el: UxmlElement) -> int:
 		s |= 1
 	if kinds[P_H] == K_PCT or kinds[P_MINH] == K_PCT or kinds[P_MAXH] == K_PCT:
 		s |= 2
-	if _flex_children(el).is_empty():
-		s |= 4
+	# Leaves and containers both read the width hint (see _stretch_hint).
+	s |= 4
 	_sens_m[el] = s
 	return s
 
@@ -695,9 +693,11 @@ func _measure(
 		bh = h if h >= 0.0 else intr.y + in_h
 	else:
 		var cw := w - in_w if w >= 0.0 else -1.0
+		if cw < 0.0 and border_w_hint >= 0.0:
+			cw = maxf(0.0, border_w_hint - in_w)
 		var ch := h - in_h if h >= 0.0 else -1.0
 		var nat := _measure_content(el, Vector2(cw, ch))
-		# Native chrome (e.g. a ScrollContainer's scrollbars) can floor the
+		# Native chrome (e.g. a wrapped control's minimum size) can floor the
 		# auto size, but an authored px/% always wins.
 		var chrome := _measure_call(el, cw)
 		bw = w if w >= 0.0 else maxf(nat.x, chrome.x) + in_w
@@ -740,11 +740,16 @@ func _measure(
 	return out
 
 
-## The border-box width hint of a best-fit text item in a column whose
-## cross axis stretches it (-1: none). Only `hinted` elements get one, so
-## other layouts keep their measures.
+## The border-box width hint of an item in a column whose cross axis
+## stretches it (-1: none): a container, or a best-fit text item (`hinted`).
+## Other leaves keep their measures.
 func _stretch_hint(child: UxmlElement, row: bool, align_items: String, ac: float, m: PackedFloat64Array) -> float:
-	if row or _hinted.is_empty() or not _hinted.has(child) or ac < 0.0:
+	if row or ac < 0.0:
+		return -1.0
+	# Yoga measures a stretched child at the stretched width: a container
+	# whose content wraps gets its real height (a row-wrap grid in a
+	# ScrollView). Leaves: only best-fit text reads the hint.
+	if _flex_children(child).is_empty() and (_hinted.is_empty() or not _hinted.has(child)):
 		return -1.0
 	var al := _str(child, "align-self", "auto")
 	if al == "auto":
@@ -1057,8 +1062,6 @@ func _layout_body(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 	var abs: Array = _abs_m[el]
 	if kids.is_empty():
 		_content_sizes[el] = Vector2.ZERO
-	elif el.local == "ScrollView" or el.local == "ListView":
-		_layout_scroll(el, content, pad, bor, kids)
 	else:
 		_content_sizes[el] = _place(el, content, kids)
 	if not abs.is_empty():
@@ -1160,37 +1163,10 @@ static func _abs_free(mode: String, reverse: bool, outer: float, sz: float, lead
 	return outer - sz if at_end else lead
 
 
-## ScrollView children live inside a scroll content box that is as wide as
-## the viewport allows and as tall as the content needs. Positions are
-## emitted in the content control's coordinate space, whose origin is the
-## element's top-left (padding and border offset the content inside it).
-func _layout_scroll(
-	el: UxmlElement,
-	content: Rect2,
-	pad: PackedFloat64Array,
-	bor: PackedFloat64Array,
-	kids: Array
-) -> void:
-	var pad_bor := Vector2(pad[L] + bor[L], pad[T] + bor[T])
-	var avail_w := content.size.x
-	var nat := _measure_content(el, Vector2(avail_w, -1.0))
-	if nat.y > content.size.y + EPS and _scroll_bar_width > 0.0:
-		# Content overflows vertically: reserve the scrollbar width and
-		# measure again, matching Unity's two-pass settle.
-		avail_w = maxf(0.0, avail_w - _scroll_bar_width)
-		nat = _measure_content(el, Vector2(avail_w, -1.0))
-	var content_h := maxf(nat.y, content.size.y)
-	var area := Rect2(pad_bor, Vector2(avail_w, content_h))
-	_place(el, area, kids)
-	# Children start at the padding/border inset; the content box spans from
-	# the content control's origin to the furthest child edge.
-	_content_sizes[el] = Vector2(avail_w, nat.y) + pad_bor
-
-
 ## The flex algorithm proper: place `kids` inside `area` (positions are
 ## emitted relative to area's coordinate space) and return the used content
 ## extent. This one routine handles row/column, wrap, grow/shrink, justify
-## and align for normal containers and for ScrollView content.
+## and align.
 func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	var row := _is_row(el)
 	var wrap_mode := _enum(el, "flex-wrap", WRAPS, "nowrap")
@@ -1250,8 +1226,7 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	for k in n:
 		var child: UxmlElement = kids[k]
 		var m := _margins(child, asx)
-		var nat := _measure(child, area.size,
-			-1.0 if _hinted.is_empty() else _stretch_hint(child, row, align_items, ac, m))
+		var nat := _measure(child, area.size, _stretch_hint(child, row, align_items, ac, m))
 		var hyp: float
 		var basis := _len(child, P_BASIS, am)
 		if not is_nan(basis):
@@ -1508,6 +1483,11 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 				)
 			else:
 				it_cross[k] = it_ncross[k]
+				# Yoga: an overflow: scroll box sized by its content on the
+				# cross axis stays inside a definite available size (Unity's
+				# ScrollView viewport).
+				if ac >= 0.0 and _str(child, "overflow", "visible") == "scroll" and _dim(child, cross_prop, ac) < 0.0:
+					it_cross[k] = maxf(minf(it_cross[k], ac - mct), it_inc[k])
 			var mk: PackedFloat64Array = it_m[k]
 			var mc_start: float = mk[cs_i]
 			var mc_end: float = mk[ce_i]

@@ -84,21 +84,33 @@ on structure only.
 
 ### Unity
 
-**79 of 92 cases match exactly. 1 more differs only by pixel-grid
-rounding. Structure: 1274/1445 elements. Geometry: 4897/4956 values, and
-2 more within 0.5px. Style: 32133/32162 values.** The 64 cases from before
-the input controls: 54 match exactly (before: 41, and 13 more within
-pixel rounding). The 28 input control cases: 25 match exactly.
+**94 of 109 cases match exactly. 1 more differs only by pixel-grid
+rounding. Structure: 2201/2225 elements. Geometry: 6997/7092 values, and
+2 more within 0.5px. Style: 46096/46098 values.** The 109 cases are the
+81 cases of the container branch (55 exact there) and the 28 input
+control cases (25 exact on the input branch); together they match better
+than either branch alone: the size field of a ListView footer is now a
+TextField part tree, so `ctl-listview-chrome` matches.
+
+Cases that still differ: `absolute-import-assets`,
+`absolute-import-project`, `inventory`, `ctl-basefield`, `ctl-helpbox`,
+`ctl-listview-reorder`, `ctl-multicolumn-listview`,
+`ctl-multicolumn-treeview`, `ctl-numeric`, `ctl-slider-click`,
+`ctl-styled-parts`, `ctl-tabview`, `ctl-textfield-multiline`,
+`ctl-treeview`, `ctl-treeview-expanded`. The tables below give the
+causes.
 
 | difference | cases | cause |
 | --- | --- | --- |
-| ScrollView parts (`unity-content-and-vertical-scroll-container`, `unity-content-viewport`, ...) | `scrollview-*`, `child-combinator-through-parts`, `inventory` | ScrollView still maps to a native `ScrollContainer`; the ScrollView part tree is the task of the container controls. |
+| Label height in a short row | `ctl-treeview*`, `ctl-multicolumn-*`, `ctl-listview-reorder` | Unity clamps a text measure to the height the Label has (14px in a 20px row); godot-uxml measures the full text (25px). |
+| auto-height ScrollView with a wrapping grid | `inventory` | the intrinsic measure passes no width bound to children (Yoga: at most the container width), so the grid measures as one line when the column sizes the ScrollView (header 40px, Unity 35px). |
+| Tab underline outside a TabView | `ctl-tabview` | Unity's underline of a lone Tab is as wide as the Tab (400px); godot-uxml makes it as wide as the header (81px). |
+| narrow field | `ctl-basefield` (150px container) | Unity clamps a text measure to the available width, so a long field label shrinks to its 150px minimum and the input collapses. godot-uxml measures the full text. |
+| `/Assets/…` image size | `absolute-import-assets`, `absolute-import-project` | resource resolution, not controls (unchanged from before). |
 | inner ScrollView of a multiline TextField | `ctl-textfield-multiline` | `vertical-scroller-visibility` AlwaysVisible: Unity puts a ScrollView in the input; godot-uxml uses the multiline container (see design.md, "Input controls"). |
 | help box label width | `ctl-helpbox`, `ctl-styled-parts` | deliberate theme deviation: the label grows, because godot-uxml measures a wrapping Label without a max-content width. |
-| narrow field | `ctl-basefield` (150px container) | Unity clamps a text measure to the available width, so a long field label shrinks to its 150px minimum and the input collapses. godot-uxml measures the full text. |
 | text wider than the input | `ctl-numeric` (Hash128Field, 1px) | Unity lays out an overflowing input text 1px wider than the text measure. |
 | click position of the dragger | `ctl-slider-click` (0.2px) | Unity keeps the dragger at the clicked pixel when the value maps less than half a pixel away; the harness places the dragger from the value. |
-| `/Assets/…` image size | `absolute-import-assets`, `absolute-import-project` | resource resolution, not controls (unchanged from before). |
 
 Per-control status against Unity (structure, classes, states, values,
 geometry and theme style):
@@ -125,11 +137,19 @@ geometry and theme style):
 | DropdownField | match: index, the ignored UXML `value`, focus, hover, disabled, open (`:active`) |
 | EnumField | match: display names, default entry, open |
 | author styles on input parts | match (`ctl-styled-inputs`) |
+| ScrollView, Scroller | match: modes, scroller visibility, scrolled offset, wheel, padding, hierarchy, overflowing, child combinator through the parts |
+| ListView | match: rows, selection, border, alternating rows, keys; header and footer match except the TextField parts of the size field |
+| ListView reorder (Animated) | structure matches; Label height (text clamp) |
+| TreeView, MultiColumnTreeView | structure matches; Label height in rows (text clamp) |
+| MultiColumnListView | structure matches; pixel rounding of the header icon, Label height in cells |
+| TabView, Tab | match, except the underline of a Tab outside a TabView |
+| TwoPaneSplitView, IMGUIContainer | match |
 
 ### Reference engine
 
-**28 match exactly, 4 match except Unity's internal control parts, 12
-differ.** Before the default theme: 31 / 4 / 9.
+**31 match exactly, 0 match except Unity's internal control parts, 13
+differ.** Before the container part trees: 28 / 4 / 12. Before the
+default theme: 31 / 4 / 9.
 
 | difference | cases | verdict |
 | --- | --- | --- |
@@ -137,7 +157,8 @@ differ.** Before the default theme: 31 / 4 / 9.
 | `position: absolute` / offsets | none | in scope since the absolute-positioning change; all match. |
 | percentage against an unsized parent | `percent-without-parent-size` | **reference is wrong**: the reference's own accuracy log confirms that Unity does not resolve the percentage. |
 | `/Packages/…` resolved from the project root vs from each importing sheet | `absolute-import-packages` | unverified against Unity (skipped by the dump tool); godot-uxml follows the documented resolution rule in docs/design.md. |
-| ScrollView parts + absolute layout of an inventory screen | `inventory` | ScrollView parts are not modeled yet. |
+| ScrollView scroller width | `scrollview-overflowing` | **match Unity 6000.3**: the runtime theme's Scroller is 24px wide. The reference snapshot records Unity 6000.0's editor scroller (13px). |
+| auto-height ScrollView with a wrapping grid | `inventory` | the parts match now; the grid height in the measure differs (see the Unity table). |
 | Label theme | `inherit-vs-direct`, `text-size`, `text-align`, `inventory` | **match Unity 6000.3**: the runtime theme gives `.unity-label` `margin: 4px 4px 2px 2px` and `padding: 4px 2px 4px 1px`. The reference snapshots record the 6000.0 editor theme, where a Label has no margin. |
 
 The reference engine also splices the reference theme at equal rank with author
@@ -150,6 +171,6 @@ Unity.
 
 - A max-content width for wrapping Labels, and Unity's clamp of a text
   measure to the available width.
-- ScrollView, ListView, TreeView and TabView as part trees (the framework
-  in docs/design.md, "Control parts"); the multiline TextField and the
-  dropdown menu then get the inner ScrollView.
+- Yoga's width bound in intrinsic measures (`inventory`).
+- The inner ScrollView of a multiline TextField and of the dropdown
+  menu, now that ScrollView is a part tree.

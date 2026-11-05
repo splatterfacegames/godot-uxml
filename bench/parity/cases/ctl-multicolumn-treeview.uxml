@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:MultiColumnTreeView name="mt" style="height: 120px; width: 300px;">
+    <ui:Columns>
+      <ui:Column name="t-name" title="Name" width="120" />
+      <ui:Column name="t-size" title="Size" width="60" resizable="false" />
+    </ui:Columns>
+  </ui:MultiColumnTreeView>
+</ui:UXML>

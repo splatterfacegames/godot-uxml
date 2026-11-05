@@ -17,9 +17,13 @@ func _layout(
 	body: String,
 	uss: String,
 	host: Vector2,
-	intrinsic: Dictionary = {}
+	intrinsic: Dictionary = {},
+	parts := false
 ) -> Dictionary:
 	var doc: UxmlDocumentModel = h._doc(body, uss)
+	if parts:
+		UxmlTheme.attach(doc, UxmlTheme.DEFAULT)
+		UxmlParts.expand(doc)
 	var res := UssStyleResolver.resolve(doc, {})
 	var warnings: Array = []
 	var measurer := func(el: UxmlElement, _style: Dictionary, _hint: float) -> Vector2:
@@ -279,19 +283,28 @@ func test_auto_and_indefinite_percent() -> void:
 # ScrollView geometry: the viewport stays at the authored height while the
 # content box reports the full scrollable size and children lay out inside
 # it in content coordinates.
+# The ScrollView is Unity's part tree (UxmlContainerParts) and lays out
+# through the ordinary flex rules: #unity-content-container does not
+# shrink (theme: flex-shrink 0), so the content keeps its height inside
+# the viewport. (Updated with unity/controls-containers: the flex layout
+# no longer special-cases ScrollView, and content_sizes carries no scroll
+# extent; the Scrollers are shown after the layout.)
 func test_scrollview_content_box() -> void:
 	var r := _layout(
 		'<ui:ScrollView name="sv" class="sv">'
 		+ '<ui:VisualElement name="tall" class="tall"/>'
 		+ '</ui:ScrollView>',
 		'.sv { height: 150px; width: 200px; } .tall { height: 400px; }',
-		Vector2(400, 300)
+		Vector2(400, 300), {}, true
 	)
 	_vec_eq(_rect(r, "sv"), Rect2(0, 0, 200, 150), "viewport keeps authored 150")
 	var tall = _rect(r, "tall")
 	h.check(tall is Rect2 and tall.size.y >= 399.0, "content keeps its 400 height, got %s" % tall)
-	var cs: Vector2 = r["content"].get(r["doc"].find_by_name("sv"), Vector2.ZERO)
-	h.check(cs.y >= 400.0, "scroll content height %s >= 400" % cs)
+	var content := UxmlParts.content_container(r["doc"].find_by_name("sv"))
+	var cr = r["rects"].get(content)
+	h.check(cr is Rect2 and cr.size.y >= 400.0, "content container height %s >= 400" % cr)
+	var vp: UxmlElement = UxmlContainerParts.get_part(r["doc"].find_by_name("sv"), "viewport")
+	h.eq((r["rects"][vp] as Rect2).size.y, 150.0, "the viewport keeps the ScrollView height")
 
 
 # An explicit width/height is a preferred size, not the automatic minimum:

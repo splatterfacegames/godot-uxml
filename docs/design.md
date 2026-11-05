@@ -67,9 +67,14 @@ UxmlResourceResolver ──────────────▶│ follows <S
   `TemplateContainer`, `Box`, `Label`, `TextElement`, `Image`, `Button`,
   `RepeatButton`, `Toggle`, `RadioButton`, `RadioButtonGroup`,
   `ToggleButtonGroup`, `GroupBox`, `HelpBox`, `PopupWindow`, `Foldout`,
-  `ProgressBar` (Unity part trees, see "Control parts"), and `Slider`,
-  `SliderInt`, `ScrollView`, `ListView`, `TextField`, `DropdownField`
-  (native Godot widgets until their part trees exist).
+  `ProgressBar`, `ScrollView`, `Scroller`, `ListView`, `TreeView`,
+  `MultiColumnListView`, `MultiColumnTreeView`, `TabView`, `Tab`,
+  `TwoPaneSplitView`, `IMGUIContainer` (Unity part trees, see "Control
+  parts" and "Container and collection parts"), and `Slider`,
+  `SliderInt`, `TextField`, `DropdownField` (native Godot widgets until
+  their part trees exist). `Columns`, `Column`, `SortColumnDescriptions`
+  and `SortColumnDescription` are UxmlObjects of the multi-column views;
+  the builder takes them out of the tree at load.
   `IntegerField`, `FloatField` are *recognized but unmapped* —
   they keep their implicit `unity-*` classes for selector matching but warn
   `unsupported-control` like any unknown tag until a milestone maps them.
@@ -198,8 +203,9 @@ Unity UXML declares a binding as a UxmlObject child of the bound element:
 - Property paths use Unity PropertyPath text: `a.b[2].c`, `[3]`,
   `map["key"]`, `map[key]`. `UxmlBindings.parse_path()` returns the parts
   (String names, int indices) or null for invalid text.
-- ListView item templates are parsed at runtime. The document runs the
-  same extraction on the pooled rows before the factory runs.
+- Collection view item templates (`item-template`, Column
+  `cell-template`) are parsed at runtime. The document runs the same
+  extraction on the pooled rows before the factory runs.
 
 ### Malformed-input policy (explicit)
 
@@ -403,12 +409,15 @@ sees the result of the steps before it.
    Template clones are ordinary elements from here on, and
    `UxmlDocumentModel.element_paths` records the source file of each clone.
 2. `UxmlTheme.attach`: the theme sheet goes first in cascade order.
-3. `_expand_lists`: ListView rows from the item templates. The `<Bindings>`
-   of the rows are extracted next.
-4. `UxmlParts.expand`: control part trees. The author children of a
-   control, template instances included, move into the content container
-   of the control. A `<Bindings>` text attribute (`label`, `text`) gets
-   its part at this step (see "Control parts").
+3. `_prepare_collections`: the item and cell templates of the collection
+   views, and the height that a row pool covers
+   (`UxmlContainerParts.pool_height`).
+4. `UxmlParts.expand`: control part trees, collection row pools
+   included. The author children of a control, template instances
+   included, move into the content container of the control. A
+   `<Bindings>` text attribute (`label`, `text`) gets its part at this
+   step (see "Control parts"). The `<Bindings>` of the pooled rows are
+   extracted next.
 5. Name index, controls (`UxmlControlFactory`), signal wiring.
 6. `UxmlBehaviors.attach_all`, then `UxmlCommonAttributes.setup`, then
    `UxmlBinding.setup`. The bindings write the first values through the
@@ -440,7 +449,12 @@ sees the result of the steps before it.
 | `runtime/controls/uxml_popup_field.gd` | `UxmlPopupField` | the focusable control of a DropdownField or EnumField |
 | `runtime/controls/uxml_popup_menu.gd` | `UxmlPopupMenu` | the dropdown menu: a UXML document with Unity's dropdown classes in a Godot `Popup` |
 | `runtime/controls/uxml_text_input.gd` | `UxmlTextInput` | the Godot `LineEdit`/`TextEdit` inside a text element part |
+| `runtime/controls/uxml_container_parts.gd` | `UxmlContainerParts` | part trees of ScrollView, Scroller, the collection views, TabView, Tab, TwoPaneSplitView, IMGUIContainer; Unity's post-layout updates on the model (`after_layout`); row binding helpers |
+| `runtime/controls/uxml_container_behaviors.gd` | `UxmlContainerBehaviors` | behaviors of those controls: scrolling, Scroller input, virtualization, selection, keys, tabs, splitter |
+| `runtime/controls/uxml_imgui_box.gd` | `UxmlImguiBox` | the control of an IMGUIContainer: hosts a Godot draw and input callback |
 | `themes/unity-default.uss` | — | the default theme, written from Unity 6000.3 measurements |
+| `themes/unity-default-containers.uss` | — | the default theme's look of the container controls |
+| `themes/unity-structure.uss` | — | the geometry of the container parts; attached also without the theme |
 
 ### Control mapping
 
@@ -462,9 +476,8 @@ Every element gets one Godot control, part elements included (see
 | `TextField`, `IntegerField`, `LongField`, `FloatField`, `DoubleField`, `UnsignedIntegerField`, `UnsignedLongField`, `Hash128Field` | `UxmlBox`; the text element part is a `LineEdit` (`TextEdit` for `multiline="true"`) | the `LineEdit`/`TextEdit` |
 | `Vector2Field` ... `Vector4Field`, `Vector2IntField`, `Vector3IntField`, `RectField`, `RectIntField`, `BoundsField`, `BoundsIntField` | `UxmlBox`; the sub-fields are numeric fields | the editor of the first sub-field |
 | `DropdownField`, `EnumField` | `UxmlPopupField` | same |
-| `ScrollView`, `ListView` | `UxmlBox` hosting `ScrollContainer` + content `Control` | the `ScrollContainer` |
-
-The last row keeps the native widget until the ScrollView part tree exists.
+| `ScrollView`, `Scroller`, `ListView`, `TreeView`, `MultiColumnListView`, `MultiColumnTreeView`, `TabView`, `Tab`, `TwoPaneSplitView` | `UxmlBox`; the interactive parts are `UxmlRepeatButton` (Scroller buttons), `UxmlToggle` (TreeView item toggles), `Button` (ListView footer) | same |
+| `IMGUIContainer` | `UxmlImguiBox` | same |
 `get_element(name)` returns the element's outer control; `get_native(name)`
 returns the interactive control. Missing names return `null`; duplicate
 `name` attributes keep the first and emit a `duplicate-name` diagnostic.
@@ -573,7 +586,10 @@ Targets. `property` accepts the Unity C# name or the UXML attribute name:
 | `focusable`, `tabIndex`, `pickingMode`, `languageDirection` | the attribute, applied at once |
 | `image` (`sprite`, `texture`), `tintColor` | Image texture and modulate |
 | `placeholderText`, `isReadOnly`, `maxLength`, `isDelayed`, `isPasswordField`, `maskChar`, `hidePlaceholderOnFocus` | text and numeric field options |
-| `itemsSource` | ListView item count (see below) |
+| `itemsSource` | collection view items (see below) |
+| `selectedIndex`, `selectedIndices` | collection view selection (two-way) |
+| `selectedTabIndex` | TabView selection (two-way) |
+| `headerTitle` | ListView foldout header text |
 | `usageHints` | accepted, no effect |
 | `style.<name>` | inline USS property; `<name>` is the IStyle C# name (`backgroundColor`, `unityFontStyleAndWeight`) or the USS name |
 
@@ -657,7 +673,9 @@ compose. `binding-path` on an element that is not a BindableElement
 `binding-failed`. A DataBinding of the same property replaces the
 `binding-path` binding.
 
-ListView: a binding of `itemsSource` to an Array sets the item count. With
+ListView (and the other collection views): a binding of `itemsSource` to
+an Array gives the view its items. Without a bind callable a Label row
+shows the item text (Unity's default bindItem). With
 `binding-source-selection-mode="AutoAssign"` each row gets the array as
 data source and `[index]` as data source path when the row is bound, so
 row bindings read `items[index]` (Unity
@@ -709,20 +727,24 @@ the controls exist. A document without the attributes does not change.
   element and of its ancestors, root first, joined with `__` (Unity
   `GetFullHierarchicalViewDataKey` without the leading separator). Only an
   element with its own key keeps view data. `get_view_data()` returns
-  `{full key: {"scroll_offset": Vector2}}` for keyed ScrollView and
-  ListView elements. `set_view_data(dict)` replaces the store and applies
-  it. `load_document()` and `reload()` capture the live state before the
-  old tree goes and restore it after the first layout of the new tree. A
-  scroll offset is applied again after each container sort until the
-  scroll range allows the offset or the user scrolls. Unity keeps view
-  data only in Editor windows; here the store is available at runtime.
+  `{full key: state}` from the `view_state()` of each keyed control
+  behavior: `scroll_offset` (ScrollView, collection views),
+  `selected_indices` (collection views), `column_widths` and `sort`
+  (multi-column views), `selected_tab_index` (TabView),
+  `fixed_pane_dimension` (TwoPaneSplitView). `set_view_data(dict)`
+  replaces the store and applies it. `load_document()` and `reload()`
+  capture the live state before the old tree goes and restore it after
+  the first layout of the new tree. A scroll offset is applied again
+  after each layout until the scroll range allows the offset or the user
+  scrolls; a selection waits for its items. Unity keeps view data only in
+  Editor windows; here the store is available at runtime.
 ### Control parts
 
 A Unity control is a tree of elements. Unity's constructors build the
 parts, give the parts Unity's names and classes, and style the parts
 through the theme. godot-uxml builds the same parts as real `UxmlElement`
 children in the model. `UxmlParts.expand(doc)` runs once per load, after
-`_expand_lists` and before the name index, the cascade and the controls
+`_prepare_collections` and before the name index, the cascade and the controls
 exist. The cascade (GDScript and native), `var()`, pseudo-states and the
 flex layout then treat parts as ordinary elements. No cascade or layout
 code knows about controls.
@@ -744,6 +766,14 @@ Rules for every part tree:
   container (the control itself, `#unity-content`,
   `#unity-content-container`, `#contentContainer` or the button group
   container).
+- The control is the logical parent of such a child (Unity's
+  `VisualElement.parent`; `UxmlParts.logical_parent`). The `>` and
+  descendant combinators walk logical parents: `#grid > .slot` matches a
+  slot in the content container of the ScrollView `#grid`, and
+  `.unity-scroll-view__content-container > .slot` does not (measured:
+  `child-combinator-through-parts`). Style inheritance follows the real
+  tree. The cascade keeps both (`UssCascade._parent`, `_sel_parent`, also
+  in the native cascade).
 - Classes that a control adds to itself or to an authored child
   (`unity-base-field--no-label`, `unity-foldout--depth-1`,
   `unity-button-group__button--left`, `unity-disabled`) are "control
@@ -777,6 +807,7 @@ Measured part trees (Unity 6000.3, `bench/parity/unity/ctl-*.json`):
 | `Foldout` | `Toggle.unity-foldout__toggle` (input `.unity-foldout__input`, checkmark `.unity-foldout__checkmark`, text `.unity-foldout__text`), **`#unity-content.unity-foldout__content`**; Foldout gets `unity-foldout--depth-N` |
 | `ProgressBar` | `#unity-progress-bar.unity-progress-bar__container` > `.unity-progress-bar__background` > (`.unity-progress-bar__progress`, `.unity-progress-bar__title-container` > `Label.unity-progress-bar__title`) |
 | `Label`, `TextElement`, `Button`, `RepeatButton`, `Box`, `Image`, `TemplateContainer`, `VisualElement` | no parts |
+| ScrollView, Scroller, collection views, TabView, Tab, TwoPaneSplitView, IMGUIContainer | see "Container and collection parts" |
 
 Each control's own classes come from `UssControls.IMPLICIT_CLASSES`
 (`Label`: `unity-text-element unity-label`; `Button`: `unity-text-element
@@ -830,9 +861,6 @@ To add a control (field and container controls next):
    Unity sets the state.
 5. Check: `bench/parity.gd` (Unity section), tests in
    `tests/test_controls.gd`, `bench/equiv*.gd`.
-
-ScrollView and ListView keep the native `ScrollContainer` until the
-part trees of these controls exist. The input controls are part trees (next section).
 
 #### Input controls
 
@@ -961,6 +989,78 @@ Deviations from Unity:
 - A text editor is a Godot LineEdit, so the line height follows Godot's
   font metrics (a TextField is 42 px high at 14 px, Unity 39 px).
 
+### Container and collection parts
+
+`UxmlContainerParts` builds these trees (measured in Unity 6000.3:
+`bench/parity/unity/ctl-scroll*.json`, `ctl-list*.json`,
+`ctl-tree*.json`, `ctl-multicolumn-*.json`, `ctl-tab*.json`,
+`ctl-twopane.json`, `ctl-imgui.json`; content container in **bold**):
+
+| control | parts |
+| --- | --- |
+| `ScrollView` | `#unity-content-and-vertical-scroll-container` > (`#unity-content-viewport` > **`#unity-content-container`**, vertical `Scroller`), horizontal `Scroller`. Classes `unity-scroll-view--scroll`, `--vertical`/`--horizontal`/`--vertical-horizontal` (`mode`); the viewport and content get the mode class too |
+| `Scroller` | `RepeatButton#unity-low-button`, `RepeatButton#unity-high-button`, `ScrollerSlider#unity-slider` > input > `#unity-drag-container` > (`#unity-tracker`, `#unity-dragger-border`, `#unity-dragger`); class `unity-scroller--vertical`/`--horizontal` (`direction`) |
+| `ListView` | [`Foldout#unity-list-view__foldout-header` holding the rest], `ScrollView.unity-collection-view__scroll-view` (rows in its content container), [`#unity-list-view__footer` > `Button#unity-list-view__add-button` "+", `Button#unity-list-view__remove-button` "-"], [`TextField#unity-list-view__size-field`] |
+| ListView row | a `Label` (no `item-template`, Unity's default makeItem) or a `TemplateContainer` with the template, classes `unity-collection-view__item unity-list-view__item`; `reorder-mode="Animated"`: `#unity-list-view__reorderable-item` > (`#unity-list-view__reorderable-handle` > 2 bars, `#unity-list-view__reorderable-item__container` > made item) |
+| `TreeView` row | `#unity-tree-view__item` > (`#unity-tree-view__item-indent`, `Toggle#unity-tree-view__item-toggle` with the Foldout toggle classes, `#unity-tree-view__item-content` > made item) |
+| `MultiColumnListView` | the ScrollView starts with `#unity-multi-column-view__header-container` > `MultiColumnCollectionHeader` > (column container > one `MultiColumnHeaderColumn` per Column [sort indicator, content container > default content > icon, title], resize handle container > one handle per Column); a row is `#unity-multi-column-view__row-container` > one `.unity-multi-column-view__cell` per Column > `Label.unity-multi-column-view__cell__label` or the `cell-template` |
+| `MultiColumnTreeView` | as MultiColumnListView; the first cell holds the indent, toggle and item content |
+| `TabView` | content viewport > (**`#unity-tab-view__header-container`** for the Tab headers, next and previous `RepeatButton`s), **`TabViewContentContainer#unity-tab-view__content-container`** (the Tabs) |
+| `Tab` | `#unity-tab__header` > (`Image#unity-tab__header-image`, `Label#unity-tab__header-label`, `#unity-tab__header-underline`, [`#unity-tab__close-button`]), **`#unity-tab__content-container`**. In a TabView the header moves into the header container; `reorderable` adds the drag handle |
+| `TwoPaneSplitView` | **`#unity-content-container`** (the two panes), `#unity-dragline-anchor` > `#unity-dragline` |
+| `IMGUIContainer` | no parts |
+
+Rules of these trees:
+
+- Unity changes some of them after a layout. `UxmlContainerParts.after_layout`
+  does the same on the model: a ScrollView shows a Scroller when the
+  content overflows on that axis (`*-scroller-visibility`: `Auto`,
+  `AlwaysVisible`, `Hidden`; the Unity 2021 `show-*-scroller` bools map to
+  `AlwaysVisible`), disables it (`enabled="false"`, `unity-disabled`) when
+  the content fits, sets its range to the content size minus the viewport
+  size, and gives the horizontal Scroller a right margin as wide as the
+  vertical one. The dragger size is `round(track * viewport / content)`
+  (Unity `Slider.AdjustDragElement`); a fraction of 1 or more hides the
+  dragger. Multi-column views set the column and cell widths (fixed
+  widths, then the stretchable columns share the rest, clamped to
+  `min-width`/`max-width`). The runtime runs these updates after every
+  layout (`UxmlDocument._after_layout`); a change lays out again, as in
+  Unity.
+- Scrolling is a `translate` on `#unity-content-container` (Unity 6000.3
+  measured: `ctl-scrollview-scrolled`). The dragger moves by `translate`
+  too. Both are paint-only, so a scroll restyles two elements and skips
+  the layout. Godot's `offset_transform` makes input follow the
+  translate, and the viewport (`overflow: scroll`) clips the content and
+  its input.
+- Collection rows are built at load: a pool of
+  `floor(pool_height / item height) + 2` rows (Unity creates
+  `floor(viewport / item height) + 2`), where `pool_height` is the
+  tallest viewport the document can get. Rows past the item count are
+  `display: none`. Item `i` lives in pool slot `i % pool`: a scroll
+  re-binds only the rows that left the view, and each row control moves
+  by `(item - slot) * item height` after the layout. The content
+  container has an inline height of `count * item height`.
+- A TabView reorder is the one change of shape after load: the header and
+  the Tab move in the model and in the node order, and
+  `UxmlDocument._structure_changed()` rebuilds the parent map and, on the
+  next restyle, the cascade and the layout caches.
+- The geometry rules of these parts are in `themes/unity-structure.uss`,
+  which `UxmlTheme.attach` adds also when `theme_path` is empty, so the
+  controls work without the Unity look. The look is in
+  `themes/unity-default-containers.uss`. Both join only a document with
+  a container control.
+
+Behavior (`UxmlContainerBehaviors`):
+
+| control | behavior |
+| --- | --- |
+| ScrollView | wheel: `mouse-wheel-scroll-size` per notch, else 36px (Unity's runtime line height, measured: `ctl-scrollview-wheel`); a Horizontal view scrolls sideways on the vertical wheel; the event goes on to an outer ScrollView at a bound unless `nested-interaction-kind="StopScrolling"`. Touch drag scrolls with `touch-scroll-type` `Clamped`, `Elastic` (past the range by `elasticity` of the viewport) or `Unrestricted`. A focused child scrolls into view (follow focus, for keyboard and controller navigation). A ScrollView with `focusable="true"` scrolls on `ui_up`/`ui_down` (one line), `ui_page_up`/`ui_page_down` (one viewport) and `ui_left`/`ui_right` |
+| Scroller | low and high RepeatButtons step by the page size (`*-page-size` of the ScrollView, else a tenth of the dragger, Unity's `k_ScrollPageOverlapFactor`; 20 for a standalone Scroller) after 250 ms and every 30 ms while held; a press on the track pages toward the pointer; the dragger follows the pointer; the focused ScrollerSlider takes `ui_*`, page, Home and End. A standalone Scroller sends `value_changed` |
+| ListView, TreeView, multi-column | selection by click (Ctrl adds, Shift extends for `selection-type="Multiple"`), `set_selection`, keys and controller (`ui_up`/`ui_down`, page, Home, End, Shift); the selected row gets `unity-collection-view__item--selected`, `:checked` (Unity 6000.3) and `:selected` (Unity's alias of `:checked`). Enter, controller A and a double click send `items_chosen`. The footer adds and removes items, the size field sets the count, `reorderable` rows move by drag (`item_index_changed`). TreeView: the toggle, `ui_right` and `ui_left` open and close items. Multi-column: a click on a sortable header sorts (`column_sorting_changed`; `sorting-mode="Default"` sorts the items source), the resize handles change a column width |
+| TabView | a click or `ui_accept` on a header selects its Tab (`value_changed` with the index); the other Tabs are `display: none`; the close button of a `closeable` Tab closes it (`tab_closed`); in a `reorderable` TabView a drag of a header moves its Tab (`tab_reordered`, `move_tab`). Headers are focusable so a controller can reach them |
+| TwoPaneSplitView | a drag on the dragline sets the fixed pane size (`set_split_dimension`), between 0 and the view size |
+| IMGUIContainer | `set_imgui_handler(name, draw, input)`: `draw.call(box, rect)` runs in the control's `_draw`, `input.call(box, event)` in its `gui_input`. Unity's `onGUIHandler` is C# IMGUI code, which Godot cannot run |
+
 ### Default theme
 
 `themes/unity-default.uss` holds Unity 6000.3's default runtime theme as
@@ -970,7 +1070,14 @@ not Unity's stylesheet, and the check, arrow and help box images are
 godot-uxml's own SVGs.
 
 `UxmlTheme.attach(doc, path)` adds the sheet to the model with no scope
-and `"theme": true`, and puts the sheet first in cascade order.
+and `"theme": true`, and puts the sheet first in cascade order. A document
+with a container control (`UxmlTheme.CONTAINER_TAGS`) also gets the
+structure sheet (`themes/unity-structure.uss`, the geometry of the
+container parts) ahead of the theme, also when `path` is empty, and, with
+the default theme, `themes/unity-default-containers.uss` after it. Other
+documents do not compile these rules. The compiled form of a theme rule
+(`UssCascade._compile_rule`) is kept on the shared parsed rule, so a load
+does not compile the theme again on the GDScript side.
 `UssCascade` ranks every author rule above every theme rule
 (`AUTHOR_LAYER`, a bit in the compiled specificity key that the native
 cascade reads too). Unity does the same: an author `Button { margin: 0 }`
@@ -1005,8 +1112,7 @@ injected leaf `measurer` (the document supplies
 for our wrappers — kept out of `custom_minimum_size` so the laid-out
 size is never floored — with wrapped `Label`s re-measured at the
 width the line assigned). Positions are emitted in `Control.position`
-space: each element's rect is relative to its parent's border-box origin,
-and a ScrollView's children are relative to its scroll content.
+space: each element's rect is relative to its parent's border-box origin.
 
 Defaults follow USS: `flex-direction: column`, `flex-shrink: 1`,
 `flex-grow: 0`, `align-items: stretch`, `display: flex`. Supported:
@@ -1061,11 +1167,29 @@ the document has settled (see Style application). The layout keeps a
 validated cross-pass cache, so unchanged subtrees cost a replay of their
 measurer calls rather than a recomputation; see `docs/performance.md`.
 
-ScrollView: the viewport keeps its authored size; children lay out inside
-a content box as tall as they need. When content overflows vertically the
-vertical scrollbar's width is reserved and content re-measured (Unity's
-two-pass settle); the content `Control`'s `custom_minimum_size` carries
-the measured extent, so native wheel scrolling works unmodified.
+ScrollView: its part tree lays out through these rules
+(`themes/unity-structure.uss`): the content container does not shrink, so
+it is as tall as its content inside the viewport. Two Yoga rules make
+that work, in the GDScript and the native layout alike:
+
+- A container that a column stretches is measured at the stretched
+  width (`_stretch_hint`). A row-wrap grid in a ScrollView thus gets the
+  height of all its lines. Leaves keep their measures, except best-fit
+  text.
+- `overflow: scroll` (the viewport): a scroll box whose cross size comes
+  from its content stays inside a definite cross size of its line.
+
+The Scrollers are shown after the layout (see "Container and collection
+parts"). The `scroll_bar_width` option and parameter of the layout are no
+longer used. `bench/ref/ref_flex_layout.gd` has the same three changes
+(no ScrollView case, the two rules), so `bench/equiv_layout.gd` compares
+like with like.
+
+One Yoga rule is not modeled: the intrinsic measure of a container passes
+no width bound to its children (Yoga measures them at most as wide as the
+container). An auto-height ScrollView in a sized column therefore
+measures a row-wrap grid as one line when the column computes the
+ScrollView's own size (`inventory`: the header is 40px, Unity 35px).
 
 ### Style application
 
@@ -1157,9 +1281,11 @@ inner native for wrapped fields — so `focusable="false"` removes the
 field from tab order and `focusable="true"` never adds an extra wrapper
 stop. A focused slider consumes `ui_left`/`ui_right` (`ui_down`/`ui_up`
 when vertical) to change the value without moving focus, until
-`ui_accept` clears Unity's `--movable` state. Focused ScrollViews scroll on `ui_up`/`ui_down`/
-`ui_page_*` via the document (consumed only when there is overflow —
-otherwise the keys pass through to navigation). `UxmlDocument` adds
+`ui_accept` clears Unity's `--movable` state. A focused child of a
+ScrollView scrolls into view. A focused ScrollView (`focusable="true"`)
+scrolls on `ui_up`/`ui_down`/`ui_page_*` (consumed only while the view
+can scroll — otherwise the keys pass through to navigation). A focused
+collection view moves its selection on the same keys. `UxmlDocument` adds
 `JOY_BUTTON_A` → `ui_accept` and d-pad → `ui_*` bindings once when an
 action has no joypad events — Godot's defaults otherwise lack
 `ui_accept` on controllers.
@@ -1168,8 +1294,14 @@ action has no joypad events — Godot's defaults otherwise lack
 
 Document signals: `button_pressed(name)`, `value_changed(name, value)`
 (`float` for Slider, `int` for SliderInt, `bool` for Toggle, `String`
-for TextField, item text for DropdownField; the other input controls in
-"Input controls"), `loaded(success)`. Native
+for TextField, item text for DropdownField, `float` for a Scroller, tab
+index for a TabView; the other input controls in "Input controls"),
+`loaded(success)`. Collection views:
+`selection_changed(name, indices)`, `items_chosen(name, indices)`,
+`item_index_changed(name, from, to)`, `items_added(name, indices)`,
+`items_removed(name, indices)`, `column_sorting_changed(name,
+descriptions)`, `item_expanded_changed(name, id, expanded)`. TabView:
+`tab_closed(name, index)`, `tab_reordered(name, from, to)`. Native
 signals (`pressed`, `toggled`, `text_changed`, ...) remain directly
 connectable on the controls `get_element`/`get_native` returns —
 `value_changed` fires exactly once per real edit.
@@ -1208,9 +1340,9 @@ are borrowed — no Slint code is included.
 - **Parity testing against a reference** (jethac/slint's Compose parity
   harness, including its deliberately broken negative cases):
   `bench/parity.gd`, results in `docs/parity.md`.
-- **Virtualized collections** (Slint's ListView/model rows): `ListView`
-  instantiates only enough template rows to cover the viewport and
-  recycles them while scrolling.
+- **Virtualized collections** (Slint's ListView/model rows): the
+  collection views instantiate only enough rows to cover the viewport and
+  recycle them while scrolling.
 
 ### Native core
 
@@ -1256,7 +1388,7 @@ doc.mark_binding_dirty("hp-label")        # WhenDirty bindings
 doc.add_binding("hp-label", "text", "stats.hp", {"mode": "ToTarget"})
 UxmlDocument.register_converter("percent", func(v): return "%d%%" % v)
 UxmlDocument.register_data_source_asset("Assets/Data/Player.asset", player)
-var state := doc.get_view_data()          # view-data-key scroll offsets
+var state := doc.get_view_data()          # view-data-key view state
 doc.set_view_data(state)
 doc.relayout()                            # per-frame text updates (no re-apply)
 doc.transition_end.connect(_on_end)       # (name, property, elapsed_time)
@@ -1269,6 +1401,27 @@ doc.get_element_model("hint").set_attribute("class", "hint visible")  # observab
 doc.set_list_source("items", items.size(), func(row: UxmlListRow, i: int):
     row.get_native("title").text = items[i].name)
 doc.refresh_list("items")                 # item data changed in place
+doc.set_items_source("items", array)      # Unity itemsSource (Label rows show the text)
+doc.selection_changed.connect(_on_select) # (name, indices); items_chosen too
+doc.set_selection("items", [3])
+doc.scroll_to_item("items", 3)
+
+# Trees: roots are {id, data, children}
+doc.set_tree_source("tree", roots, func(row: UxmlListRow, i: int):
+    (row.get_element() as Label).text = str(doc.get_tree_item("tree", i)["data"]))
+doc.set_tree_item_expanded("tree", 1, true)
+
+# Multi-column views: <ui:Columns><ui:Column name="hp" .../></ui:Columns>
+doc.set_column_cell_bind("table", "hp", func(cell: Control, i: int):
+    (cell as Label).text = str(units[i].hp))
+doc.set_column_comparison("table", "hp", func(a, b): return a.hp - b.hp)
+
+doc.set_scroll_offset("sv", Vector2(0, 120))   # ScrollView.scrollOffset
+doc.scroll_to("sv", "item-name")               # ScrollView.ScrollTo
+doc.select_tab("tabs", 1)                      # TabView
+doc.move_tab("tabs", 0, 2)                     # reorderable TabView
+doc.set_split_dimension("split", 200)          # TwoPaneSplitView
+doc.set_imgui_handler("gl", func(box, rect): box.draw_rect(rect, Color.RED))
 for d in doc.diagnostics:                 # everything, parse→runtime
     print(UxmlDiagnostic.format(d))
 ```
@@ -1277,17 +1430,19 @@ for d in doc.diagnostics:                 # everything, parse→runtime
 
 `<ui:ListView fixed-item-height="N" item-template="row.uxml"
 show-alternating-row-backgrounds="ContentOnly|All">` (Unity 2023.2+
-attribute names; `virtualization-method` other than `FixedHeight` is
-diagnosed). The template's visual top-level elements are copied into a pool
-of rows — enough to cover the tallest viewport the document can get (its
-height, the window or the screen, at least 1080px) — appended under the
-ListView before the cascade runs, so they are ordinary elements: author
-selectors, `var()` and pseudo-states reach them; their `name`s do not enter
-the document's name index. Template `<Style>` sheets are attached scoped to
+attribute names). The ListView is its Unity part tree (see "Container and
+collection parts"). The rows are a pool — enough to cover the tallest
+viewport the document can get (its height, the window or the screen, at
+least 1080px) — built under the ScrollView's content container before
+the cascade runs, so they are ordinary elements: author selectors,
+`var()` and pseudo-states reach them; their `name`s do not enter the
+document's name index. Template `<Style>` sheets are attached scoped to
 the ListView. Rows carry Unity's `unity-collection-view__item` /
 `unity-list-view__item` classes (and `--alternative-background` on odd
 items). Item `i` lives in pool slot `i % pool`, so scrolling re-binds only
 rows that scrolled out; slots past the item count are `display: none`.
+`virtualization-method="DynamicHeight"` is diagnosed (`unsupported-value`):
+rows keep `fixed-item-height`.
 
 ## Unsupported / out of scope (diagnosed, not silent)
 
@@ -1308,8 +1463,9 @@ rows that scrolled out; slots past the item count are `display: none`.
 - Binding types defined in C# (CustomBinding subclasses such as
   `LocalizedString`) — `unsupported-feature`, the binding is ignored.
 - Unity asset GUID resolution.
-- Part trees for ScrollView and ListView (`unity-content-viewport` etc.):
-  these controls keep the native Godot widgets for now.
+- `virtualization-method="DynamicHeight"` (rows keep their fixed height).
+- IMGUI code (`IMGUIContainer.onGUIHandler`): C#; the element hosts a
+  Godot callback instead.
 - Full Unity UI Toolkit API compatibility.
 
 ## Native-chrome differences (intentional)
@@ -1323,9 +1479,11 @@ rows that scrolled out; slots past the item count are `display: none`.
 - Text measurement is Godot's (`get_combined_minimum_size`), not Unity's
   text engine — intrinsic label sizes can differ slightly. Auto-height
   labels re-measure at their assigned width when wrapping.
-- ScrollView keeps Godot's `ScrollContainer` scrollbars and input; the
-  layout reserves vertical-scrollbar width on overflow like Unity's
-  two-pass settle.
+- Unity clamps a text measure to the space a Label has; godot-uxml
+  measures the full text. A Label in a 20px TreeView row or table cell
+  is therefore taller than Unity's (25px against 14px for a 14px font),
+  and a Label row keeps Godot's Label minimum height (24px for Unity's
+  20px `fixed-item-height`); rows still sit `fixed-item-height` apart.
 - Godot `Control.size` clamps to `get_combined_minimum_size()` — a hard
   engine rule, not something styles can override. For our own wrappers
   this is neutralized: `UxmlBox`/`UxmlField` keep their intrinsic measure
@@ -1688,8 +1846,10 @@ paths.
   control. Godot multiplies every canvas item of the subtree by the
   modulate. Unity also multiplies each child separately ("perceived
   opacity"): a child does not hide its parent.
-- `overflow: hidden` sets `clip_contents`. Unity also accepts `scroll`;
-  the runtime clips for `scroll` as for `hidden`. A Label or Button with
+- `overflow: hidden` sets `clip_contents`. Unity also accepts `scroll`
+  (the ScrollView viewport has it); the runtime clips for `scroll` as for
+  `hidden`, and the layout applies Yoga's scroll-box rule (see
+  "Layout"). A Label or Button with
   `overflow: hidden` and no wrap also gets `clip_text`, so the authored
   box can be narrower than the text, as in Unity. The measurer turns
   `clip_text` off for the measurement, so the intrinsic size stays the

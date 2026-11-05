@@ -1,0 +1,443 @@
+/*
+ * godot-uxml structure sheet for the container and collection controls
+ * (runtime/controls/uxml_container_parts.gd).
+ *
+ * Unity lays the parts of these controls out with rules of its default
+ * theme. Without those rules a ScrollView cannot scroll and a list row
+ * has no row layout, so UxmlTheme attaches this sheet to a document with
+ * one of these controls even when UxmlDocument.theme_path is empty,
+ * ranked like the theme (below every author rule). It holds only
+ * geometry: direction, grow and shrink, position, part sizes and
+ * overflow. The look (colours, borders, padding, fonts) is in
+ * unity-default-containers.uss.
+ *
+ * Values measured in Unity 6000.3.24f1 (bench/parity/unity/ctl-scroll*,
+ * ctl-list*, ctl-tree*, ctl-multicolumn-*, ctl-tab*, ctl-twopane).
+ */
+
+/* ---- ScrollView ------------------------------------------------------ */
+
+/* Unity resolves a flex-basis of 0 here inside a sized ScrollView, and a
+   ScrollView without a height takes its content height (measured:
+   inventory, ItemGrid). The default basis (auto) gives both results in
+   this layout: these parts are the only growing children. */
+.unity-scroll-view__content-and-vertical-scroll-container {
+  flex-direction: row;
+  flex-grow: 1;
+}
+
+/* Unity gives the viewport its internal `scroll` overflow: it clips like
+   `hidden`, and Yoga keeps a content-sized scroll box inside the space
+   the parent has (the viewport of a short VerticalAndHorizontal view is
+   as tall as its content). */
+.unity-scroll-view__content-viewport {
+  flex-grow: 1;
+  overflow: scroll;
+}
+
+.unity-scroll-view__content-container {
+  flex-shrink: 0;
+}
+
+.unity-scroll-view__content-viewport--horizontal,
+.unity-scroll-view__content-viewport--vertical-horizontal {
+  flex-direction: row;
+}
+
+.unity-scroll-view__content-viewport--vertical-horizontal {
+  align-self: flex-start;
+}
+
+.unity-scroll-view__content-container--horizontal {
+  flex-direction: row;
+  flex-grow: 1;
+}
+
+.unity-scroll-view__content-container--vertical-horizontal {
+  flex-grow: 1;
+  align-self: flex-start;
+}
+
+.unity-scroll-view__vertical-scroller,
+.unity-scroll-view__horizontal-scroller {
+  flex-shrink: 0;
+}
+
+/* ---- Scroller -------------------------------------------------------- */
+
+.unity-scroller--vertical {
+  width: 24px;
+}
+
+.unity-scroller--horizontal {
+  flex-direction: row;
+}
+
+.unity-scroller__low-button,
+.unity-scroller__high-button {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+}
+
+.unity-scroller--vertical > .unity-scroller__low-button {
+  top: 0;
+}
+
+.unity-scroller--vertical > .unity-scroller__high-button {
+  bottom: 0;
+}
+
+.unity-scroller--horizontal > .unity-scroller__low-button {
+  left: 0;
+}
+
+.unity-scroller--horizontal > .unity-scroller__high-button {
+  right: 0;
+}
+
+.unity-scroller__slider {
+  flex-grow: 1;
+  flex-shrink: 0;
+}
+
+.unity-scroller--vertical > .unity-scroller__slider {
+  flex-direction: column;
+  min-width: 24px;
+  margin: 24px 0;
+}
+
+.unity-scroller--horizontal > .unity-scroller__slider {
+  flex-direction: row;
+  min-height: 24px;
+  margin: 0 24px;
+}
+
+.unity-scroller__slider > .unity-base-slider__input {
+  flex-grow: 1;
+  flex-shrink: 0;
+}
+
+.unity-scroller--vertical > .unity-scroller__slider > .unity-base-slider__input {
+  flex-direction: column;
+}
+
+.unity-scroller--horizontal > .unity-scroller__slider > .unity-base-slider__input {
+  flex-direction: row;
+}
+
+.unity-scroller__slider .unity-base-slider__drag-container {
+  flex-grow: 1;
+}
+
+.unity-scroller__slider .unity-base-slider__tracker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+}
+
+.unity-scroller__slider .unity-base-slider__dragger-border {
+  display: none;
+}
+
+.unity-scroller__slider .unity-base-slider__dragger {
+  position: absolute;
+}
+
+.unity-scroller--vertical .unity-base-slider__dragger {
+  left: 3px;
+  right: 3px;
+  height: 8px;
+}
+
+.unity-scroller--horizontal .unity-base-slider__dragger {
+  top: 3px;
+  bottom: 3px;
+  width: 8px;
+}
+
+/* ---- Collection views ------------------------------------------------ */
+
+.unity-collection-view {
+  min-height: 40px;
+  max-height: 4000px;
+}
+
+.unity-tree-view {
+  flex-grow: 1;
+  flex-shrink: 0;
+}
+
+.unity-collection-view__scroll-view {
+  flex-grow: 1;
+}
+
+.unity-collection-view__item {
+  flex-shrink: 0;
+}
+
+.unity-list-view__foldout-header {
+  flex-grow: 1;
+}
+
+.unity-list-view__foldout-header > .unity-foldout__content {
+  flex-grow: 1;
+}
+
+.unity-list-view__foldout-header > .unity-foldout__toggle {
+  height: 38px;
+}
+
+.unity-list-view__footer {
+  flex-direction: row;
+  flex-shrink: 0;
+  align-self: flex-end;
+  justify-content: center;
+}
+
+.unity-list-view__size-field {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 50px;
+  max-width: 50px;
+}
+
+.unity-list-view__reorderable-item {
+  flex-direction: row;
+}
+
+.unity-list-view__reorderable-handle {
+  min-width: 14px;
+  min-height: 16px;
+}
+
+.unity-list-view__reorderable-handle-bar {
+  width: 10px;
+  height: 1px;
+}
+
+.unity-list-view__reorderable-item__container {
+  flex-grow: 1;
+}
+
+.unity-tree-view__item {
+  flex-direction: row;
+}
+
+.unity-tree-view__item-indent {
+  flex-direction: row;
+  flex-shrink: 0;
+}
+
+.unity-tree-view__item-toggle {
+  flex-shrink: 0;
+}
+
+.unity-tree-view__item-content {
+  flex-grow: 1;
+  flex-shrink: 0;
+}
+
+/* ---- Multi-column header and cells ------------------------------------ */
+
+.unity-multi-column-header {
+  flex-direction: row;
+  min-height: 40px;
+}
+
+.unity-multi-column-header__column-container {
+  flex-direction: row;
+  flex-shrink: 0;
+}
+
+.unity-multi-column-header__column {
+  flex-shrink: 0;
+  min-width: 35px;
+}
+
+/* Only the columns of a sortable view show the sort indicator
+   (ctl-multicolumn-treeview has no sorting-mode). */
+.unity-multi-column-header__column__sort-indicator {
+  display: none;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.unity-multi-column-header__column--sortable > .unity-multi-column-header__column__sort-indicator {
+  display: flex;
+}
+
+.unity-multi-column-header__column__sort-indicator__arrow {
+  width: 16px;
+  height: 16px;
+}
+
+.unity-multi-column-header__column__content-container {
+  flex-grow: 1;
+}
+
+.unity-multi-column-header__column__default-content {
+  flex-direction: row;
+  flex-grow: 1;
+}
+
+.unity-multi-column-header__column__icon {
+  position: absolute;
+  flex-shrink: 0;
+  align-self: center;
+  width: 16px;
+  height: 16px;
+  visibility: hidden;
+}
+
+.unity-multi-column-header__resize-handle-container {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+}
+
+.unity-multi-column-header__column-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+}
+
+.unity-multi-column-header__column-resize-handle__drag-area {
+  flex-grow: 1;
+  width: 10px;
+  margin-left: -5px;
+}
+
+.unity-multi-column-view__row-container {
+  flex-direction: row;
+}
+
+.unity-multi-column-view__cell {
+  flex-shrink: 0;
+}
+
+.unity-multi-column-view__cell__label {
+  flex-grow: 1;
+}
+
+/* ---- TabView, Tab ------------------------------------------------------ */
+
+.unity-tab-view__content-viewport {
+  flex-direction: row;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.unity-tab-view__header-container {
+  flex-direction: row;
+  flex-shrink: 0;
+}
+
+.unity-tab__header {
+  flex-direction: row;
+  flex-shrink: 0;
+  align-items: center;
+  align-self: flex-start;
+  min-height: 24px;
+}
+
+.unity-tab__header-image--empty {
+  display: none;
+}
+
+.unity-tab__header-underline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+}
+
+.unity-tab__close-button {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+}
+
+.unity-tab-view__next-button,
+.unity-tab-view__previous-button {
+  position: absolute;
+  align-self: center;
+}
+
+.unity-tab__reorderable-handle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.unity-tab__reorderable-handle-bar {
+  width: 1px;
+  min-width: 1px;
+  height: 10px;
+}
+
+/* ---- TwoPaneSplitView -------------------------------------------------- */
+
+.unity-two-pane-split-view {
+  flex-grow: 1;
+}
+
+.unity-two-pane-split-view__content-container {
+  flex-grow: 1;
+  align-self: stretch;
+}
+
+.unity-two-pane-split-view--horizontal {
+  flex-direction: row;
+  padding-right: 1px;
+}
+
+.unity-two-pane-split-view--vertical {
+  padding-bottom: 1px;
+}
+
+.unity-two-pane-split-view__dragline-anchor {
+  position: absolute;
+}
+
+.unity-two-pane-split-view__dragline-anchor--horizontal {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.unity-two-pane-split-view__dragline-anchor--vertical {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+.unity-two-pane-split-view__dragline {
+  position: absolute;
+}
+
+.unity-two-pane-split-view__dragline--horizontal {
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 11px;
+}
+
+.unity-two-pane-split-view__dragline--vertical {
+  left: 0;
+  right: 0;
+  top: -5px;
+  height: 11px;
+}

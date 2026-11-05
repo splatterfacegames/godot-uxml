@@ -54,13 +54,18 @@ static func resolve(doc: UxmlDocumentModel, options: Dictionary = {}) -> Diction
 # Matching context
 # ---------------------------------------------------------------------------
 
+## Selector parents. An author child that a control keeps in its content
+## container matches combinators against the control (Unity's
+## VisualElement.parent; added with unity/controls-containers, the
+## original resolver predates part trees).
 static func _build_parent_map(root: UxmlElement) -> Dictionary:
 	var map := {}
 	var stack := [root]
 	while not stack.is_empty():
 		var node: UxmlElement = stack.pop_back()
 		for child in node.children:
-			map[child] = node
+			var lp := UxmlParts.logical_parent(child)
+			map[child] = node if lp == null else lp
 			stack.append(child)
 	return map
 

@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Scroller name="sc-v" direction="Vertical" low-value="0" high-value="100" value="25" style="height: 120px;" />
+  <ui:Scroller name="sc-h" direction="Horizontal" low-value="10" high-value="50" value="50" style="width: 200px;" />
+  <ui:Scroller name="sc-default" />
+</ui:UXML>

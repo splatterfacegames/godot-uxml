@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:TwoPaneSplitView name="split-h" fixed-pane-initial-dimension="80" style="height: 100px; width: 300px;">
+    <ui:VisualElement name="left" style="background-color: rgb(255, 0, 0);" />
+    <ui:VisualElement name="right" style="background-color: rgb(0, 255, 0);" />
+  </ui:TwoPaneSplitView>
+  <ui:TwoPaneSplitView name="split-v" orientation="Vertical" fixed-pane-index="1" fixed-pane-initial-dimension="30" style="height: 120px; width: 200px;">
+    <ui:VisualElement name="top" />
+    <ui:VisualElement name="bottom" />
+  </ui:TwoPaneSplitView>
+</ui:UXML>
