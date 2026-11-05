@@ -22,8 +22,10 @@ extends Control
 ## Pseudo-states map to real Control state: hover <- mouse_entered/exited,
 ## focus <- focus_entered/exited, active <- button held, checked <- toggle
 ## state, disabled <- enabled="false" or set_enabled(). Every change
-## re-resolves the cascade with element_states/disabled_elements and
-## re-applies, so :hover etc. work exactly like the authored USS says.
+## re-resolves the cascade with element_states/disabled_elements
+## (incrementally) and re-applies what changed, so :hover etc. work exactly
+## like the authored USS says. refresh() re-applies everything; relayout()
+## is the cheap per-frame form for text-only updates.
 
 signal button_pressed(element_name)
 signal value_changed(element_name, value)
@@ -743,5 +745,15 @@ func set_class(element_name: String, class_string: String) -> void:
 ## code mutating a Label's text directly.
 func refresh() -> void:
 	_full_apply = true
+	_force_layout = true
+	_queue_restyle()
+
+
+## Re-lay out only — for content changes that cannot affect styling, e.g.
+## game code updating Label/Button text every frame. Cheaper than
+## refresh(): the cascade is still checked incrementally, but controls are
+## not re-applied unless their computed style actually changed. Coalesced
+## with other pending restyles like every other mutation.
+func relayout() -> void:
 	_force_layout = true
 	_queue_restyle()

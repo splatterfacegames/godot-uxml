@@ -40,12 +40,19 @@ extends RefCounted
 ##     border / margin edges per containing-block width, enums, flex
 ##     children, numbers — and value parsing is memoized by text in
 ##     UssValues, so the hot recursion does no regex or string building;
-##   * _measure() results are memoized per (element, avail, hint) for
-##     subtrees whose measurer is pure. options["volatile"] names elements
-##     whose intrinsic size depends on measurer call history (a wrapping
-##     Label is measured at the width the previous call left on it); any
-##     subtree containing one is always measured for real, so the measurer
-##     sees exactly the call sequence it always did;
+##   * _measure() results are memoized per canonical (element, avail,
+##     hint) — avail only through the element's own percentage props, the
+##     hint only for leaves. options["volatile"] maps elements whose
+##     intrinsic size depends on measurer call history (a wrapping Label is
+##     measured at the width the previous call left on it) to the control's
+##     current width; the layout tracks that width through the pass
+##     (options["volatile_width"] reads the engine-clamped result back),
+##     memoizes per actual width, and subtree memo entries key on and
+##     replay the labels' widths — every real measurer call happens at the
+##     width the original call sequence would have used;
+##   * options["records"] + options["xcache"] (caller-owned Dictionaries)
+##     keep parsed style records and a validated cross-pass measure/layout
+##     cache (see the "Entries" notes below);
 ##   * flex items are parallel packed arrays, not per-item Dictionaries.
 ## Diagnostics are deduplicated per (property, message) for the document's
 ## lifetime, so skipping a repeated identical call never drops a warning.

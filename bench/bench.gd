@@ -197,6 +197,17 @@ func _run() -> void:
 		var dt := (Time.get_ticks_usec() - t0) / 1000.0
 		await process_frame
 		return dt, 300, 3000.0)
+	if hud.has_method("relayout"):
+		await _time_async("hud frame (8 labels + relayout)", func() -> float:
+			frame[0] += 1
+			var t0 := Time.get_ticks_usec()
+			for i in labels.size():
+				(labels[i] as Label).text = str((frame[0] * 37 + i * 101) % 100000)
+			hud.relayout()
+			hud._restyle_now()
+			var dt := (Time.get_ticks_usec() - t0) / 1000.0
+			await process_frame
+			return dt, 300, 3000.0)
 	await _time_async("hud frame (8 labels, no refresh)", func() -> float:
 		frame[0] += 1
 		var t0 := Time.get_ticks_usec()
@@ -254,6 +265,12 @@ func _steady(doc: UxmlDocument) -> void:
 		return await op.call(func():
 			(doc.get_native("card-30-body") as Label).text = "short" if flip[0] else "a much longer body text that wraps over lines"
 			doc.refresh()), 60, 6000.0)
+	if doc.has_method("relayout"):
+		await _time_async("set_text + relayout", func() -> float:
+			flip[0] = not flip[0]
+			return await op.call(func():
+				(doc.get_native("card-30-body") as Label).text = "short" if flip[0] else "a much longer body text that wraps over lines"
+				doc.relayout()), 60, 6000.0)
 	await _time_async("resize relayout", func() -> float:
 		flip[0] = not flip[0]
 		var t0 := Time.get_ticks_usec()

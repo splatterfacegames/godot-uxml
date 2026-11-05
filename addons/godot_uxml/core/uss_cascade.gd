@@ -551,6 +551,8 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 		es_bits[i] = m
 
 	var full := force or not _computed_once
+	var has_ov := not dis_ov.is_empty()
+	var has_es := not es_bits.is_empty()
 	var changed := PackedInt32Array()
 	last_old = []
 	var inh_dirty := PackedByteArray()
@@ -571,18 +573,20 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 		var st = null if a == null else a["value"]
 		a = r[5]
 		var own_d: int = 1 if a != null and a["value"] == "false" else 0
-		var ov = dis_ov.get(i)
-		if ov != null:
-			own_d = ov
+		if has_ov:
+			var ov = dis_ov.get(i)
+			if ov != null:
+				own_d = ov
 		var p := _parent[i]
 		var b := global
 		if own_d == 1 or (p >= 0 and (_sig_bits[p] & BIT_DISABLED) != 0):
 			b |= BIT_DISABLED
 		else:
 			b |= BIT_ENABLED
-		var eb = es_bits.get(i)
-		if eb != null:
-			b |= eb
+		if has_es:
+			var eb = es_bits.get(i)
+			if eb != null:
+				b |= eb
 		if has_keys:
 			b |= key_bits[i]
 		var own: bool = (

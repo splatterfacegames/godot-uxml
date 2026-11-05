@@ -48,7 +48,8 @@ UxmlResourceResolver ──────────────▶│ follows <S
 | `resource_resolver.gd` | `UxmlResourceResolver` | `project_root`; `resolve`, `resolve_text` |
 | `uxml_document.gd` | `UxmlDocumentModel` | `source`, `path`, `root`, `sheets`, `style_roots`, `warnings` |
 | `uxml_loader.gd` | `UxmlLoader` | `load_file(path, project_root)`, `load_source(source, path, resolver, uss)` |
-| `style_resolver.gd` | `UssStyleResolver` | `resolve(doc, options) -> {styles, warnings}` |
+| `style_resolver.gd` | `UssStyleResolver` | `resolve(doc, options) -> {styles, warnings}` (a one-shot `UssCascade`); var() substitution |
+| `uss_cascade.gd` | `UssCascade` | compiled, bucketed, incremental cascade: `update(options, force) -> changed indices`, `styles`, `collect_warnings()` |
 
 ## UXML subset
 
@@ -302,9 +303,16 @@ axis. Otherwise only an authored `min-*` floors shrink; `max-*` also
 caps `align-items: stretch`. This was verified against the installed
 package, not assumed from CSS.
 
-Re-layout happens on document resize, on any state/style change (coalesced
-— several state changes per frame cost one pass), and via `refresh()`
-after mutations the runtime cannot see (e.g. code writing `Label.text`).
+Re-layout happens on document resize, on any state/style change that can
+affect geometry (coalesced — several state changes per frame cost one
+pass), via `refresh()` after mutations the runtime cannot see (e.g. code
+writing `Label.text`), and via `relayout()` — the cheap per-frame form of
+the same for content-only changes (re-lays out without re-applying
+styles). A restyle whose changes are all paint-only (colors, radii,
+`visibility`, text alignment, custom properties) skips the layout once
+the document has settled (see Style application). The layout keeps a
+validated cross-pass cache, so unchanged subtrees cost a replay of their
+measurer calls rather than a recomputation; see `docs/performance.md`.
 
 ScrollView: the viewport keeps its authored size; children lay out inside
 a content box as tall as they need. When content overflows vertically the
@@ -365,9 +373,23 @@ States map to real engine events: `hover` ← `mouse_entered/exited`,
 `button_down`, `checked` ← `toggled` (initial `value="true"` is synced at
 wire time), `disabled` ← `enabled="false"` or `set_enabled()`. Every
 change queues a deferred restyle: the cascade re-resolves with
-`element_states`/`disabled_elements`/`enabled_elements`, styles re-apply,
-and layout re-runs — a `:hover` rule therefore works exactly like
+`element_states`/`disabled_elements`/`enabled_elements` — incrementally:
+only elements whose inputs (attributes, state bits, inherited values, or
+ancestor features some descendant/child selector tests) changed are
+recomputed — the controls whose computed style or effective
+disabled/hidden state changed re-apply, and layout re-runs unless every
+change was paint-only. A `:hover` rule therefore works exactly like
 authored USS says, and native signals keep working beside them.
+
+Theme overrides reach a control's minimum size through a deferred engine
+update, so the layout right after an apply can measure stale sizes; the
+runtime keeps re-applying what it applied on the previous pass and keeps
+laying out until a layout reproduces the previous rects (the same fixed
+point a full re-apply/re-layout on every restyle reaches) before
+paint-only restyles may skip the layout. Controls whose fresh stylebox
+margins differ from the resolved insets (percentage padding, texture
+styleboxes) are re-applied and re-laid out on every restyle.
+`refresh()` re-applies every control.
 
 `enabled="false"` and `display:none` both descend their subtrees:
 descendants are natively disabled/hidden, unfocusable, and mouse-ignored
@@ -425,6 +447,7 @@ var slider: HSlider = doc.get_native("volume")    # interactive inner
 doc.set_enabled("advanced-panel", false)  # subtree disable + :disabled
 doc.set_class("item", "row selected")     # re-resolve with new classes
 doc.refresh()                             # after unseen mutations
+doc.relayout()                            # per-frame text updates (no re-apply)
 for d in doc.diagnostics:                 # everything, parse→runtime
     print(UxmlDiagnostic.format(d))
 ```
@@ -485,11 +508,18 @@ for d in doc.diagnostics:                 # everything, parse→runtime
 
 ## Performance / limitations
 
-- Full re-resolve + re-apply + re-layout on every state batch (coalesced
-  per frame) — fine for menus and settings screens; per-frame churn on
-  thousands of elements is untested territory.
+- Restyles are incremental (cascade, apply and layout all scale with
+  what changed); numbers and method in `docs/performance.md`. A restyle
+  still scans every element's cascade inputs once (O(n), ~3 µs/element)
+  so direct model edits are always seen, and a cached layout replays one
+  native minimum-size read per leaf.
+- `UxmlStyleApplier.BULK_THEME_OVERRIDES` (default on) batches each
+  control's theme-override writes into one notification. Its only
+  observable effect vs per-override notification: the first layout after
+  a load already sees settled minimum sizes, where the pre-optimization
+  runtime showed some stale until its next restyle.
 - 100 repeated `load_document` calls hold `OBJECT_NODE_COUNT` flat in
-  tests; very large documents are linear in both resolve and layout.
+  tests.
 - Synthetic mouse *motion* is not delivered under a headless
   DisplayServer — hover/click behavior is covered by the windowed test
   run (577 checks) vs headless (572 checks).

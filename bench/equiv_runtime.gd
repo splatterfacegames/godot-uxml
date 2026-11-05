@@ -81,7 +81,7 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 		names = [""]
 	for step in steps:
 		var nm: String = names[rng.randi() % names.size()]
-		var op := rng.randi() % 10
+		var op := rng.randi() % 11
 		var args: Array = []
 		match op:
 			0, 1, 2:
@@ -127,6 +127,17 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 					if n2 is Label or n2 is Button:
 						n2.text = t2
 					d.size = sz2
+			10:
+				# New relayout() (text-only update) must land exactly where
+				# the original's refresh() does.
+				var t3 := str(rng.randi() % 1000000)
+				args = [nm, t3]
+				for d in [a, b]:
+					var n3 = d.get_native(nm)
+					if n3 is Label or n3 is Button:
+						n3.text = t3
+				a.refresh()
+				b.relayout()
 			8:
 				# Several changes coalesced into one flush.
 				var nm2: String = names[rng.randi() % names.size()]
