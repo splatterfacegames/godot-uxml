@@ -1650,7 +1650,7 @@ class PopupBehavior extends InputBehavior:
 		var anchor := control_of(part("input"))
 		if anchor == null:
 			anchor = native()
-		_menu = UxmlPopupMenu.open(anchor, items(), index(), doc.theme_path, doc._doc)
+		_menu = UxmlPopupMenu.open(anchor, items(), index(), doc.theme_path, doc)
 		_menu.chosen.connect(choose.bind(true))
 		_menu.popup_hide.connect(_on_menu_closed)
 		set_state(el, "active", true)

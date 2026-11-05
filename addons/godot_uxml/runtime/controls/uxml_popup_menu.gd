@@ -35,10 +35,10 @@ var _highlight := -1
 
 ## Open a menu below `anchor` (the field input control) with `items`;
 ## `selected` is checked and highlighted.
-## `owner` is the model of the field's document: its author sheets style
-## the menu.
+## `owner` is the field's document: its author sheets style the menu, and
+## url()s in them resolve against its project root.
 static func open(anchor: Control, items: PackedStringArray, selected: int, theme_path: String,
-		owner: UxmlDocumentModel = null) -> UxmlPopupMenu:
+		owner: UxmlDocument = null) -> UxmlPopupMenu:
 	var m := UxmlPopupMenu.new()
 	m.transparent_bg = true
 	m.borderless = true
@@ -64,13 +64,15 @@ static func menu_uxml(items: PackedStringArray, width: float) -> String:
 
 
 func _build(anchor: Control, items: PackedStringArray, selected: int, theme_path: String,
-		owner: UxmlDocumentModel = null) -> void:
+		owner: UxmlDocument = null) -> void:
 	_count = items.size()
 	var width := maxf(anchor.size.x, 20.0)
 	_doc = UxmlDocument.new()
 	_doc.auto_load = false
 	_doc.theme_path = theme_path
-	_doc.shared_sheets = owner
+	if owner != null:
+		_doc.shared_sheets = owner._doc
+		_doc.project_root = owner._effective_root
 	_doc.size = Vector2(width + 8.0, 4000.0)
 	add_child(_doc)
 	_doc.load_source(menu_uxml(items, width))

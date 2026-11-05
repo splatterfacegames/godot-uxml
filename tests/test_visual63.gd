@@ -432,10 +432,14 @@ func test_auto_size() -> void:
 	h.check(_text_w(st, _fs(st)) <= 100.0 and _fs(st) < 40, "a stretched item fits its stretched width (%d)" % _fs(st))
 	h.eq(st.size.y, st.get_combined_minimum_size().y, "and measures its height at that size")
 	# Text set by game code refits on the next layout.
+	# Updated with unity/fidelity: Yoga measures every item at most as wide
+	# as its container (AtMost), so a text too long for the 400px column at
+	# the maximum size fits the column width.
 	free.text = "Hello world, a much longer line of text"
 	doc.refresh()
 	await h.process_frame
-	h.eq(_fs(free), 40, "unconstrained text keeps the maximum")
+	h.check(_fs(free) < 40 and _text_w(free, _fs(free)) <= 400.0,
+		"a long text fits the width of its column (%d)" % _fs(free))
 	_unload(doc)
 
 

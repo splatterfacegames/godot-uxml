@@ -836,16 +836,27 @@ func _line_font(c: Control, font: Font, style: Dictionary, el: UxmlElement) -> F
 		var want_h := ceilf(UNITY_LINE_EM * fs - 0.001)
 		var top := roundi(UNITY_ASCENT_EM * fs - base.get_ascent(fs))
 		var bottom := roundi(want_h - base.get_height(fs)) - top
-		if top == 0 and bottom == 0:
-			hit = base
-		else:
-			var fv := FontVariation.new()
-			fv.base_font = base
-			fv.set_spacing(TextServer.SPACING_TOP, top)
-			fv.set_spacing(TextServer.SPACING_BOTTOM, bottom)
-			hit = fv
+		hit = base if top == 0 and bottom == 0 else with_spacing(base, top, bottom)
 		_line_fonts[key] = hit
 	return hit if hit != base or font != null else font
+
+
+## `base` with extra top and bottom spacing. Godot does not stack nested
+## FontVariations (the outer one replaces the spacing, embolden and
+## transform of the inner one), so a FontVariation base is copied and its
+## spacing grows.
+static func with_spacing(base: Font, top: int, bottom: int) -> FontVariation:
+	var fv: FontVariation
+	if base is FontVariation:
+		fv = (base as FontVariation).duplicate()
+		fv.set_spacing(TextServer.SPACING_TOP, fv.get_spacing(TextServer.SPACING_TOP) + top)
+		fv.set_spacing(TextServer.SPACING_BOTTOM, fv.get_spacing(TextServer.SPACING_BOTTOM) + bottom)
+	else:
+		fv = FontVariation.new()
+		fv.base_font = base
+		fv.set_spacing(TextServer.SPACING_TOP, top)
+		fv.set_spacing(TextServer.SPACING_BOTTOM, bottom)
+	return fv
 
 
 ## Max-content width of a wrapping Label (its longest paragraph, as one
@@ -878,15 +889,16 @@ static func label_max_content(l: Label) -> float:
 ## with a negative bottom spacing as large as the deficit (whole pixels).
 ## The control then takes the laid-out height, and the text keeps its
 ## baseline. `uxml_fit` (on the control) holds the deficit; the measurers
-## add it back, so the measure does not change. Called after the control
-## got its laid-out size.
+## measure it as unfitted (unfitted_height), so the measure does not
+## change. Called after the control got its laid-out size.
 func fit_label(c: Label, want: Vector2) -> void:
 	var fit: int = int(c.get_meta(&"uxml_fit", 0))
 	var need := 0
 	if c.autowrap_mode == TextServer.AUTOWRAP_OFF and c.label_settings == null and c.get_line_count() <= 1:
-		need = maxi(0, int(ceilf(c.get_combined_minimum_size().y + fit - want.y - 0.01)))
+		need = maxi(0, int(ceilf(unfitted_height(c) - want.y - 0.01)))
 	if need == fit:
 		if c.size != want:
+			c.update_minimum_size()
 			c.size = want
 		return
 	var had: bool
@@ -910,16 +922,29 @@ func fit_label(c: Label, want: Vector2) -> void:
 		var key := "%d|%d" % [0 if base == null else base.get_instance_id(), need]
 		var fv: FontVariation = _fit_fonts.get(key)
 		if fv == null:
-			fv = FontVariation.new()
-			fv.base_font = base
-			fv.set_spacing(TextServer.SPACING_BOTTOM, -need)
+			fv = with_spacing(base, 0, -need)
 			_fit_fonts[key] = fv
 		c.add_theme_font_override(&"font", fv)
 		c.set_meta(&"uxml_fit", need)
 		if fit == 0:
 			c.set_meta(&"uxml_fit_base", [had, base])
 		fitted[c] = true
+	c.update_minimum_size()
 	c.size = want
+
+
+## The height of a one-line Label with the font it has without fit_label:
+## one line of that font plus the stylebox margins. fit_label and both
+## measurers use it, so neither depends on when Godot updates the minimum
+## size of the Label after a font change. The native measurer computes the
+## same value (layout.rs, unfitted_height).
+static func unfitted_height(c: Label) -> float:
+	var base: Font = c.get_theme_font(&"font")
+	if c.has_meta(&"uxml_fit_base"):
+		base = (c.get_meta(&"uxml_fit_base") as Array)[1]
+	var fh := 0.0 if base == null else base.get_height(c.get_theme_font_size(&"font_size"))
+	var sb := c.get_theme_stylebox(&"normal")
+	return fh + (0.0 if sb == null else sb.get_minimum_size().y)
 
 
 ## Records the control's pre-override theme font once, at apply() entry —

@@ -432,8 +432,8 @@ pub struct Pass<'a> {
     /// Per-pass memo: the control carries `uxml_clip_text` (metas do not
     /// change during a pass).
     cliptext_m: Vec<Option<bool>>,
-    /// Per-pass memo: the `uxml_fit` deficit of a fitted Label
-    /// (UxmlStyleApplier.fit_label).
+    /// Per-pass memo: the unfitted height of a fitted Label, -1 for a Label
+    /// without `uxml_fit` (UxmlStyleApplier.fit_label, unfitted_height).
     fit_m: Vec<Option<f64>>,
     /// Best-fit text (-unity-text-auto-size): measured through
     /// UxmlStyleApplier.autosize_measure, which reads the width hint.
@@ -987,15 +987,15 @@ impl<'a> Pass<'a> {
                 ms.x = f(label_max_content(&lbl));
             }
             let sn_fit = &self.sn_fit;
-            let fit = *self.fit_m[i].get_or_insert_with(|| {
+            let fit_h = *self.fit_m[i].get_or_insert_with(|| {
                 if lbl.has_meta(sn_fit) {
-                    lbl.get_meta(sn_fit).try_to::<i64>().unwrap_or(0) as f64
+                    unfitted_height(&lbl)
                 } else {
-                    0.0
+                    -1.0
                 }
             });
-            if fit != 0.0 {
-                ms.y = f(d(ms.y) + fit);
+            if fit_h >= 0.0 {
+                ms.y = f(fit_h);
             }
         }
         if self.margins_m[i].is_none() {
@@ -1716,6 +1716,20 @@ fn label_max_content(l: &Gd<Label>) -> f64 {
     }
     let sb = l.get_theme_stylebox("normal");
     w + sb.map(|s| d(s.get_minimum_size().x)).unwrap_or(0.0)
+}
+
+/// UxmlStyleApplier.unfitted_height: one line of the font a fitted Label has
+/// without the fit, plus its stylebox margins.
+fn unfitted_height(l: &Gd<Label>) -> f64 {
+    let mut base: Option<Gd<Font>> = l.get_theme_font("font");
+    if l.has_meta("uxml_fit_base") {
+        let keep = l.get_meta("uxml_fit_base").try_to::<VarArray>().ok();
+        base = keep.and_then(|a| a.get(1)).and_then(|v| v.try_to::<Gd<Font>>().ok());
+    }
+    let fs = l.get_theme_font_size("font_size");
+    let fh = base.map(|b| d(b.get_height_ex().font_size(fs).done())).unwrap_or(0.0);
+    let sb = l.get_theme_stylebox("normal");
+    fh + sb.map(|s| d(s.get_minimum_size().y)).unwrap_or(0.0)
 }
 
 fn abs_free(mode: &str, reverse: bool, outer: f64, sz: f64, lead: f64) -> f64 {

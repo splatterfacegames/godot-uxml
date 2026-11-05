@@ -82,7 +82,7 @@ Status values:
 | ScrollView: `mode`, `horizontal-scroller-visibility`, `vertical-scroller-visibility`, `mouse-wheel-scroll-size`, `horizontal-page-size`, `vertical-page-size`, `nested-interaction-kind`, `touch-scroll-type`, `elasticity`, `scroll-deceleration-rate` | done |
 | Scroller: `low-value`, `high-value`, `direction`, `value` | done |
 | Collection views: `fixed-item-height`, `selection-type`, `show-border`, `show-alternating-row-backgrounds`, `reorderable`, `reorder-mode`, `show-foldout-header`, `header-title`, `show-add-remove-footer`, `allow-add`, `allow-remove`, `show-bound-collection-size`, `horizontal-scrolling`, `item-template`, `sorting-mode`, `auto-expand` | done |
-| Collection views: `virtualization-method` | `FixedHeight` done; `DynamicHeight` is diagnosed (`unsupported-value`), rows keep `fixed-item-height` |
+| Collection views: `virtualization-method` | done: `FixedHeight` and `DynamicHeight` (rows take the height of their item; the other items count with the expected height; the first visible item keeps its place when heights change). Other values are diagnosed (`unsupported-value`) |
 | Tab: `label`, `icon-image`, `closeable`; TabView: `reorderable` | done (a drag of a header moves its Tab) |
 | TwoPaneSplitView: `fixed-pane-index`, `fixed-pane-initial-dimension`, `orientation` | done |
 
@@ -137,26 +137,20 @@ Deviations from Unity:
 
 Container and collection differences to Unity:
 
-- Unity clamps a text measure to the space a Label has. godot-uxml
-  measures the full text, so a Label in a TreeView row or a table cell is
-  taller than in Unity (25px against 14px in a 20px row), and a Label row
-  keeps Godot's Label minimum height. The rows still sit
-  `fixed-item-height` apart.
-- The runtime keeps a pool of rows for the tallest viewport the document
-  can get; rows past the item count are `display: none`. Unity creates
-  `floor(viewport / item height) + 2` rows.
+- The runtime builds a pool of rows for the tallest viewport the document
+  can get at load. Only `floor(viewport / item height) + 2` rows are in
+  use, as in Unity (`get_list_rows`, binding); the other rows stay hidden
+  and unbound, so a resize adds no elements. Unity creates and releases
+  the rows instead. DynamicHeight uses `ceil(viewport / expected height)
+  + 2` rows, at most the pool.
 - TabView headers are focusable so a controller can reach them. Unity's
   headers are not focusable.
 - A focused child of a ScrollView scrolls into view (follow focus), for
   keyboard and controller navigation.
-- The underline of a Tab outside a TabView is as wide as its header.
-  Unity makes it as wide as the Tab (400px against 81px in `ctl-tabview`).
 - A closed Tab stays in the tree with `display: none`; part trees are
   fixed after load. Unity removes it.
-- An auto-height ScrollView in a sized column measures a row-wrap grid as
-  one line when the column computes the ScrollView's size (the layout
-  passes no width bound to children in an intrinsic measure). Inside a
-  sized ScrollView the grid has its full height.
+- DynamicHeight keeps no anchor across a change of the item source and
+  does not stick to the bottom (Unity's m_StickToBottom).
 - The `ScrollView` keyboard scroll needs `focusable="true"`; Unity puts
   the keys on the focusable Scroller sliders, which godot-uxml also
   supports.
@@ -178,18 +172,18 @@ with Unity dumps (`docs/parity.md`).
 | VisualElement, TemplateContainer, Label, TextElement, Image, Box | done (Label: rich text tags give a RichTextLabel) |
 | Button, RepeatButton | done (theme box and states; rich text tags removed) |
 | Toggle, RadioButton, RadioButtonGroup, ToggleButtonGroup | done: part trees, theme, states, values, data binding. Differences to Unity: pixel-grid rounding of centred parts |
-| GroupBox, HelpBox, PopupWindow, Foldout, ProgressBar | done: part trees, theme, values, data binding. HelpBox label width differs (see `docs/parity.md`) |
+| GroupBox, HelpBox, PopupWindow, Foldout, ProgressBar | done: part trees, theme, values, data binding |
 | Disabled look (`unity-disabled`, opacity 0.5 on the element) | done |
 | Slider, SliderInt, MinMaxSlider | done: part trees, theme, `direction`, `inverted`, `page-size`, `fill`, `show-input-field`, `low-value`/`high-value`, `min-value`/`max-value`/`low-limit`/`high-limit`; keys, controller, pointer (jump, page, drag, label drag) as Unity's BaseSlider; continuous Slider values. Differences: pixel-grid rounding of the centred parts |
-| TextField | done: part tree, theme, `multiline`, `max-length`, `password`/`mask-character`, `readonly`, `is-delayed`, `placeholder-text`, `hide-placeholder-on-focus`, the selection attributes, `keyboard-type`, `hide-mobile-input`; a Godot LineEdit/TextEdit edits the text (IME, selection, clipboard); `--unity-cursor-color`, `--unity-selection-color`. Differences: no inner ScrollView for `vertical-scroller-visibility` Auto/AlwaysVisible; `select-all-on-mouse-up` and `auto-correction` have no effect; Godot line height |
+| TextField | done: part tree, theme, `multiline`, `max-length`, `password`/`mask-character`, `readonly`, `is-delayed`, `placeholder-text`, `hide-placeholder-on-focus`, the selection attributes, `keyboard-type`, `hide-mobile-input`; a Godot LineEdit/TextEdit edits the text (IME, selection, clipboard); `--unity-cursor-color`, `--unity-selection-color`. `vertical-scroller-visibility` Auto/AlwaysVisible puts Unity's inner ScrollView in the input (the caret stays in view); the line height is Unity's (39px field at 14px). Differences: `select-all-on-mouse-up` and `auto-correction` have no effect; the inner ScrollView is VerticalAndHorizontal also for `white-space: normal` (Unity: Vertical) |
 | IntegerField, LongField, FloatField, DoubleField, UnsignedIntegerField, UnsignedLongField, Hash128Field | done: part trees, theme, Unity's parsing, expressions (`2*3`, `+=5`, `sqrt(16)`, ...) and formatting (all 451 rows of `bench/parity/probes/numeric.json` match), allowed characters, label dragger |
 | Vector2Field, Vector2IntField, Vector3Field, Vector3IntField, Vector4Field | done: part trees and the runtime theme layout (stacked sub-fields), values, binding |
 | RectField, RectIntField, BoundsField, BoundsIntField | done: two-line groups, Bounds center/extents (`ex`..`ez` are the size, as in Unity), values (`Rect2`, `Rect2i`, `AABB`) |
-| DropdownField, EnumField | done: part trees, theme, `choices`/`index` (the UXML `value` selects nothing, as in Unity 6000.3), the menu (Unity's dropdown classes in a Godot Popup; keys, controller, pointer); EnumField types from `UxmlDocument.register_enum()` or from a bound enum property, `include-obsolete-values`. Differences: the menu does not scroll; author sheets do not style the menu |
+| DropdownField, EnumField | done: part trees, theme, `choices`/`index` (the UXML `value` selects nothing, as in Unity 6000.3), the menu (Unity's GenericDropdownMenu tree with an inner ScrollView in a Godot Popup; keys, controller, pointer, wheel; a long menu gets the space below or above the field and scrolls; the author sheets of the document style the menu); EnumField types from `UxmlDocument.register_enum()` or from a bound enum property, `include-obsolete-values` |
 | ScrollView, Scroller | done: part trees, structure and theme, Scroller visibility after layout, scrolling by `translate`, wheel, touch, keys, controller, follow focus, Scroller buttons, track and dragger, view data. Matches Unity in every measured case |
-| ListView | done: part trees (rows, foldout header, footer, size field, reorder handles), fixed-height virtualization, selection (mouse, keys, controller), `:checked`/`--selected`, `items_chosen`, footer add/remove, reorder, data binding. Size field parts follow TextField (planned). Differences: see below |
+| ListView | done: part trees (rows, foldout header, footer, size field, reorder handles), fixed-height and dynamic-height virtualization, selection (mouse, keys, controller), `:checked`/`--selected`, `items_chosen`, footer add/remove, reorder, data binding. Size field parts follow TextField (planned). Differences: see below |
 | TreeView, MultiColumnListView, MultiColumnTreeView | done: tree rows (indent, toggle, content), expansion (toggle, keys), `<Columns>`, header, sorting (`sorting-mode`, `sort-column-descriptions`), header resizing, cell binders, tree data API |
-| Tab, TabView | done: part trees, header move, selection (mouse, `ui_accept`), close, drag reorder, `label` binding |
+| Tab, TabView | done: part trees, header move, selection (mouse, `ui_accept`), close, drag reorder, `label` binding; the underline of a Tab outside a TabView is as wide as the Tab, as in Unity |
 | TwoPaneSplitView | done: part tree, fixed pane, draggable splitter |
 | IMGUIContainer | done: the element hosts a Godot draw and input callback (`set_imgui_handler`); Unity's C# IMGUI code cannot run |
 

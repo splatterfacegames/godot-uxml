@@ -887,7 +887,7 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 		if c.has_meta(&"uxml_fit"):
 			# A Label fitted into a box shorter than its line measures as
 			# without the fit (UxmlStyleApplier.fit_label).
-			ms.y += float(c.get_meta(&"uxml_fit"))
+			ms.y = UxmlStyleApplier.unfitted_height(c)
 	# A USS stylebox carries padding+border as content margins, which the
 	# minimum size already counts — the flex pass adds the same insets on
 	# top of the intrinsic size, so take them back out here. Only styleboxes
