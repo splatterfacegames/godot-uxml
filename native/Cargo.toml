@@ -3,6 +3,7 @@ name = "godot_uxml_native"
 version = "0.1.0"
 edition = "2021"
 description = "Native core for the godot-uxml addon (cascade, layout, parsers)"
+license = "Apache-2.0"
 publish = false
 
 [lib]
