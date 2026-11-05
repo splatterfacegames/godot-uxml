@@ -22,6 +22,14 @@ extends RefCounted
 ## came from — including inline styles (the UXML path) and inherited values
 ## (the sheet that declared them on the ancestor).
 
+## Batch each control's theme-override writes into one theme-changed
+## notification (begin/end_bulk_theme_override). ~3x faster applies. Only
+## observable difference vs. per-override notifications: right after a load
+## the first layout already sees settled minimum sizes, where per-override
+## notification left some stale until the next restyle. Set false for exact
+## first-frame parity with the pre-optimization runtime.
+const BULK_THEME_OVERRIDES := true
+
 var _resolver: UxmlResourceResolver
 var _uxml_path: String
 var _source: String
@@ -173,6 +181,17 @@ func _font_color_names(c: Control) -> Array:
 
 
 func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin: bool) -> void:
+	# All override writes for this control land as ONE theme-changed
+	# notification instead of one per slot/color (10+ for a Button).
+	if BULK_THEME_OVERRIDES:
+		c.begin_bulk_theme_override()
+		_apply_themed_inner(c, style, el, include_skin)
+		c.end_bulk_theme_override()
+	else:
+		_apply_themed_inner(c, style, el, include_skin)
+
+
+func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include_skin: bool) -> void:
 	if include_skin:
 		var sb := _stylebox(style, el)
 		var tex := _texture(style, "background-image", el)
@@ -505,29 +524,43 @@ func _load_font(path: String, el: UxmlElement) -> Font:
 ## StyleBoxTexture for themed controls (UxmlBox paints it separately as
 ## box_texture); mixed per-side border colors collapse to the top side's —
 ## StyleBoxFlat has a single border color, the difference is diagnosed.
+const _SIDES := ["top", "right", "bottom", "left"]
+const _CORNERS := ["top-left", "top-right", "bottom-right", "bottom-left"]
+const _BW := ["border-top-width", "border-right-width", "border-bottom-width", "border-left-width"]
+const _BC := ["border-top-color", "border-right-color", "border-bottom-color", "border-left-color"]
+const _BR := [
+	"border-top-left-radius", "border-top-right-radius",
+	"border-bottom-right-radius", "border-bottom-left-radius",
+]
+const _PAD := ["padding-top", "padding-right", "padding-bottom", "padding-left"]
+
+
 func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 	var bg := _color(style, "background-color", el)
-	var widths := {}
+	# Per-side values in [top, right, bottom, left] order; corners clockwise
+	# from top-left. Diagnostics are emitted in the original order.
+	var widths := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 	var any_border := false
-	for side in ["top", "right", "bottom", "left"]:
-		var e = style.get("border-%s-width" % side)
+	for k in 4:
+		var e = style.get(_BW[k])
+		if e == null:
+			continue
 		var w := 0.0
-		if e != null:
-			var p := UssValues.parse_length(String(e["value"]))
-			if p["kind"] == "px":
-				w = maxf(0.0, p["value"])
-			elif p["kind"] == "invalid":
-				_warn(el, "border-width", "border-%s-width: %s" % [side, p["problem"]])
-			else:
-				_warn(el, "border-width", "border-%s-width: only px is supported" % side)
-		widths[side] = w
+		var p := UssValues.parse_length(String(e["value"]))
+		if p["kind"] == "px":
+			w = maxf(0.0, p["value"])
+		elif p["kind"] == "invalid":
+			_warn(el, "border-width", "border-%s-width: %s" % [_SIDES[k], p["problem"]])
+		else:
+			_warn(el, "border-width", "border-%s-width: only px is supported" % _SIDES[k])
+		widths[k] = w
 		any_border = any_border or w > 0.0
-	var bcolors := {}
 	var any_bcolor := false
 	var first_bcolor: Variant = null
-	for side in ["top", "right", "bottom", "left"]:
-		var c := _color(style, "border-%s-color" % side, el)
-		bcolors[side] = c
+	for k in 4:
+		if not style.has(_BC[k]):
+			continue
+		var c := _color(style, _BC[k], el)
 		if c != null:
 			any_bcolor = true
 			if first_bcolor == null:
@@ -537,20 +570,21 @@ func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 					"border-color-mixed", el,
 					"per-side border colors differ; StyleBoxFlat supports one border color — the first is used"
 				)
-	var radii := {}
+	var radii := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 	var any_radius := false
-	for corner in ["top-left", "top-right", "bottom-right", "bottom-left"]:
-		var e = style.get("border-%s-radius" % corner)
+	for k in 4:
+		var e = style.get(_BR[k])
+		if e == null:
+			continue
 		var v := 0.0
-		if e != null:
-			var p := UssValues.parse_length(String(e["value"]))
-			if p["kind"] == "px":
-				v = maxf(0.0, p["value"])
-			elif p["kind"] == "invalid":
-				_warn(el, "border-radius", "border-%s-radius: %s" % [corner, p["problem"]])
-			else:
-				_warn(el, "border-radius", "border-%s-radius: only px is supported" % corner)
-		radii[corner] = v
+		var p := UssValues.parse_length(String(e["value"]))
+		if p["kind"] == "px":
+			v = maxf(0.0, p["value"])
+		elif p["kind"] == "invalid":
+			_warn(el, "border-radius", "border-%s-radius: %s" % [_CORNERS[k], p["problem"]])
+		else:
+			_warn(el, "border-radius", "border-%s-radius: only px is supported" % _CORNERS[k])
+		radii[k] = v
 		any_radius = any_radius or v > 0.0
 
 	# Authored padding insets the native content (a Label/Button's text) via
@@ -559,19 +593,18 @@ func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 	# Percentages resolve in the flex pass against the containing block:
 	# the px estimate here is corrected post-layout by
 	# apply_resolved_insets() so painted text matches the reserved box.
-	var pads := {}
+	var pads := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 	var any_pad := false
-	for side in ["top", "right", "bottom", "left"]:
-		var e = style.get("padding-%s" % side)
-		var pad := 0.0
-		if e != null:
-			var p := UssValues.parse_length(String(e["value"]))
-			if p["kind"] == "px":
-				pad = maxf(0.0, p["value"])
-			elif p["kind"] == "percent":
-				any_pad = true
-		pads[side] = pad
-		any_pad = any_pad or pad > 0.0
+	for k in 4:
+		var e = style.get(_PAD[k])
+		if e == null:
+			continue
+		var p := UssValues.parse_length(String(e["value"]))
+		if p["kind"] == "px":
+			pads[k] = maxf(0.0, p["value"])
+		elif p["kind"] == "percent":
+			any_pad = true
+		any_pad = any_pad or pads[k] > 0.0
 
 	var has_visual := (
 		bg != null or any_border or any_bcolor or any_radius or any_pad
@@ -582,23 +615,27 @@ func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg if bg != null else Color.TRANSPARENT
 	sb.border_color = first_bcolor if first_bcolor != null else Color.BLACK
-	for side in ["top", "right", "bottom", "left"]:
-		sb.set("border_width_%s" % side, int(widths[side]))
-		sb.set("content_margin_%s" % side, float(widths[side]) + pads[side])
+	sb.border_width_top = int(widths[0])
+	sb.border_width_right = int(widths[1])
+	sb.border_width_bottom = int(widths[2])
+	sb.border_width_left = int(widths[3])
+	sb.content_margin_top = widths[0] + pads[0]
+	sb.content_margin_right = widths[1] + pads[1]
+	sb.content_margin_bottom = widths[2] + pads[2]
+	sb.content_margin_left = widths[3] + pads[3]
 	# The margins inflate get_combined_minimum_size() — record what USS put
 	# there so the layout's intrinsic measurer can subtract them and the
 	# flex insets are not counted twice.
 	sb.set_meta("uxml_margins", [
-		float(widths["left"]) + pads["left"],
-		float(widths["top"]) + pads["top"],
-		float(widths["right"]) + pads["right"],
-		float(widths["bottom"]) + pads["bottom"],
+		widths[3] + pads[3],
+		widths[0] + pads[0],
+		widths[1] + pads[1],
+		widths[2] + pads[2],
 	])
-	for corner in ["top_left", "top_right", "bottom_right", "bottom_left"]:
-		sb.set("corner_radius_%s" % corner, int(radii[
-			{"top_left": "top-left", "top_right": "top-right",
-			 "bottom_right": "bottom-right", "bottom_left": "bottom-left"}[corner]
-		]))
+	sb.corner_radius_top_left = int(radii[0])
+	sb.corner_radius_top_right = int(radii[1])
+	sb.corner_radius_bottom_right = int(radii[2])
+	sb.corner_radius_bottom_left = int(radii[3])
 	sb.draw_center = bg != null
 	return sb
 

@@ -70,6 +70,9 @@ func caption_node() -> Label:
 ## removed again when the corresponding property leaves the computed style,
 ## so leaving a state restores the caption's theme defaults exactly.
 func apply_caption_style(font: Font, font_size: int, color: Color, has_color: bool) -> void:
+	var bulk := UxmlStyleApplier.BULK_THEME_OVERRIDES
+	if bulk:
+		caption.begin_bulk_theme_override()  # one theme notification, not three
 	if font != null:
 		caption.add_theme_font_override("font", font)
 	elif caption.has_theme_font_override("font"):
@@ -82,6 +85,8 @@ func apply_caption_style(font: Font, font_size: int, color: Color, has_color: bo
 		caption.add_theme_color_override("font_color", color)
 	elif caption.has_theme_color_override("font_color"):
 		caption.remove_theme_color_override("font_color")
+	if bulk:
+		caption.end_bulk_theme_override()
 	_update_min_size()
 	_relayout()
 
