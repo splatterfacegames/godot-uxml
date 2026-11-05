@@ -384,8 +384,9 @@ func _edges(el: UxmlElement, base_pid: int, cb_width: float, allow_negative: boo
 		if kind == K_NONE:
 			continue
 		if kind == K_AUTOKW:
-			var name: String = PNAMES[pid]
-			_warn_once(el, name, "%s: auto is not supported; 0 used" % name)
+			if base_pid != P_MAR:
+				var name: String = PNAMES[pid]
+				_warn_once(el, name, "%s: auto is not supported; 0 used" % name)
 			continue
 		var r := _lenr(el, rec, pid, cb_width)
 		if is_nan(r):
@@ -1294,6 +1295,26 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 		var free := am - used
 		var start := 0.0
 		var step := gap_m
+		var nauto := 0
+		for k in range(lo, hi):
+			var ak: PackedByteArray = _rec(kids[k])[1]
+			if ak[P_MAR + ms_i] == K_AUTOKW:
+				nauto += 1
+			if ak[P_MAR + me_i] == K_AUTOKW:
+				nauto += 1
+		if nauto > 0:
+			var per := maxf(0.0, free) / nauto
+			var cur := area.position[main]
+			for k in range(lo, hi):
+				var ak2: PackedByteArray = _rec(kids[k])[1]
+				var mk0: PackedFloat64Array = it_m[k]
+				if ak2[P_MAR + ms_i] == K_AUTOKW:
+					cur += per
+				it_pos[k] = cur + mk0[ms_i]
+				cur += it_mmain[k] + it_main[k] + gap_m
+				if ak2[P_MAR + me_i] == K_AUTOKW:
+					cur += per
+			justify = "__auto"
 		match justify:
 			"center":
 				start = free / 2.0
@@ -1309,11 +1330,14 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 				var u2 := free / (cnt + 1)
 				start = u2
 				step += u2
-		var cursor := area.position[main] + start
-		for k in range(lo, hi):
-			var mk: PackedFloat64Array = it_m[k]
-			it_pos[k] = cursor + mk[ms_i]
-			cursor += it_mmain[k] + it_main[k] + step
+		if justify != "__auto":
+			var cursor := area.position[main] + start
+			for k in range(lo, hi):
+				var mk: PackedFloat64Array = it_m[k]
+				it_pos[k] = cursor + mk[ms_i]
+				cursor += it_mmain[k] + it_main[k] + step
+		else:
+			justify = _enum(el, "justify-content", JUSTIFY, "flex-start")
 		if reverse:
 			for k in range(lo, hi):
 				var mk: PackedFloat64Array = it_m[k]
@@ -1340,6 +1364,19 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 				_warn_once(child, "align-items", "baseline alignment is not supported; flex-start used")
 				al = "flex-start"
 			var mct: float = it_mcross[k]
+			var ck: PackedByteArray = _rec(child)[1]
+			var ca_s: bool = ck[P_MAR + cs_i] == K_AUTOKW
+			var ca_e: bool = ck[P_MAR + ce_i] == K_AUTOKW
+			if ca_s or ca_e:
+				it_cross[k] = it_ncross[k]
+				var mk3: PackedFloat64Array = it_m[k]
+				if ca_s and ca_e:
+					it_cpos[k] = lp + maxf(0.0, lc - it_cross[k] - mct) / 2.0 + mk3[cs_i]
+				elif ca_s:
+					it_cpos[k] = lp + maxf(0.0, lc - it_cross[k] - mct) + mk3[cs_i]
+				else:
+					it_cpos[k] = lp + mk3[cs_i]
+				continue
 			if al == "stretch" and _dim(child, cross_prop, ac) < 0.0:
 				# Stretch still honors min/max — a max-height:30 item in a
 				# 100-high line stretches to 30, not 100 — and the

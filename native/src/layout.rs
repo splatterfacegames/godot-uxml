@@ -538,8 +538,10 @@ impl<'a> Pass<'a> {
                 continue;
             }
             if kind == K::AutoKw {
-                let name = LAYOUT_PROPS[pid];
-                self.warn_once(i, name, format!("{name}: auto is not supported; 0 used"));
+                if base != P_MAR {
+                    let name = LAYOUT_PROPS[pid];
+                    self.warn_once(i, name, format!("{name}: auto is not supported; 0 used"));
+                }
                 continue;
             }
             let r = self.lenr(i, pid, cb);
@@ -1181,7 +1183,32 @@ impl<'a> Pass<'a> {
             let free = am - used;
             let mut start = 0.0f64;
             let mut step = gap_m;
-            match justify {
+            let mut nauto = 0usize;
+            for k in lo..hi {
+                let ak = &self.recs[kids[k]].kinds;
+                if ak[P_MAR + ms_i] == K::AutoKw {
+                    nauto += 1;
+                }
+                if ak[P_MAR + me_i] == K::AutoKw {
+                    nauto += 1;
+                }
+            }
+            if nauto > 0 {
+                let per = gmax(0.0, free) / nauto as f64;
+                let mut cur = apos_main;
+                for k in lo..hi {
+                    let ak = &self.recs[kids[k]].kinds;
+                    if ak[P_MAR + ms_i] == K::AutoKw {
+                        cur += per;
+                    }
+                    it_pos[k] = cur + it_m[k][ms_i];
+                    cur += it_mmain[k] + it_main[k] + gap_m;
+                    if ak[P_MAR + me_i] == K::AutoKw {
+                        cur += per;
+                    }
+                }
+            }
+            if nauto == 0 { match justify {
                 "center" => start = free / 2.0,
                 "flex-end" => start = free,
                 "space-between" => step += if cnt > 1 { free / (cnt - 1) as f64 } else { 0.0 },
@@ -1201,7 +1228,7 @@ impl<'a> Pass<'a> {
             for k in lo..hi {
                 it_pos[k] = cursor + it_m[k][ms_i];
                 cursor += it_mmain[k] + it_main[k] + step;
-            }
+            } }
             if reverse {
                 for k in lo..hi {
                     let outer_start = it_pos[k] - it_m[k][ms_i];
@@ -1229,6 +1256,20 @@ impl<'a> Pass<'a> {
                     al = "flex-start";
                 }
                 let mct = it_mcross[k];
+                let ca_s = self.recs[ch].kinds[P_MAR + cs_i] == K::AutoKw;
+                let ca_e = self.recs[ch].kinds[P_MAR + ce_i] == K::AutoKw;
+                if ca_s || ca_e {
+                    it_cross[k] = it_ncross[k];
+                    let rem = gmax(0.0, lc - it_cross[k] - mct);
+                    it_cpos[k] = if ca_s && ca_e {
+                        lp + rem / 2.0 + it_m[k][cs_i]
+                    } else if ca_s {
+                        lp + rem + it_m[k][cs_i]
+                    } else {
+                        lp + it_m[k][cs_i]
+                    };
+                    continue;
+                }
                 if al == "stretch" && self.dim(ch, cross_prop, ac) < 0.0 {
                     let smin = gmax(self.min_or(ch, min_cross, ac, 0.0), it_inc[k]);
                     let mxb = self.bound(ch, max_cross, ac, false);

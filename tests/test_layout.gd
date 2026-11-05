@@ -461,12 +461,12 @@ func test_value_diagnostics() -> void:
 		+ '<ui:VisualElement name="a" class="c"><ui:VisualElement name="a2"/></ui:VisualElement>'
 		+ '</ui:VisualElement>',
 		'.row { flex-direction: row; width: 100px; }'
-		+ '.c { width: 10em; margin-left: auto; flex-direction: diagonal; height: 5px; }',
+		+ '.c { width: 10em; padding-left: auto; flex-direction: diagonal; height: 5px; }',
 		Vector2(100, 100)
 	)
 	var kinds := _warn_kinds(r)
 	h.check(kinds.count("unsupported-value") >= 3,
-		"em/auto-margin/bad-direction diagnosed once each, got %s" % [kinds])
+		"em/auto-padding/bad-direction diagnosed once each, got %s" % [kinds])
 	# The em width fell back (auto -> intrinsic 0) rather than becoming 10px.
 	var a = _rect(r, "a")
 	h.check(a is Rect2 and a.size.x < 1.0, "em width not treated as px: %s" % a)
@@ -552,3 +552,31 @@ func test_padding_border_floor() -> void:
 		Vector2(200, 50)
 	)
 	_vec_eq(_rect(r, "a"), Rect2(0, 0, 10, 28), "cross: explicit height 10 floored to 28")
+
+
+# margin: auto (Yoga): auto margins take a line's free main-axis space
+# before justify-content, and center or push an item on the cross axis
+# (no stretch when a cross margin is auto).
+func test_auto_margins() -> void:
+	var r := _layout(
+		'<ui:VisualElement name="row" class="row">'
+		+ '<ui:VisualElement name="a" class="c"/>'
+		+ '<ui:VisualElement name="b" class="c push"/>'
+		+ '</ui:VisualElement>'
+		+ '<ui:VisualElement name="col" class="col">'
+		+ '<ui:VisualElement name="m" class="mid"/>'
+		+ '<ui:VisualElement name="e" class="end"/>'
+		+ '</ui:VisualElement>',
+		'.row { flex-direction: row; width: 300px; height: 50px; justify-content: center; }'
+		+ '.c { width: 50px; height: 20px; }'
+		+ '.push { margin-left: auto; }'
+		+ '.col { width: 300px; height: 200px; }'
+		+ '.mid { width: 100px; height: 40px; margin: 0 auto; }'
+		+ '.end { height: 40px; width: 60px; margin-left: auto; margin-top: auto; }',
+		Vector2(300, 400)
+	)
+	_vec_eq(_rect(r, "a"), Rect2(0, 0, 50, 20), "justify ignored: a at start")
+	_vec_eq(_rect(r, "b"), Rect2(250, 0, 50, 20), "auto margin-left pushes b to the end")
+	_vec_eq(_rect(r, "m"), Rect2(100, 0, 100, 40), "auto side margins center on the cross axis")
+	_vec_eq(_rect(r, "e"), Rect2(240, 160, 60, 40), "auto top takes the free main space; auto left pushes across")
+	h.check(not _warn_kinds(r).has("unsupported-value"), "margin auto is not diagnosed: %s" % [_warn_kinds(r)])
