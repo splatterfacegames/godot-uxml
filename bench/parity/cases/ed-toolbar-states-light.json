@@ -1,0 +1,1 @@
+{"width": 700, "height": 100, "actions": [{"op": "force-state", "target": "tb-hover", "states": ["hover"]}, {"op": "force-state", "target": "tb-active", "states": ["hover", "active"]}, {"op": "force-state", "target": "tt-hover", "states": ["hover"]}, {"op": "force-state", "target": "tm-hover", "states": ["hover"]}], "editor": "light"}

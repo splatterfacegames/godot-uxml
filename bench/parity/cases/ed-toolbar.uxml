@@ -1,0 +1,22 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <uie:Toolbar name="toolbar">
+    <uie:ToolbarButton name="tb" text="Button" />
+    <uie:ToolbarToggle name="tt" text="Toggle" />
+    <uie:ToolbarToggle name="tt-on" text="On" value="true" />
+    <uie:ToolbarMenu name="tm" text="Menu" />
+    <uie:ToolbarSpacer name="sp" />
+    <uie:ToolbarButton name="tb2" text="Two" />
+    <uie:ToolbarSpacer name="flex" />
+    <uie:ToolbarSearchField name="search" />
+  </uie:Toolbar>
+  <uie:Toolbar name="toolbar2">
+    <uie:ToolbarBreadcrumbs name="crumbs" />
+    <uie:ToolbarSpacer name="flex2" />
+    <uie:ToolbarPopupSearchField name="psearch" />
+  </uie:Toolbar>
+  <uie:Toolbar name="toolbar3">
+    <uie:ToolbarToggle name="tt-label" label="Label" />
+    <uie:ToolbarMenu name="tm-empty" />
+    <uie:ToolbarButton name="tb-disabled" text="Off" enabled="false" />
+  </uie:Toolbar>
+</ui:UXML>

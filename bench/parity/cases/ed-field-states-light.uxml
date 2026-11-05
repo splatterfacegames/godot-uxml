@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <uie:ColorField name="c-hover" label="Hover" value="#FF0000" />
+  <uie:ObjectField name="o-hover" label="Hover" />
+  <uie:MaskField name="m-hover" label="Hover" choices="A,B" value="1" />
+  <uie:CurveField name="cu-focus" label="Focus" />
+  <uie:GradientField name="g-focus" label="Focus" />
+  <ui:Button name="b-hover" text="Hover" />
+  <ui:TextField name="t-focus" label="Focus" value="x" />
+  <ui:Toggle name="tg-hover" label="Hover" />
+</ui:UXML>

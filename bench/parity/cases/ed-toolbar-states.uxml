@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <uie:Toolbar name="toolbar">
+    <uie:ToolbarButton name="tb-hover" text="Hover" />
+    <uie:ToolbarButton name="tb-active" text="Active" />
+    <uie:ToolbarToggle name="tt-hover" text="Hover" value="true" />
+    <uie:ToolbarMenu name="tm-hover" text="Menu" />
+    <uie:ToolbarSearchField name="search" value="abc" />
+  </uie:Toolbar>
+</ui:UXML>

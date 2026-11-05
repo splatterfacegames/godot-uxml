@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <uie:ColorField name="c-alpha" label="Color" value="#FF000080" />
+  <uie:ColorField name="c-opaque" label="Opaque" value="#3366CC" />
+  <uie:ColorField name="c-noalpha" label="No alpha" show-alpha="false" value="#FF000080" />
+  <uie:ColorField name="c-hdr" label="HDR" hdr="true" value="#00FF00" />
+  <uie:ColorField name="c-hdr-noalpha" hdr="true" show-alpha="false" value="#00FF0080" />
+  <uie:ColorField name="c-nodrop" label="No dropper" show-eye-dropper="false" value="#FFFFFF" />
+  <uie:ColorField name="c-disabled" label="Disabled" enabled="false" value="#808080" />
+</ui:UXML>

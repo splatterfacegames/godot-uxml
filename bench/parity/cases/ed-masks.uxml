@@ -1,0 +1,15 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <uie:EnumFlagsField name="flags" label="Flags" type="DumpFlags, Assembly-CSharp-Editor" value="Alpha, Gamma" />
+  <uie:EnumFlagsField name="flags-none" label="None" type="DumpFlags, Assembly-CSharp-Editor" value="None" />
+  <uie:MaskField name="mask" label="Mask" choices="One,Two,Three" value="5" />
+  <uie:MaskField name="mask-nothing" label="Nothing" choices="One,Two,Three" value="0" />
+  <uie:MaskField name="mask-all" label="Everything" choices="One,Two,Three" value="-1" />
+  <uie:MaskField name="mask-masks" label="Masks" choices="Low,High" />
+  <uie:MaskField name="mask-full" label="Full" choices="One,Two,Three" value="7" />
+  <uie:EnumFlagsField name="flags-ab" label="AB" type="DumpFlags, Assembly-CSharp-Editor" value="Alpha, Beta" />
+  <uie:LayerField name="layer" label="Layer" value="4" />
+  <uie:LayerMaskField name="layermask" label="Layer Mask" value="3" />
+  <uie:RenderingLayerMaskField name="rlayer" label="Rendering" />
+  <uie:TagField name="tag" label="Tag" value="Player" />
+  <uie:MaskField name="mask-disabled" label="Disabled" choices="One,Two" value="1" enabled="false" />
+</ui:UXML>

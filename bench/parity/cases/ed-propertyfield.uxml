@@ -1,0 +1,14 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <uie:PropertyField name="p-int" binding-path="intValue" />
+  <uie:PropertyField name="p-float" binding-path="floatValue" label="Custom" />
+  <uie:PropertyField name="p-string" binding-path="stringValue" />
+  <uie:PropertyField name="p-bool" binding-path="boolValue" />
+  <uie:PropertyField name="p-color" binding-path="colorValue" />
+  <uie:PropertyField name="p-v2" binding-path="vector2Value" />
+  <uie:PropertyField name="p-enum" binding-path="enumValue" />
+  <uie:PropertyField name="p-flags" binding-path="flagsValue" />
+  <uie:PropertyField name="p-curve" binding-path="curveValue" />
+  <uie:PropertyField name="p-gradient" binding-path="gradientValue" />
+  <uie:PropertyField name="p-tex" binding-path="textureValue" />
+  <uie:PropertyField name="p-layer" binding-path="layerMaskValue" />
+</ui:UXML>

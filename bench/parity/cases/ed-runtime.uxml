@@ -1,0 +1,17 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:Label name="label" text="A label" />
+  <ui:Button name="button" text="Button" />
+  <ui:Toggle name="toggle" label="Toggle" value="true" />
+  <ui:TextField name="text" label="Text" value="abc" />
+  <ui:IntegerField name="int" label="Integer" value="7" />
+  <ui:FloatField name="float" label="Float" value="1.5" />
+  <ui:DropdownField name="dropdown" label="Dropdown" choices="A,B" index="1" />
+  <ui:Vector3Field name="v3" label="Vector3" x="1" y="2" z="3" />
+  <ui:Foldout name="foldout" text="Foldout">
+    <ui:Label text="Inside" />
+  </ui:Foldout>
+  <ui:Slider name="slider" label="Slider" low-value="0" high-value="10" value="5" />
+  <ui:RadioButton name="radio" label="Radio" value="true" />
+  <ui:HelpBox name="help" text="Help" message-type="Info" />
+  <ui:ProgressBar name="progress" title="Progress" value="40" />
+</ui:UXML>

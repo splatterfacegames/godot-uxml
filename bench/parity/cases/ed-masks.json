@@ -1,0 +1,1 @@
+{"width": 400, "height": 320, "actions": [{"op": "set-prop", "target": "mask-masks", "prop": "choicesMasks", "value": [1, 8]}, {"op": "set-value", "target": "mask-masks", "value": 9}, {"op": "set-value", "target": "rlayer", "value": 1}], "editor": "dark"}
