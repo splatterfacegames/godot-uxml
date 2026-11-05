@@ -99,7 +99,7 @@ func _create(el: UxmlElement) -> Control:
 			return _create_image(el)
 		"Slider", "SliderInt":
 			return _create_slider(el, el.local == "SliderInt")
-		"ScrollView":
+		"ScrollView", "ListView":
 			return _create_scroll(el)
 		"Toggle":
 			var t := CheckBox.new()

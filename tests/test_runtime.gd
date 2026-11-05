@@ -1029,3 +1029,69 @@ func test_texture_stylebox_percent_insets() -> void:
 	h.check(sb2 is StyleBoxTexture and absf(sb2.content_margin_left - 40.0) < 1.0,
 		"resize re-resolves texture stylebox content margins")
 	_unload(doc)
+
+
+# Virtualized ListView: a fixed pool of template rows covers the viewport;
+# scrolling re-binds them to item indices instead of creating nodes.
+func test_list_view_virtualization() -> void:
+	var doc := UxmlDocument.new()
+	h.root.add_child(doc)
+	doc.size = Vector2(400, 600)
+	doc.load_document("Assets/UI/list.uxml", FIXTURE)
+	var bound := {}
+	doc.set_list_source("items", 10000, func(row: UxmlListRow, i: int):
+		bound[i] = true
+		(row.get_native("title") as Label).text = "Item %d" % i
+		(row.get_native("value") as Label).text = str(i * 2))
+	await h.process_frame
+	await h.process_frame
+	var rows: Array = doc.get_list_rows("items")
+	h.check(rows.size() >= 13 and rows.size() < 200,
+		"pool covers the viewport, not the item count (%d rows)" % rows.size())
+	h.eq(_warn_kinds(doc).has("unsupported-control"), false, "ListView is a known control")
+	h.eq(_warn_kinds(doc).has("duplicate-name"), false, "pooled rows do not report duplicate names")
+	var r0: UxmlListRow = rows[0]
+	h.eq(r0.index, 0, "slot 0 shows item 0")
+	h.eq((r0.get_native("title") as Label).text, "Item 0", "bind filled row 0")
+	h.check(bound.size() <= rows.size(), "only visible rows were bound (%d)" % bound.size())
+	var sc := doc.get_native("items") as ScrollContainer
+	var content := sc.get_node("uxml-scroll-content") as Control
+	h.check(absf(content.custom_minimum_size.y - 10000 * 24.0) < 1.0,
+		"content is as tall as every item (%s)" % content.custom_minimum_size.y)
+	var y0: float = (r0.get_element() as Control).position.y
+	# Scroll to item 100.
+	sc.scroll_vertical = 2400
+	await h.process_frame
+	await h.process_frame
+	# Rows recycle Unity-style: item i lives in slot i % pool, so rows still
+	# in view keep their items and only scrolled-out rows are re-bound.
+	var shown := {}
+	var r100: UxmlListRow = null
+	for r in rows:
+		var rr: UxmlListRow = r
+		if rr.index >= 0:
+			shown[rr.index] = true
+		if rr.index == 100:
+			r100 = rr
+	h.check(r100 != null, "after scrolling, a row shows item 100")
+	h.check(shown.has(100) and shown.has(100 + rows.size() - 1) and not shown.has(99),
+		"the pool covers items 100.. contiguously")
+	if r100 != null:
+		h.eq((r100.get_native("title") as Label).text, "Item 100", "item 100 bound into its row")
+		h.check(absf((r100.get_element() as Control).position.y - (y0 + 2400.0)) < 0.5,
+			"row placed at its item's position (%s)" % (r100.get_element() as Control).position.y)
+	h.check(r0.element.class_list().has("unity-collection-view__item"),
+		"rows carry Unity's item class")
+	var r1: UxmlListRow = rows[1]
+	h.check(r1.element.class_list().has("unity-collection-view__item--alternative-background"),
+		"odd items get the alternating-row class")
+	# Fewer items than slots: the rest are display:none.
+	doc.set_list_source("items", 3, func(row: UxmlListRow, i: int):
+		(row.get_native("title") as Label).text = "Few %d" % i)
+	await h.process_frame
+	await h.process_frame
+	h.eq((rows[0] as UxmlListRow).index, 0, "short list starts at item 0")
+	h.eq((rows[5].get_element() as Control).visible, false, "unused slots are hidden")
+	h.eq((rows[2].get_element() as Control).visible, true, "used slots are visible")
+	_unload(doc)
+

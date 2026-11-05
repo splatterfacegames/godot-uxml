@@ -938,7 +938,7 @@ func _layout_body(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 	if kids.is_empty():
 		_content_sizes[el] = Vector2.ZERO
 		return
-	if el.local == "ScrollView":
+	if el.local == "ScrollView" or el.local == "ListView":
 		_layout_scroll(el, content, pad, bor, kids)
 		return
 	_content_sizes[el] = _place(el, content, kids)

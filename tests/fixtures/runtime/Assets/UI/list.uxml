@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="list.uss" />
+  <ui:VisualElement name="screen" class="screen">
+    <ui:ListView name="items" class="items" fixed-item-height="24" item-template="list_row.uxml" show-alternating-row-backgrounds="ContentOnly" />
+  </ui:VisualElement>
+</ui:UXML>

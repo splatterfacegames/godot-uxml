@@ -1294,7 +1294,7 @@ impl Cascade {
     }
 
     pub fn is_scroll_view(&self, i: usize) -> bool {
-        self.els[i].local_name == "ScrollView"
+        self.els[i].local_name == "ScrollView" || self.els[i].local_name == "ListView"
     }
 
     pub fn element_var(&self, i: usize) -> Variant {

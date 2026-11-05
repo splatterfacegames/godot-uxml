@@ -1,0 +1,6 @@
+.screen { flex-grow: 1; }
+.items { height: 240px; }
+.row { flex-direction: row; flex-grow: 1; }
+.title { flex-grow: 1; }
+.value { width: 60px; }
+.unity-collection-view__item--alternative-background { background-color: #222; }

@@ -98,6 +98,13 @@ var _layout_records: Dictionary = {}  # flex layout's parsed-style cache
 var _layout_xcache: Dictionary = {}   # flex layout's validated cross-pass cache
 var _attr_dirty: Dictionary = {}      # UxmlElement -> true (set_attribute since last restyle)
 var _placed_force: Array = []         # elements re-applied this restyle (inset hooks must run)
+# Virtualized ListViews: list element -> {rows: Array[UxmlListRow], h, count,
+# bind, first, applied, alt}. Rows are pooled copies of the item template.
+var _lists: Dictionary = {}
+var _pooled: Dictionary = {}          # UxmlElement -> true (inside a pooled row)
+
+## Unity's default ListView fixed-item-height.
+const LIST_DEFAULT_ITEM_HEIGHT := 22.0
 var _scan_all := true                 # next restyle re-reads every element's attributes
 
 ## Computed-style properties that can change neither the flex geometry nor
@@ -245,6 +252,8 @@ func _clear() -> void:
 	_layout_xcache = {}
 	_attr_dirty = {}
 	_scan_all = true
+	_lists = {}
+	_pooled = {}
 	_doc = null
 	diagnostics = []
 
@@ -252,6 +261,7 @@ func _clear() -> void:
 ## Parent map, name index (first wins, duplicates diagnosed), runtime
 ## control tree, and signal wiring — everything keyed off the element tree.
 func _index() -> void:
+	_expand_lists()
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
@@ -259,6 +269,8 @@ func _index() -> void:
 			_parents[child] = el
 			stack.append(child)
 	for el in _doc.root.walk():
+		if _pooled.has(el):
+			continue  # pooled list rows repeat their template's names
 		var n = el.get_attribute("name")
 		if n == null:
 			continue
@@ -284,6 +296,10 @@ func _index() -> void:
 	_controls[_doc.root] = _root_box
 	for el in _controls:
 		_el_of[_controls[el]] = el
+	for lel in _lists:
+		var lsc := _natives.get(lel) as ScrollContainer
+		if lsc != null:
+			lsc.get_v_scroll_bar().value_changed.connect(_on_list_scrolled.bind(lel))
 	# Observable model: set_attribute() on any element restyles just it.
 	var on_changed := _on_model_changed
 	for el in _doc.root.walk():
@@ -670,6 +686,7 @@ func _do_layout() -> void:
 			(_scroll[el] as Control).custom_minimum_size = sizes.get(el, Vector2.ZERO)
 		_unsettled = _pending_fresh or bool(r[0])
 		_pending_fresh = false
+		_lists_after_layout()
 		return
 	var prev := _rects
 	var res := _compute_layout(size)
@@ -687,6 +704,7 @@ func _do_layout() -> void:
 	# previous rects (see _reapply).
 	_unsettled = _pending_fresh or prev != _rects
 	_pending_fresh = false
+	_lists_after_layout()
 
 
 ## Position/size one element's control from the last layout and inset its
@@ -807,6 +825,228 @@ func refresh() -> void:
 	_force_layout = true
 	_scan_all = true  # also picks up direct edits of UxmlElement.attributes
 	_queue_restyle()
+
+
+# ---------------------------------------------------------------------------
+# Virtualized ListView
+# ---------------------------------------------------------------------------
+
+## Give a ListView its items: `count` items, `bind.call(row: UxmlListRow,
+## index: int)` fills a pooled row for an item. Only enough rows to cover
+## the viewport exist; scrolling re-binds them. Call again whenever the
+## item count changes or every row must be re-bound.
+func set_list_source(list_name: String, count: int, bind: Callable) -> void:
+	var el: UxmlElement = _by_name.get(list_name)
+	if el == null or not _lists.has(el):
+		return
+	var info: Dictionary = _lists[el]
+	info["count"] = maxi(0, count)
+	info["bind"] = bind
+	_list_refresh(el, true)
+
+
+## Re-bind every visible row of a list (item data changed in place).
+func refresh_list(list_name: String) -> void:
+	var el: UxmlElement = _by_name.get(list_name)
+	if el != null and _lists.has(el):
+		_list_refresh(el, true)
+
+
+## The pooled rows of a list (for games that want to style them directly).
+func get_list_rows(list_name: String) -> Array:
+	var el: UxmlElement = _by_name.get(list_name)
+	return [] if el == null or not _lists.has(el) else _lists[el]["rows"]
+
+
+## Instantiate each ListView's row pool from its item-template, before the
+## cascade and controls exist, so rows are ordinary elements: author
+## selectors, var() and states all reach them.
+func _expand_lists() -> void:
+	var lists: Array = []
+	for el in _doc.root.walk():
+		if el.local == "ListView":
+			lists.append(el)
+	for el in lists:
+		var h := LIST_DEFAULT_ITEM_HEIGHT
+		var hv = el.get_attribute("fixed-item-height")
+		if hv != null:
+			var n := UssValues.parse_number(String(hv))
+			if is_nan(n) or n <= 0.0:
+				_rt_warnings.append(UxmlDiagnostic.make("unsupported-value",
+					'fixed-item-height="%s" is not a positive number; %s used' % [hv, LIST_DEFAULT_ITEM_HEIGHT],
+					_doc.source, el.open_tag_start, _doc.path))
+			else:
+				h = n
+		var vm = el.get_attribute("virtualization-method")
+		if vm != null and String(vm) != "FixedHeight":
+			_rt_warnings.append(UxmlDiagnostic.make("unsupported-value",
+				'virtualization-method="%s" is not supported; FixedHeight used' % vm,
+				_doc.source, el.open_tag_start, _doc.path))
+		var alt_v = el.get_attribute("show-alternating-row-backgrounds")
+		var alt: bool = alt_v != null and ["ContentOnly", "All", "true"].has(String(alt_v))
+		var template: Array = _load_item_template(el)
+		var pool := clampi(int(ceil(_list_pool_height() / h)) + 3, 3, 1000)
+		var rows: Array = []
+		for k in pool:
+			var row := UxmlElement.new()
+			row.prefix = el.prefix
+			row.local = "VisualElement"
+			row.open_tag_start = el.open_tag_start
+			row.open_tag_end = el.open_tag_end
+			row.attributes = [
+				{"name": "class", "value": "unity-collection-view__item unity-list-view__item", "offset": 0},
+				{"name": "style", "value": _row_style(h, false), "offset": 0},
+			]
+			for t in template:
+				row.children.append(_clone_element(t, el))
+			el.children.append(row)
+			for sub in row.walk():
+				_pooled[sub] = true
+			rows.append(UxmlListRow.new(self, row))
+		_lists[el] = {"rows": rows, "h": h, "count": 0, "bind": Callable(),
+			"first": 0, "applied": 0, "alt": alt}
+
+
+func _row_style(h: float, visible: bool) -> String:
+	return "height: %spx; flex-shrink: 0;%s" % [h, "" if visible else " display: none;"]
+
+
+## Rows must cover the tallest viewport a list can get: the document, the
+## window, or the screen, whichever is largest (at least 1080px).
+func _list_pool_height() -> float:
+	var hgt := maxf(size.y, 1080.0)
+	if is_inside_tree():
+		hgt = maxf(hgt, get_viewport_rect().size.y)
+	return maxf(hgt, float(DisplayServer.screen_get_size().y))
+
+
+## The item template's visual top-level elements; its <Style> sheets are
+## attached to the document scoped to the ListView.
+func _load_item_template(el: UxmlElement) -> Array:
+	var src = el.get_attribute("item-template")
+	if src == null or String(src).is_empty():
+		_rt_warnings.append(UxmlDiagnostic.make("malformed",
+			"<ListView> has no item-template; it shows no rows",
+			_doc.source, el.open_tag_start, _doc.path))
+		return []
+	var res := _resolver.resolve_text(String(src), _doc.path)
+	if not res["ok"]:
+		var d: Dictionary = res["diagnostic"].duplicate()
+		d["message"] = 'item-template "%s" could not be loaded: %s' % [src, d["message"]]
+		d["file"] = _doc.path
+		var lc := UxmlDiagnostic.line_col(_doc.source, el.open_tag_start)
+		d["offset"] = el.open_tag_start
+		d["line"] = lc.x
+		d["column"] = lc.y
+		_rt_warnings.append(d)
+		return []
+	var parsed := UxmlParser.new().parse(res["text"], res["path"])
+	_rt_warnings.append_array(parsed["warnings"])
+	var out: Array = []
+	for child in (parsed["root"] as UxmlElement).children:
+		if child.local == "Style":
+			var s = child.get_attribute("src")
+			if s != null and not String(s).is_empty():
+				UxmlLoader.attach_sheet(_doc, _resolver, String(s), res["path"], el)
+			continue
+		if UssControls.is_non_visual(child.local):
+			continue
+		out.append(child)
+	return out
+
+
+## Deep copy of a template element; diagnostics point at the ListView.
+func _clone_element(t: UxmlElement, at: UxmlElement) -> UxmlElement:
+	var c := UxmlElement.new()
+	c.prefix = t.prefix
+	c.local = t.local
+	c.open_tag_start = at.open_tag_start
+	c.open_tag_end = at.open_tag_end
+	for a in t.attributes:
+		c.attributes.append({"name": a["name"], "value": a["value"], "offset": 0})
+	for ch in t.children:
+		c.children.append(_clone_element(ch, at))
+	return c
+
+
+func _on_list_scrolled(_value: float, el: UxmlElement) -> void:
+	_list_refresh(el, false)
+
+
+## Map pool slots onto items from the current scroll position. Item i
+## lives in slot i % pool (Unity-style recycling): when scrolling, rows that
+## stay in view keep their item and only rows that scrolled out are re-bound
+## (all of them when `rebind_all`). Slots past the end are hidden.
+func _list_refresh(el: UxmlElement, rebind_all: bool) -> void:
+	var info: Dictionary = _lists[el]
+	var rows: Array = info["rows"]
+	var pool := rows.size()
+	var h: float = info["h"]
+	var count: int = info["count"]
+	var sc := _natives.get(el) as ScrollContainer
+	var scroll := 0.0 if sc == null else float(sc.scroll_vertical)
+	var first := clampi(int(floor(scroll / h)), 0, maxi(0, count - pool))
+	info["first"] = first
+	var bind: Callable = info["bind"]
+	var rebound := false
+	for k in pool:
+		var row: UxmlListRow = rows[k]
+		# The item in [first, first + pool) that maps to slot k.
+		var idx := first + posmod(k - first, pool)
+		var visible := idx < count
+		row.element.set_attribute("style", _row_style(h, visible))
+		if not visible:
+			row.index = -1
+			continue
+		if row.index != idx or rebind_all:
+			row.index = idx
+			if info["alt"]:
+				row.element.set_attribute("class",
+					"unity-collection-view__item unity-list-view__item"
+					+ (" unity-collection-view__item--alternative-background" if idx % 2 == 1 else ""))
+			if bind.is_valid():
+				bind.call(row, idx)
+			rebound = true
+	if rebound:
+		relayout()  # bound content may change rows' internal layout
+	_list_place(el)
+
+
+## Rows are laid out in pool-slot order (slot k at its layout y); each is
+## shifted by (item - slot) * h to its item's position, and the scroll
+## content is sized for every item.
+func _list_place(el: UxmlElement) -> void:
+	var info: Dictionary = _lists[el]
+	var h: float = info["h"]
+	var rows: Array = info["rows"]
+	var applied: Dictionary = info["applied_rows"] if info.has("applied_rows") else {}
+	for k in rows.size():
+		var row: UxmlListRow = rows[k]
+		var want := 0 if row.index < 0 else row.index - k
+		var have: int = applied.get(k, 0)
+		if want != have:
+			var c: Control = _controls.get(row.element)
+			if c != null:
+				c.position.y += (want - have) * h
+			applied[k] = want
+	info["applied_rows"] = applied
+	var content := _scroll.get(el) as Control
+	if content != null:
+		var cnt: int = info["count"]
+		var top := 0.0
+		if not rows.is_empty() and cnt > 0:
+			var c0: Control = _controls.get((rows[0] as UxmlListRow).element)
+			if c0 != null:
+				top = c0.position.y - float(applied.get(0, 0)) * h
+		content.custom_minimum_size = Vector2(
+			content.custom_minimum_size.x, top + cnt * h if cnt > 0 else 0.0)
+
+
+## A layout pass put every row back at its slot position.
+func _lists_after_layout() -> void:
+	for el in _lists:
+		_lists[el]["applied_rows"] = {}
+		_list_place(el)
 
 
 ## Re-lay out only — for content changes that cannot affect styling, e.g.

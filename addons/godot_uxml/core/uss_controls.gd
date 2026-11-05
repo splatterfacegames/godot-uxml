@@ -16,6 +16,7 @@ const IMPLICIT_CLASSES := {
 	"Button": ["unity-button"],
 	"Image": ["unity-image"],
 	"ScrollView": ["unity-scroll-view"],
+	"ListView": ["unity-list-view", "unity-collection-view"],
 	"Toggle": ["unity-toggle", "unity-base-field"],
 	"DropdownField": ["unity-dropdown-field", "unity-base-popup-field", "unity-base-field"],
 	"TextField": ["unity-text-field", "unity-base-text-field", "unity-base-field"],
@@ -62,6 +63,10 @@ const KNOWN_ATTRIBUTES := {
 	"multiline": true, "placeholder-text": true, "readonly": true,
 	"max-length": true, "mask-char": true,
 	"object-type": true, "type": true,
+	# ListView (virtualized; rows instantiated from item-template)
+	"fixed-item-height": true, "item-template": true,
+	"show-alternating-row-backgrounds": true, "virtualization-method": true,
+	"selection-type": true,
 }
 
 

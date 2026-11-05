@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement class="row">
+    <ui:Label name="title" class="title" text="?" />
+    <ui:Label name="value" class="value" text="" />
+  </ui:VisualElement>
+</ui:UXML>

@@ -79,6 +79,31 @@ static func load_source(
 	return doc
 
 
+## Load the stylesheet `src` (resolved against `from_path`) into an already
+## loaded document, scoped to `scope` — used for sheets that arrive after the
+## main load (ListView item templates). Diagnostics land in `doc.warnings`.
+static func attach_sheet(
+	doc: UxmlDocumentModel, resolver: UxmlResourceResolver,
+	src: String, from_path: String, scope: UxmlElement
+) -> void:
+	var res := resolver.resolve_text(src, from_path)
+	if not res["ok"]:
+		var diag := _rebase(res["diagnostic"], from_path)
+		diag["message"] = '<Style src="%s"> could not be resolved: %s' % [src, diag["message"]]
+		doc.warnings.append(diag)
+		return
+	var loaded := {}
+	for sh in doc.sheets:
+		if not String(sh["origin"]).is_empty():
+			loaded[sh["origin"]] = sh["index"]
+	var sheet_index: int
+	if loaded.has(res["path"]):
+		sheet_index = loaded[res["path"]]
+	else:
+		sheet_index = _load_sheet(res["text"], res["path"], scope, doc, resolver, loaded, [])
+	doc.style_roots.append({"sheet": sheet_index, "scope": scope})
+
+
 ## `<Style src="...">` elements in document order; each scopes its sheet to
 ## the element that contains it. A <Style> with a missing or empty src is a
 ## broken reference: it yields a `problem` entry so the loader can diagnose

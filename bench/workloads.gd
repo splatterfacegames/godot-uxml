@@ -29,6 +29,7 @@ func _initialize() -> void:
 	await _inventory()
 	await _dialog()
 	await _list()
+	await _listview()
 	print("")
 	print("| workload | op | n | median ms | p95 ms |")
 	print("| --- | --- | ---: | ---: | ---: |")
@@ -142,6 +143,40 @@ func _list() -> void:
 	_done(d)
 
 
+func _listview() -> void:
+	var name := "listview10k"
+	var bind := func(row: UxmlListRow, i: int):
+		(row.get_native("lname") as Label).text = "Entry %d" % i
+		(row.get_native("lval") as Label).text = str(i * 3)
+	var s := PackedFloat64Array()
+	var d: UxmlDocument
+	for i in _iters(15):
+		var t0 := Time.get_ticks_usec()
+		d = UxmlDocument.new()
+		root.add_child(d)
+		d.size = Vector2(1280, 720)
+		d.load_document("Assets/UI/wl_listview.uxml", ROOT)
+		d.set_list_source("list", 10000, bind)
+		d._restyle_now()
+		s.append((Time.get_ticks_usec() - t0) / 1000.0)
+		if i < _iters(15) - 1:
+			root.remove_child(d)
+			d.free()
+	_stats(name, "load + 10k items + first layout", s)
+	for k in 3:
+		await process_frame
+	var sc := d.get_native("list") as ScrollContainer
+	await _time_op(name, "scroll 3 rows (rebind + relayout)", d, func(i):
+		sc.scroll_vertical = (i * 72) % 200000, 120)
+	await _time_op(name, "hover row", d, func(i):
+		var rows: Array = d.get_list_rows("list")
+		var row: UxmlListRow = rows[i % 20]
+		row.element.set_attribute("class", "unity-collection-view__item unity-list-view__item" + (" hot" if i % 2 == 0 else "")))
+	await _time_op(name, "update all visible items (refresh_list)", d, func(i):
+		d.refresh_list("list"))
+	_done(d)
+
+
 # ---------------------------------------------------------------------------
 # Documents
 # ---------------------------------------------------------------------------
@@ -160,6 +195,16 @@ func _write_all() -> void:
 	_write(ui + "wl_inventory.uxml", _inventory_uxml())
 	_write(ui + "wl_dialog.uxml", _dialog_uxml())
 	_write(ui + "wl_list.uxml", _list_uxml())
+	_write(ui + "wl_listview.uxml", _head() + '  <ui:VisualElement name="screen" class="screen">
+    <ui:ListView name="list" class="list" fixed-item-height="24" item-template="wl_row.uxml" show-alternating-row-backgrounds="ContentOnly" />
+  </ui:VisualElement>
+</ui:UXML>')
+	_write(ui + "wl_row.uxml", '<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement class="lrow">
+    <ui:Label name="lname" class="lname" text="" />
+    <ui:Label name="lval" class="lval" text="" />
+  </ui:VisualElement>
+</ui:UXML>')
 
 
 func _head() -> String:
