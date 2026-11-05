@@ -78,8 +78,12 @@ static func configure(c: Control, field: UxmlElement) -> void:
 	var placeholder := UxmlParts._attr(field, "placeholder-text")
 	var ro := UxmlParts._bool(field, "readonly", false)
 	c.set("placeholder_text", placeholder)
-	c.set("editable", not ro)
+	# The authored editable state; the style applier forces false while the
+	# field is disabled and restores this value (uxml_editable).
 	c.set_meta("uxml_editable", not ro)
+	if not c.has_meta(&"uxml_configured"):
+		c.set_meta(&"uxml_configured", true)
+		c.set("editable", not ro)
 	if c is LineEdit:
 		var le := c as LineEdit
 		var ml := int(UxmlInputParts.num(field, "max-length", -1.0))

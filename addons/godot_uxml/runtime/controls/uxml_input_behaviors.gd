@@ -1124,6 +1124,9 @@ class TextBehavior extends InputBehavior:
 		sync_text("label", "label")
 		if _ed != null:
 			UxmlTextInput.configure(_ed, el)
+			# readonly after load: editable follows unless the field is
+			# disabled (the applier then restores the authored state).
+			_ed.set("editable", bool(_ed.get_meta("uxml_editable", true)) and not is_disabled())
 		_placeholder()
 
 	func native() -> Control:

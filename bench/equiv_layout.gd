@@ -1,7 +1,9 @@
 extends SceneTree
 ## Layout equivalence: optimized UxmlFlexLayout vs the original
 ## (bench/ref/ref_flex_layout.gd) on live documents with the real control
-## measurer, at several host sizes. Control sizes are snapshotted and
+## measurer, at several host sizes. The reference has no absolute
+## positioning, so the subtrees of elements with absolute children are not
+## compared (bench/equiv_runtime.gd compares those between the paths). Control sizes are snapshotted and
 ## restored between the two runs so both see identical measurer state.
 
 var _fails := 0
@@ -73,17 +75,47 @@ func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary,
 		b = d._compute_layout(host)
 		d._layout_warned = keep_w
 		d._rt_warnings = keep_rt
+		if d.pixel_grid:
+			# The runtime rounds to the pixel grid (UxmlDocument.pixel_grid);
+			# the reference result gets the same rounding rule.
+			a = a.duplicate()
+			a["rects"] = UxmlFlexLayout.round_to_pixel_grid(d._doc.root, a["rects"])
 	else:
 		b = UxmlFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w2, opts2)
 	_checks += 1
+	# The reference predates `position: absolute` (it lays absolute elements
+	# out as flex items, so they change intrinsic sizes too). A control with
+	# absolute parts (Slider, MinMaxSlider, ProgressBar) is no oracle case:
+	# its parts and its content size are left out.
+	var skip := {}
+	var skip_content := {}
+	for el in d._doc.root.walk():
+		var pe = d._styles.get(el, {}).get("position")
+		if pe == null or String(pe["value"]) != "absolute" or el.part_of == null:
+			continue
+		var owner: UxmlElement = el.part_of
+		while owner.part_of != null:
+			owner = owner.part_of
+		skip_content[owner] = true
+		for x in owner.walk():
+			if x != owner:
+				skip[x] = true
+				skip_content[x] = true
 	var bad := ""
 	for k in ["rects", "content_sizes", "insets"]:
-		if a[k] != b[k]:
-			bad = k
-			for el in a[k]:
-				if a[k][el] != b[k].get(el):
-					bad = "%s differs at <%s name=%s>: %s vs %s" % [k, el.local, el.get_attribute("name"), a[k][el], b[k].get(el)]
-					break
+		var keys := {}
+		for el in a[k]:
+			keys[el] = true
+		for el in b[k]:
+			keys[el] = true
+		for el in keys:
+			if skip.has(el) or (k == "content_sizes" and skip_content.has(el)):
+				continue
+			if a[k].get(el) != b[k].get(el):
+				bad = "%s differs at <%s name=%s>: %s vs %s" % [k, el.local, el.get_attribute("name"), a[k].get(el), b[k].get(el)]
+				break
+		if not bad.is_empty():
+			break
 	if bad.is_empty() and w1 != w2:
 		bad = "warnings differ: %s vs %s" % [w1, w2]
 	if bad.is_empty():

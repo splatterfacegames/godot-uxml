@@ -96,7 +96,7 @@ pixel rounding). The 28 input control cases: 25 match exactly.
 | inner ScrollView of a multiline TextField | `ctl-textfield-multiline` | `vertical-scroller-visibility` AlwaysVisible: Unity puts a ScrollView in the input; godot-uxml uses the multiline container (see design.md, "Input controls"). |
 | help box label width | `ctl-helpbox`, `ctl-styled-parts` | deliberate theme deviation: the label grows, because godot-uxml measures a wrapping Label without a max-content width. |
 | narrow field | `ctl-basefield` (150px container) | Unity clamps a text measure to the available width, so a long field label shrinks to its 150px minimum and the input collapses. godot-uxml measures the full text. |
-| text wider than its input | `ctl-numeric` (Hash128Field, 1px) | Unity lays out an overflowing input text 1px wider than its measure. |
+| text wider than the input | `ctl-numeric` (Hash128Field, 1px) | Unity lays out an overflowing input text 1px wider than the text measure. |
 | click position of the dragger | `ctl-slider-click` (0.2px) | Unity keeps the dragger at the clicked pixel when the value maps less than half a pixel away; the harness places the dragger from the value. |
 | `/Assets/…` image size | `absolute-import-assets`, `absolute-import-project` | resource resolution, not controls (unchanged from before). |
 
@@ -152,4 +152,4 @@ Unity.
   measure to the available width.
 - ScrollView, ListView, TreeView and TabView as part trees (the framework
   in docs/design.md, "Control parts"); the multiline TextField and the
-  dropdown menu then get their inner ScrollView.
+  dropdown menu then get the inner ScrollView.
