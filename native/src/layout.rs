@@ -8,6 +8,7 @@
 //! (bench/equiv_layout.gd, bench/equiv_runtime.gd).
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use godot::classes::{Control, Label, Object, StyleBox};
 use godot::prelude::*;
@@ -346,8 +347,8 @@ pub struct Pass<'a> {
     pad_m: Vec<Option<(f64, Edges)>>,
     mar_m: Vec<Option<(f64, Edges)>>,
     bor_m: Vec<Option<Edges>>,
-    kids_m: Vec<Option<Vec<usize>>>,
-    enum_m: Vec<[Option<String>; 7]>,
+    kids_m: Vec<Option<Rc<Vec<usize>>>>,
+    enum_m: Vec<[Option<&'static str>; 7]>,
     num_m: Vec<[Option<f64>; 2]>,
     sens_m: Vec<i32>,
     meas_m: Vec<Vec<MemoE>>,
@@ -357,7 +358,10 @@ pub struct Pass<'a> {
     vw: Vec<f64>,
     vset: Vec<HashMap<u64, (f64, Vector2)>>,
     vread: Vec<HashMap<u64, Vector2>>,
-    vl_m: Vec<Option<Vec<usize>>>,
+    vl_m: Vec<Option<Rc<Vec<usize>>>>,
+    sn_natural: StringName,
+    sn_normal: StringName,
+    sn_margins: StringName,
 }
 
 impl<'a> Pass<'a> {
@@ -400,6 +404,9 @@ impl<'a> Pass<'a> {
             vset: (0..n).map(|_| HashMap::new()).collect(),
             vread: (0..n).map(|_| HashMap::new()).collect(),
             vl_m: vec![None; n],
+            sn_natural: StringName::from("natural_size"),
+            sn_normal: StringName::from("normal"),
+            sn_margins: StringName::from("uxml_margins"),
         }
     }
 
@@ -429,8 +436,9 @@ impl<'a> Pass<'a> {
 
     // ------------------------------------------------------------- access
 
-    fn str_(&self, i: usize, e: usize, default: &str) -> String {
-        self.recs[i].enums[e - NP].clone().unwrap_or_else(|| default.to_string())
+    fn str_(&self, i: usize, e: usize, default: &'static str) -> &'a str {
+        let recs: &'a [Rec] = self.recs;
+        recs[i].enums[e - NP].as_deref().unwrap_or(default)
     }
 
     fn num(&mut self, i: usize, pid: usize, default: f64) -> f64 {
@@ -453,18 +461,21 @@ impl<'a> Pass<'a> {
         out
     }
 
-    fn enum_(&mut self, i: usize, e: usize, valid: &[&str], default: &str) -> String {
-        if let Some(v) = &self.enum_m[i][e - NP] {
-            return v.clone();
+    fn enum_(&mut self, i: usize, e: usize, valid: &'static [&'static str], default: &'static str) -> &'static str {
+        if let Some(v) = self.enum_m[i][e - NP] {
+            return v;
         }
-        let mut v = self.str_(i, e, default);
-        if !valid.contains(&v.as_str()) {
-            let name = LAYOUT_PROPS[e];
-            let m = format!("{name}: \"{v}\" is not supported; {default} used");
-            self.warn_once(i, name, m);
-            v = default.to_string();
-        }
-        self.enum_m[i][e - NP] = Some(v.clone());
+        let raw = self.str_(i, e, default);
+        let v = match valid.iter().find(|x| **x == raw) {
+            Some(x) => *x,
+            None => {
+                let name = LAYOUT_PROPS[e];
+                let m = format!("{name}: \"{raw}\" is not supported; {default} used");
+                self.warn_once(i, name, m);
+                default
+            }
+        };
+        self.enum_m[i][e - NP] = Some(v);
         v
     }
 
@@ -599,7 +610,7 @@ impl<'a> Pass<'a> {
         }
     }
 
-    fn flex_children(&mut self, i: usize) -> Vec<usize> {
+    fn flex_children(&mut self, i: usize) -> Rc<Vec<usize>> {
         if let Some(k) = &self.kids_m[i] {
             return k.clone();
         }
@@ -617,8 +628,9 @@ impl<'a> Pass<'a> {
             }
             out.push(ch);
         }
-        self.kids_m[i] = Some(out.clone());
-        out
+        let rc = Rc::new(out);
+        self.kids_m[i] = Some(rc.clone());
+        rc
     }
 
     fn is_row(&mut self, i: usize) -> bool {
@@ -649,7 +661,7 @@ impl<'a> Pass<'a> {
         s
     }
 
-    fn vlist(&mut self, i: usize) -> Vec<usize> {
+    fn vlist(&mut self, i: usize) -> Rc<Vec<usize>> {
         if let Some(v) = &self.vl_m[i] {
             return v.clone();
         }
@@ -658,10 +670,11 @@ impl<'a> Pass<'a> {
             out.push(i);
         }
         for ch in self.c.children(i) {
-            out.extend(self.vlist(ch));
+            out.extend(self.vlist(ch).iter().copied());
         }
-        self.vl_m[i] = Some(out.clone());
-        out
+        let rc = Rc::new(out);
+        self.vl_m[i] = Some(rc.clone());
+        rc
     }
 
     // ------------------------------------------------------------- measurer
@@ -676,16 +689,16 @@ impl<'a> Pass<'a> {
             cm.set_size(s);
         }
         let mut ms = match self.kinds[i] {
-            CtlKind::Boxed => c.clone().upcast::<Object>().get("natural_size").try_to::<Vector2>().unwrap_or(Vector2::ZERO),
+            CtlKind::Boxed => c.clone().upcast::<Object>().get(&self.sn_natural).try_to::<Vector2>().unwrap_or(Vector2::ZERO),
             _ => c.get_combined_minimum_size(),
         };
         if self.margins_m[i].is_none() {
             let mut m: Option<[f64; 4]> = None;
-            if c.has_theme_stylebox_override("normal") {
-                if let Some(sb) = c.get_theme_stylebox("normal") {
+            if c.has_theme_stylebox_override(&self.sn_normal) {
+                if let Some(sb) = c.get_theme_stylebox(&self.sn_normal) {
                     let sb: Gd<StyleBox> = sb;
-                    if sb.has_meta("uxml_margins") {
-                        let a = sb.get_meta("uxml_margins").to::<VarArray>();
+                    if sb.has_meta(&self.sn_margins) {
+                        let a = sb.get_meta(&self.sn_margins).to::<VarArray>();
                         let g = |k: usize| a.at(k).try_to::<f64>().unwrap_or(0.0);
                         m = Some([g(0), g(1), g(2), g(3)]);
                     }
@@ -795,7 +808,7 @@ impl<'a> Pass<'a> {
         let mut lines_main: Vec<f64> = vec![];
         let mut lines_cross: Vec<f64> = vec![];
         let (mut cur_main, mut cur_cross, mut cur_n) = (0.0f64, 0.0f64, 0usize);
-        for &ch in &kids {
+        for &ch in kids.iter() {
             let msz = self.measure(ch, cavail, -1.0);
             let m = self.margins(ch, d(cavail.x));
             let (o_main, o_cross) = if row {
@@ -849,10 +862,10 @@ impl<'a> Pass<'a> {
             return;
         }
         if self.c.is_scroll_view(i) {
-            self.layout_scroll(i, content, pad, bor, &kids);
+            self.layout_scroll(i, content, pad, bor, &kids[..]);
             return;
         }
-        let ext = self.place(i, content, &kids);
+        let ext = self.place(i, content, &kids[..]);
         self.out.content[i] = Some(ext);
     }
 
@@ -1018,7 +1031,7 @@ impl<'a> Pass<'a> {
         let apos_cross = comp(area.position, cross);
         let mut cpos = apos_cross;
         let mut cstep = gap_c;
-        match align_content.as_str() {
+        match align_content {
             "center" => cpos += free_c / 2.0,
             "flex-end" => cpos += free_c,
             "space-between" => cstep += if nlines > 1 { free_c / (nlines - 1) as f64 } else { 0.0 },
@@ -1056,7 +1069,7 @@ impl<'a> Pass<'a> {
             let free = am - used;
             let mut start = 0.0f64;
             let mut step = gap_m;
-            match justify.as_str() {
+            match justify {
                 "center" => start = free / 2.0,
                 "flex-end" => start = free,
                 "space-between" => step += if cnt > 1 { free / (cnt - 1) as f64 } else { 0.0 },
@@ -1091,17 +1104,17 @@ impl<'a> Pass<'a> {
             let lp = l_pos[li];
             for k in line_lo[li]..line_hi[li] {
                 let ch = kids[k];
-                let mut al = self.str_(ch, E_ALIGN_SELF, "auto");
+                let mut al: &str = self.str_(ch, E_ALIGN_SELF, "auto");
                 if al == "auto" {
-                    al = align_items.clone();
+                    al = align_items;
                 }
-                if !ALIGN.contains(&al.as_str()) {
+                if !ALIGN.contains(&al) {
                     self.warn_once(ch, "align-self", format!("align-self: \"{al}\" is not supported; flex-start used"));
-                    al = "flex-start".into();
+                    al = "flex-start";
                 }
                 if al == "baseline" {
                     self.warn_once(ch, "align-items", "baseline alignment is not supported; flex-start used".into());
-                    al = "flex-start".into();
+                    al = "flex-start";
                 }
                 let mct = it_mcross[k];
                 if al == "stretch" && self.dim(ch, cross_prop, ac) < 0.0 {
@@ -1113,7 +1126,7 @@ impl<'a> Pass<'a> {
                 }
                 let mc_start = it_m[k][cs_i];
                 let mc_end = it_m[k][ce_i];
-                it_cpos[k] = match al.as_str() {
+                it_cpos[k] = match al {
                     "center" => lp + (lc - it_cross[k] - mct) / 2.0 + mc_start,
                     "flex-end" => lp + lc - it_cross[k] - mc_end,
                     _ => lp + mc_start,
