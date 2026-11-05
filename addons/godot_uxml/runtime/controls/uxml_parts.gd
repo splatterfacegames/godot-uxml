@@ -316,7 +316,11 @@ static func _builder(local: String) -> Callable:
 		"ProgressBar":
 			return _build_progress_bar
 	# Input controls (Slider, TextField, numeric/composite/popup fields).
-	return UxmlInputParts.builder(local)
+	var ib := UxmlInputParts.builder(local)
+	if ib.is_valid():
+		return ib
+	# Editor controls (UnityEditor.UIElements): uxml_editor_parts.gd.
+	return UxmlEditorParts.builder(local)
 
 
 # ---------------------------------------------------------------------------

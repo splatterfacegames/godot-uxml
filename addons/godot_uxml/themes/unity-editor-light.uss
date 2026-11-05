@@ -1,0 +1,422 @@
+/*
+ * godot-uxml editor theme: colours of the light skin.
+ *
+ * Written by godot-uxml from values measured in Unity 6000.3.24f1 in an
+ * editor panel with the light editor skin (tools/unity-dump,
+ * bench/parity/unity/ed-*.json). Not Unity's stylesheet. UxmlTheme
+ * attaches this sheet after unity-editor.uss (UxmlDocument.editor_skin).
+ * The images are godot-uxml's own SVGs.
+ */
+
+UXML {
+  color: rgb(9, 9, 9);
+}
+
+.unity-base-field__label {
+  color: rgb(9, 9, 9);
+}
+
+.unity-base-field:focus:enabled > .unity-base-field__label {
+  color: rgb(0, 60, 136);
+}
+
+/* ---- Button ---------------------------------------------------------- */
+
+.unity-button {
+  color: rgb(9, 9, 9);
+  background-color: rgb(228, 228, 228);
+  border-color: rgb(178, 178, 178);
+  border-bottom-color: rgb(147, 147, 147);
+}
+
+.unity-button:hover:enabled {
+  background-color: rgb(236, 236, 236);
+}
+
+.unity-button:active:enabled,
+.unity-button:checked {
+  background-color: rgb(150, 195, 251);
+  border-color: rgb(147, 147, 147);
+  border-top-color: rgb(112, 112, 112);
+}
+
+.unity-button:focus:enabled {
+  border-color: rgb(1, 140, 255);
+}
+
+.unity-button-group__button:checked:hover {
+  background-color: rgb(140, 182, 234);
+}
+
+/* ---- Text fields ----------------------------------------------------- */
+
+.unity-base-text-field {
+  --unity-cursor-color: rgb(0, 0, 0);
+  --unity-selection-color: rgba(61, 128, 223, 0.65);
+}
+
+.unity-base-text-field__input {
+  color: rgb(9, 9, 9);
+  background-color: rgb(240, 240, 240);
+  border-color: rgb(183, 183, 183);
+  border-top-color: rgb(160, 160, 160);
+}
+
+.unity-base-text-field:hover:enabled > .unity-base-text-field__input,
+.unity-base-text-field__input:hover:enabled {
+  border-color: rgb(108, 108, 108);
+}
+
+.unity-base-text-field:focus:enabled > .unity-base-text-field__input,
+.unity-base-text-field__input:focus:enabled {
+  border-color: rgb(29, 80, 135);
+}
+
+.unity-base-text-field__input--placeholder {
+  color: rgb(115, 115, 115);
+}
+
+/* ---- Popup fields ---------------------------------------------------- */
+
+.unity-base-popup-field__input,
+.unity-enum-field__input {
+  background-color: rgb(223, 223, 223);
+  border-color: rgb(178, 178, 178);
+  border-bottom-color: rgb(147, 147, 147);
+}
+
+.unity-base-popup-field__text,
+.unity-enum-field__text {
+  color: rgb(9, 9, 9);
+}
+
+.unity-base-popup-field__arrow,
+.unity-enum-field__arrow {
+  background-image: url("editor-dropdown-light.svg");
+}
+
+.unity-base-popup-field:hover:enabled > .unity-base-popup-field__input,
+.unity-enum-field:hover:enabled > .unity-enum-field__input {
+  background-color: rgb(228, 228, 228);
+}
+
+.unity-base-popup-field:focus:enabled > .unity-base-popup-field__input,
+.unity-enum-field:focus:enabled > .unity-enum-field__input {
+  border-color: rgb(29, 80, 135);
+}
+
+/* ---- Toggle, RadioButton, Foldout ------------------------------------ */
+
+.unity-toggle__checkmark {
+  background-image: url("editor-toggle-light.svg");
+}
+
+.unity-toggle > .unity-toggle__input:checked > .unity-toggle__checkmark {
+  background-image: url("editor-toggle-on-light.svg");
+}
+
+.unity-radio-button__checkmark-background {
+  background-color: rgb(240, 240, 240);
+  border-color: rgb(183, 183, 183);
+}
+
+.unity-radio-button__checkmark {
+  background-color: rgb(85, 85, 85);
+}
+
+.unity-radio-button > .unity-radio-button__input:hover:enabled > .unity-radio-button__checkmark-background {
+  border-color: rgb(108, 108, 108);
+}
+
+.unity-radio-button > .unity-radio-button__input:focus:enabled > .unity-radio-button__checkmark-background {
+  border-color: rgb(29, 80, 135);
+}
+
+.unity-radio-button__input:focus:enabled > .unity-radio-button__text,
+.unity-foldout__toggle > .unity-toggle__input:focus:enabled > .unity-toggle__text {
+  color: rgb(0, 60, 136);
+}
+
+.unity-foldout__toggle > .unity-toggle__input > .unity-toggle__checkmark {
+  background-image: url("editor-foldout-light.svg");
+}
+
+.unity-foldout__toggle > .unity-toggle__input:checked > .unity-toggle__checkmark {
+  background-image: url("editor-foldout-on-light.svg");
+}
+
+/* ---- Slider, MinMaxSlider -------------------------------------------- */
+
+.unity-base-slider--horizontal .unity-base-slider__tracker,
+.unity-min-max-slider__tracker {
+  background-color: rgb(143, 143, 143);
+}
+
+.unity-base-slider--horizontal .unity-base-slider__dragger {
+  background-color: rgb(97, 97, 97);
+  border-color: rgb(97, 97, 97);
+}
+
+.unity-base-slider__dragger:hover:enabled,
+.unity-base-slider__input:focus:enabled .unity-base-slider__dragger {
+  background-color: rgb(79, 79, 79);
+}
+
+.unity-base-slider__dragger-border {
+  background-color: rgba(12, 108, 203, 0.5);
+}
+
+.unity-base-slider__fill {
+  background-color: rgb(79, 79, 79);
+}
+
+.unity-base-slider__tracker:disabled {
+  opacity: 1;
+  background-color: rgb(164, 164, 164);
+}
+
+.unity-base-slider__dragger:disabled {
+  opacity: 1;
+  background-color: rgb(155, 155, 155);
+  border-color: rgb(102, 102, 102);
+}
+
+.unity-base-slider__fill:disabled {
+  background-color: rgb(155, 155, 155);
+}
+
+.unity-min-max-slider__dragger,
+.unity-min-max-slider__min-thumb,
+.unity-min-max-slider__max-thumb {
+  background-color: rgb(97, 97, 97);
+}
+
+.unity-min-max-slider__min-thumb,
+.unity-min-max-slider__max-thumb {
+  border-color: rgb(178, 178, 178);
+}
+
+.unity-min-max-slider__min-thumb:hover,
+.unity-min-max-slider__max-thumb:hover {
+  background-color: rgb(79, 79, 79);
+}
+
+.unity-min-max-slider--movable,
+.unity-min-max-slider__min-thumb.unity-min-max-slider--movable,
+.unity-min-max-slider__max-thumb.unity-min-max-slider--movable {
+  border-color: rgb(1, 140, 255);
+  background-color: rgb(79, 79, 79);
+}
+
+/* ---- Box, PopupWindow, HelpBox, ProgressBar -------------------------- */
+
+.unity-box {
+  background-color: rgba(185, 185, 185, 0.9);
+  border-color: rgba(0, 0, 0, 0);
+}
+
+.unity-popup-window {
+  color: rgb(9, 9, 9);
+  background-color: rgba(179, 179, 179, 0.95);
+  border-color: rgb(102, 102, 102);
+}
+
+.unity-help-box {
+  background-color: rgb(202, 202, 202);
+  border-color: rgb(154, 154, 154);
+}
+
+.unity-help-box__icon--info {
+  background-image: url("info.svg");
+}
+
+.unity-help-box__icon--warning {
+  background-image: url("warning.svg");
+}
+
+.unity-help-box__icon--error {
+  background-image: url("error.svg");
+}
+
+.unity-progress-bar__progress {
+  background-color: rgb(78, 141, 211);
+}
+
+.unity-progress-bar__background {
+  background-color: rgb(182, 182, 182);
+  border-color: rgb(128, 128, 128);
+}
+
+.unity-progress-bar__title {
+  color: rgb(9, 9, 9);
+}
+
+/* ---- ColorField ------------------------------------------------------ */
+
+.unity-color-field__input {
+  border-color: rgb(183, 183, 183);
+}
+
+.unity-color-field:hover:enabled > .unity-color-field__input,
+.unity-color-field__input:hover:enabled {
+  border-color: rgb(108, 108, 108);
+}
+
+.unity-color-field__input:focus:enabled {
+  border-color: rgb(29, 80, 135);
+}
+
+.unity-color-field__hdr {
+  color: rgb(128, 128, 128);
+}
+
+.unity-color-field__color-container > .unity-base-field__label--mixed-value {
+  color: rgb(9, 9, 9);
+}
+
+.unity-color-field__color-container .unity-progress-bar__background {
+  background-color: rgb(0, 0, 0);
+}
+
+.unity-color-field__color-container .unity-progress-bar__progress {
+  background-color: rgb(255, 255, 255);
+}
+
+.unity-color-field__eyedropper {
+  background-color: rgb(222, 222, 222);
+  background-image: url("editor-eyedropper-light.svg");
+}
+
+.unity-color-field__eyedropper:hover:enabled {
+  background-color: rgb(204, 204, 204);
+}
+
+/* ---- CurveField, GradientField --------------------------------------- */
+
+.unity-curve-field__input {
+  background-color: rgb(86, 86, 86);
+  border-color: rgb(183, 183, 183);
+  --unity-curve-color: rgb(0, 255, 0);
+}
+
+.unity-curve-field:focus:enabled > .unity-curve-field__input,
+.unity-gradient-field:focus:enabled > .unity-gradient-field__input {
+  border-color: rgb(29, 80, 135);
+}
+
+.unity-gradient-field__input {
+  border-color: rgb(183, 183, 183);
+}
+
+/* ---- ObjectField ----------------------------------------------------- */
+
+.unity-object-field__input {
+  background-color: rgb(237, 237, 237);
+  border-color: rgb(176, 176, 176);
+}
+
+.unity-object-field:hover:enabled > .unity-object-field__input {
+  border-color: rgb(108, 108, 108);
+}
+
+.unity-object-field:focus:enabled > .unity-object-field__input {
+  border-color: rgb(29, 80, 135);
+}
+
+.unity-object-field-display__label {
+  color: rgb(9, 9, 9);
+}
+
+.unity-object-field__selector {
+  background-color: rgb(222, 222, 222);
+  background-image: url("editor-object-picker-light.svg");
+}
+
+.unity-object-field__selector:hover:enabled {
+  background-color: rgb(204, 204, 204);
+}
+
+/* ---- Toolbar --------------------------------------------------------- */
+
+.unity-toolbar {
+  background-color: rgb(203, 203, 203);
+  border-color: rgb(153, 153, 153);
+}
+
+.unity-toolbar-button,
+.unity-toolbar-toggle,
+.unity-toolbar-menu {
+  color: rgb(9, 9, 9);
+  background-color: rgb(203, 203, 203);
+  border-color: rgb(153, 153, 153);
+}
+
+.unity-toolbar-toggle:checked {
+  background-color: rgb(239, 239, 239);
+}
+
+.unity-toolbar-button:hover,
+.unity-toolbar-toggle:hover,
+.unity-toolbar-menu:hover {
+  color: rgb(9, 9, 9);
+  background-color: rgb(193, 193, 193);
+}
+
+.unity-toolbar-button:active,
+.unity-toolbar-menu:active {
+  color: rgb(9, 9, 9);
+  background-color: rgb(239, 239, 239);
+}
+
+.unity-toolbar-menu__arrow {
+  background-image: url("editor-dropdown-light.svg");
+}
+
+.unity-toolbar-breadcrumbs__item {
+  color: rgb(9, 9, 9);
+  background-image: url("editor-breadcrumb-mid-light.svg");
+}
+
+.unity-toolbar-breadcrumbs__first-item {
+  background-image: url("editor-breadcrumb-left-light.svg");
+}
+
+/* ---- Search fields --------------------------------------------------- */
+
+.unity-search-field-base {
+  background-color: rgb(240, 240, 240);
+  border-color: rgb(183, 183, 183);
+  border-top-color: rgb(160, 160, 160);
+}
+
+.unity-search-field-base:hover:enabled {
+  border-color: rgb(108, 108, 108);
+}
+
+.unity-search-field-base:focus:enabled,
+.unity-search-field-base:focus:hover:enabled {
+  border-color: rgb(29, 80, 135);
+}
+
+.unity-search-field-base__search-button,
+.unity-search-field-base__search-button:hover:enabled,
+.unity-search-field-base__cancel-button,
+.unity-search-field-base__cancel-button:hover:enabled {
+  background-color: rgba(0, 0, 0, 0);
+}
+
+.unity-search-field-base__search-button {
+  background-image: url("editor-search-light.svg");
+}
+
+.unity-search-field-base--popup > .unity-search-field-base__search-button {
+  background-image: url("editor-search-menu-light.svg");
+}
+
+.unity-search-field-base__cancel-button {
+  background-image: url("editor-clear-light.svg");
+}
+
+.unity-search-field-base__cancel-button--off {
+  background-image: none;
+}

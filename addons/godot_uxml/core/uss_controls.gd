@@ -72,6 +72,34 @@ const IMPLICIT_CLASSES := {
 	"TabView": ["unity-tab-view"],
 	"TwoPaneSplitView": ["unity-two-pane-split-view"],
 	"IMGUIContainer": ["unity-imgui-container"],
+	# ---- Editor controls (UnityEditor.UIElements, the `uie:` prefix):
+	# runtime/controls/uxml_editor_parts.gd. Measured in Unity 6000.3 in an
+	# editor panel (bench/parity/unity/ed-*.json). ObjectFieldDisplay,
+	# ObjectFieldSelector, BreadcrumbItem and PopupField`1 are part types.
+	"ColorField": ["unity-base-field", "unity-color-field"],
+	"CurveField": ["unity-base-field", "unity-curve-field"],
+	"GradientField": ["unity-base-field", "unity-gradient-field"],
+	"ObjectField": ["unity-base-field", "unity-object-field"],
+	"ObjectFieldDisplay": ["unity-object-field-display"],
+	"ObjectFieldSelector": [],
+	"EnumFlagsField": ["unity-base-field", "unity-base-popup-field", "unity-enum-flags-field"],
+	"MaskField": ["unity-base-field", "unity-base-popup-field", "unity-mask-field"],
+	"LayerField": ["unity-base-field", "unity-base-popup-field", "unity-popup-field", "unity-layer-field"],
+	"LayerMaskField": ["unity-base-field", "unity-base-popup-field", "unity-mask-field", "unity-layer-mask-field"],
+	"RenderingLayerMaskField": ["unity-base-field", "unity-base-popup-field", "unity-rendering-layer-mask-field"],
+	"TagField": ["unity-base-field", "unity-base-popup-field", "unity-popup-field", "unity-tag-field"],
+	"PopupField`1": ["unity-base-field", "unity-base-popup-field", "unity-popup-field"],
+	"Toolbar": ["unity-toolbar"],
+	"ToolbarButton": ["unity-text-element", "unity-toolbar-button"],
+	"ToolbarToggle": ["unity-base-field", "unity-toolbar-toggle"],
+	"ToolbarMenu": ["unity-text-element", "unity-toolbar-menu"],
+	"ToolbarSpacer": ["unity-toolbar-spacer"],
+	"ToolbarBreadcrumbs": ["unity-toolbar-breadcrumbs"],
+	"BreadcrumbItem": ["unity-text-element", "unity-toolbar-breadcrumbs__item"],
+	"ToolbarSearchField": ["unity-search-field-base", "unity-toolbar-search-field"],
+	"ToolbarPopupSearchField": ["unity-search-field-base", "unity-toolbar-search-field", "unity-search-field-base--popup"],
+	"PropertyField": ["unity-property-field"],
+	"InspectorElement": ["unity-inspector-element"],
 	# Column UxmlObjects of the multi-column views: the builder takes them
 	# out of the tree at load (UxmlContainerParts.read_columns).
 	"Columns": [],
@@ -172,6 +200,9 @@ const KNOWN_ATTRIBUTES := {
 	"x": true, "y": true, "z": true, "w": true, "h": true,
 	"cx": true, "cy": true, "cz": true, "ex": true, "ey": true, "ez": true,
 	"px": true, "py": true, "pz": true, "sx": true, "sy": true, "sz": true,
+	# Editor controls (runtime/controls/uxml_editor_parts.gd)
+	"show-alpha": true, "hdr": true, "show-eye-dropper": true, "color-space": true,
+	"allow-scene-objects": true, "choices-masks": true, "flex": true, "variant": true,
 }
 
 
