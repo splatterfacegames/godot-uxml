@@ -6,6 +6,7 @@ use godot::prelude::*;
 
 mod cascade;
 mod layout;
+mod parse;
 
 struct UxmlNativeExtension;
 

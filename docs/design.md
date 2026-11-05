@@ -471,7 +471,11 @@ install the Windows x64 binary with `python native/build.py` (release; the
 `.gdextension` maps both editor and export builds to the optimized
 library). `UssCascade` delegates to `UxmlNativeCascade` when
 `ClassDB.class_exists("UxmlNativeCascade")`; `UssCascade.use_native` and
-`UxmlDocument.use_native_layout` force the GDScript path. Rule compilation
+`UxmlDocument.use_native_layout` force the GDScript path. `UxmlParser` and
+`UssParser` scan natively (`UxmlNativeParser`) and build objects and
+diagnostics from the result with their own code; `use_native` on each
+forces the GDScript scanners (`bench/equiv_parse.gd` compares both,
+including on fuzzed input). Rule compilation
 and its diagnostics, `var()` substitution, shorthand expansion and inline
 style parsing stay in GDScript (the native core calls back and memoizes),
 so those semantics are shared by construction. `bench/equiv*.gd` (with

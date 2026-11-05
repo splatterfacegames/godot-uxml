@@ -24,12 +24,22 @@ var _pos: int = 0
 var _warnings: Array = []
 
 
+## Parse with the native core (UxmlNativeParser) when the extension is
+## loaded; this GDScript parser stays the reference and the fallback.
+static var use_native := true
+
+
 ## Returns {items: Array, warnings: Array}.
 func parse(source: String, file: String = "") -> Dictionary:
 	_src = source
 	_file = file
 	_pos = 0
 	_warnings = []
+	if use_native and ClassDB.class_exists("UxmlNativeParser"):
+		var r: Array = ClassDB.class_call_static("UxmlNativeParser", "parse_uss", source)
+		for w in r[1]:
+			_warn(w[0], w[1], w[2])
+		return {"items": r[0], "warnings": _warnings}
 	var items: Array = []
 	while true:
 		_skip_trivia()

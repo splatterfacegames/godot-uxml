@@ -222,9 +222,13 @@ RTX 5060 Ti, vsync off): empty scene 0.34 ms/frame; godot-uxml big document
 batched/GPU box renderer was not built: it would save at most a few tenths
 of a millisecond per frame on this document.
 
-Where load time goes (big document, native core): parse UXML + sheets 93
-ms (GDScript), build 1,530 controls 72 ms, wire signals 21 ms, cascade
-setup 19 ms, full native cascade 58 ms, apply 82 ms. Node creation is
-engine-bound (the native `.tscn` instantiation itself is ~270 ms), so the
-remaining removable cost is parsing.
+Where load time went (big document, before native parsing): parse UXML +
+sheets 93 ms, build 1,530 controls 72 ms, wire signals 21 ms, cascade setup
+19 ms, full native cascade 58 ms, apply 82 ms. Node creation is
+engine-bound (the native `.tscn` instantiation itself is ~270 ms), so an
+import-time baked scene would not beat it by much; parsing was the large
+removable cost. With native scanners: UXML parse 62 -> 23 ms, USS parse
+(3 sheets) 25.5 -> 5.2 ms, `load_document` (big) 446 -> 392 ms
+(`bench/equiv_parse.gd`: 2,004 comparisons incl. fuzzed input, 0
+differences).
 

@@ -23,6 +23,11 @@ var _next_id: int = 0
 var _warnings: Array = []
 
 
+## Scan with the native core (UxmlNativeParser) when the extension is
+## loaded; this GDScript scanner stays the reference and the fallback.
+static var use_native := true
+
+
 ## Returns {root: UxmlElement, warnings: Array[Dictionary]}.
 func parse(source: String, file: String = "") -> Dictionary:
 	_src = source
@@ -30,6 +35,8 @@ func parse(source: String, file: String = "") -> Dictionary:
 	_pos = 0
 	_next_id = 0
 	_warnings = []
+	if use_native and ClassDB.class_exists("UxmlNativeParser"):
+		return _parse_native(source)
 
 	_seek_tag()
 	var root: UxmlElement
@@ -57,6 +64,56 @@ func parse(source: String, file: String = "") -> Dictionary:
 			_parse_element() # consume and discard
 		else:
 			_pos += 1
+	return {"root": root, "warnings": _warnings}
+
+
+## The native scanner returns the kept tree as flat preorder arrays and the
+## problems in order; objects and diagnostics are built here exactly as the
+## GDScript scanner builds them. Values with '&' come back raw and are
+## decoded by decode_entities.
+func _parse_native(source: String) -> Dictionary:
+	var d: Dictionary = ClassDB.class_call_static("UxmlNativeParser", "scan_uxml", source)
+	var local: PackedStringArray = d["local"]
+	var prefix: PackedStringArray = d["prefix"]
+	var parent: PackedInt32Array = d["parent"]
+	var ids: PackedInt32Array = d["id"]
+	var os: PackedInt32Array = d["open_start"]
+	var oe: PackedInt32Array = d["open_end"]
+	var se: PackedInt32Array = d["source_end"]
+	var els: Array = []
+	els.resize(local.size())
+	for k in local.size():
+		var e := UxmlElement.new()
+		e.id = ids[k]
+		e.prefix = prefix[k]
+		e.local = local[k]
+		e.open_tag_start = os[k]
+		e.open_tag_end = oe[k]
+		e.source_end = se[k]
+		els[k] = e
+		if parent[k] >= 0:
+			(els[parent[k]] as UxmlElement).children.append(e)
+	var ael: PackedInt32Array = d["attr_el"]
+	var an: PackedStringArray = d["attr_name"]
+	var av: PackedStringArray = d["attr_value"]
+	var ar: PackedByteArray = d["attr_raw"]
+	var ao: PackedInt32Array = d["attr_offset"]
+	for a in ael.size():
+		var v: String = av[a]
+		if ar[a] != 0:
+			v = decode_entities(v)
+		(els[ael[a]] as UxmlElement).attributes.append({"name": an[a], "value": v, "offset": ao[a]})
+	var wm: PackedStringArray = d["w_msg"]
+	var ws: PackedInt32Array = d["w_start"]
+	var we: PackedInt32Array = d["w_end"]
+	for w in wm.size():
+		_warn(wm[w], ws[w], we[w])
+	var root: UxmlElement
+	if d["synth_root"]:
+		root = UxmlElement.new()
+		root.id = 0
+	else:
+		root = els[0]
 	return {"root": root, "warnings": _warnings}
 
 
