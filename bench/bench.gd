@@ -280,6 +280,35 @@ func _steady(doc: UxmlDocument) -> void:
 		return dt, 60, 6000.0)
 	await _time_async("idle restyle (no change)", func() -> float:
 		return await op.call(func(): pass), 60, 6000.0)
+	if doc.has_method("advance_transitions"):
+		# One element animating (long linear transitions, stepped by hand):
+		# the per-frame cost of a running USS transition — paint-only
+		# (background-color) and layout-affecting (width).
+		doc.transitions_manual = true
+		for spec in [
+			["transition frame (bg color)", "card-7-ok",
+				"transition: background-color 1000s linear; background-color: rgb(10, 20, 30);",
+				"transition: background-color 1000s linear; background-color: rgb(250, 200, 100);"],
+			["transition frame (width)", "card-8",
+				"transition: width 1000s linear; width: 100px;",
+				"transition: width 1000s linear; width: 300px;"],
+		]:
+			var m := doc.get_element_model(spec[1])
+			var orig = m.get_attribute("style")
+			m.set_attribute("style", spec[2])
+			doc._restyle_now()
+			m.set_attribute("style", spec[3])
+			doc._restyle_now()
+			await process_frame
+			await _time_async(spec[0], func() -> float:
+				var t0 := Time.get_ticks_usec()
+				doc.advance_transitions(0.016)
+				var dt := (Time.get_ticks_usec() - t0) / 1000.0
+				await process_frame
+				return dt, 120, 4000.0)
+			m.set_attribute("style", "" if orig == null else String(orig))
+			doc._restyle_now()
+		doc.transitions_manual = false
 	# Leave the document clean.
 	doc.size = Vector2(1280, 800)
 

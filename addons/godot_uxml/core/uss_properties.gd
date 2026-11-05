@@ -76,7 +76,113 @@ const SUPPORTED := {
 	"-unity-background-image-tint-color": true,
 	"-unity-text-outline": true,
 	"-unity-text-outline-width": true, "-unity-text-outline-color": true,
+	# transitions (runtime/uss_transitions.gd)
+	"transition": true, "transition-property": true, "transition-duration": true,
+	"transition-delay": true, "transition-timing-function": true,
 }
+
+## Unity's EasingMode names, in enum order (index 0, `ease`, is also the
+## value of an unknown name).
+const EASING_MODES := [
+	"ease", "ease-in", "ease-out", "ease-in-out", "linear",
+	"ease-in-sine", "ease-out-sine", "ease-in-out-sine",
+	"ease-in-cubic", "ease-out-cubic", "ease-in-out-cubic",
+	"ease-in-circ", "ease-out-circ", "ease-in-out-circ",
+	"ease-in-elastic", "ease-out-elastic", "ease-in-out-elastic",
+	"ease-in-back", "ease-out-back", "ease-in-out-back",
+	"ease-in-bounce", "ease-out-bounce", "ease-in-out-bounce",
+]
+
+const _CSS_KEYWORDS := ["inherit", "initial", "auto", "unset", "true", "false", "none"]
+static var _re_time := RegEx.create_from_string("^-?(\\d+\\.?\\d*|\\.\\d+)(s|ms)$")
+
+
+## `transition: <property> <duration> <delay> <easing>, ...` -> the four
+## comma-separated longhand lists, following Unity's
+## ShorthandApplicator.CompileTransition: per item, the first time is the
+## duration and the second the delay; an easing name is the timing
+## function, any other identifier the property; `none` is valid only as the
+## single first item. An invalid value sets all four longhands to their
+## initial values (all / 0s / 0s / ease) instead of being dropped.
+static func _expand_transition(value: String) -> Array:
+	var v := value.strip_edges()
+	var props := PackedStringArray()
+	var durs := PackedStringArray()
+	var delays := PackedStringArray()
+	var easings := PackedStringArray()
+	var valid := not (v == "initial" or v == "unset" or v == "inherit" or v.is_empty())
+	if valid:
+		var groups := v.split(",")
+		var none_found := false
+		var count := 0
+		for g in groups.size():
+			if none_found:
+				valid = false
+				break
+			var tokens := split_value(groups[g])
+			if tokens.is_empty() and g == groups.size() - 1 and g > 0:
+				break  # trailing comma: Unity's reader stops at the end of input
+			var p := "all"
+			var d := "0s"
+			var dl := "0s"
+			var e := "ease"
+			var has_p := false
+			var has_d := false
+			var has_dl := false
+			var has_e := false
+			for tok in tokens:
+				var t := String(tok)
+				var lt := t.to_lower()
+				if _CSS_KEYWORDS.has(lt):
+					if lt == "none" and count == 0:
+						none_found = true
+						has_p = true
+						p = "none"
+					else:
+						valid = false
+				elif _re_time.search(lt) != null:
+					if not has_d:
+						has_d = true
+						d = t
+					elif not has_dl:
+						has_dl = true
+						dl = t
+					else:
+						valid = false
+				elif not has_e and EASING_MODES.has(lt):
+					has_e = true
+					e = lt
+				elif not has_p and _is_ident(t):
+					has_p = true
+					p = t
+				else:
+					valid = false
+			props.append(p)
+			durs.append(d)
+			delays.append(dl)
+			easings.append(e)
+			count += 1
+			if not valid:
+				break
+	if not valid:
+		props = PackedStringArray(["all"])
+		durs = PackedStringArray(["0s"])
+		delays = PackedStringArray(["0s"])
+		easings = PackedStringArray(["ease"])
+	return [
+		["transition-property", ", ".join(props)],
+		["transition-duration", ", ".join(durs)],
+		["transition-delay", ", ".join(delays)],
+		["transition-timing-function", ", ".join(easings)],
+	]
+
+
+static func _is_ident(t: String) -> bool:
+	if t.is_empty():
+		return false
+	var c := t.unicode_at(0)
+	# letters, '-' or '_' start an identifier; digits do not.
+	return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 45 or c == 95
 
 ## Shorthand -> longhands. Radii run clockwise from the top-left corner,
 ## not top/right/bottom/left.
@@ -194,6 +300,9 @@ static func expand_shorthand(property: String, value: String) -> Array:
 			return []
 		var col: String = parts[1] if parts.size() > 1 else parts[0]
 		return [["row-gap", parts[0]], ["column-gap", col]]
+
+	if property == "transition":
+		return _expand_transition(value)
 
 	# -unity-text-outline: <width> <color> (either order, either optional).
 	if property == "-unity-text-outline":

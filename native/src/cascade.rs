@@ -199,6 +199,11 @@ pub struct Cascade {
     lay_ver: Vec<u64>,
     computed_once: bool,
     next_cid: i64,
+    // computed overrides (USS transitions): index -> {prop: entry}; the
+    // pre-override result per overridden index; indices to recompute
+    ov: HashMap<usize, VarDictionary>,
+    tgt: HashMap<usize, VarDictionary>,
+    ov_force: Vec<usize>,
     // scratch
     k_name: Variant,
     k_value: Variant,
@@ -468,6 +473,9 @@ impl Cascade {
             lay_ver: vec![],
             computed_once: false,
             next_cid: 1,
+            ov: HashMap::new(),
+            tgt: HashMap::new(),
+            ov_force: vec![],
             k_name: "name".to_variant(),
             k_value: "value".to_variant(),
             k_origin: "origin".to_variant(),
@@ -720,6 +728,7 @@ impl Cascade {
         styles: &mut VarDictionary,
         scan_all: bool,
         dirty: &PackedInt32Array,
+        only_forced: bool,
     ) -> PackedInt32Array {
         let n = self.els.len();
         let mut global = 0i32;
@@ -776,9 +785,36 @@ impl Cascade {
         }
         let mut changed = PackedInt32Array::new();
         self.last_old = VarArray::new();
+        let mut forced = vec![false; if self.ov_force.is_empty() { 0 } else { n }];
+        for &f in &self.ov_force {
+            if f < n {
+                forced[f] = true;
+            }
+        }
+        let has_forced = !self.ov_force.is_empty();
+        // Only overrides changed (UssCascade.update `only_forced`): visit
+        // just the subtrees of the elements whose overrides changed.
+        let use_order = only_forced && self.computed_once && !force;
+        let mut order: Vec<usize> = vec![];
+        if use_order {
+            let mut fs = self.ov_force.clone();
+            fs.sort_unstable();
+            fs.dedup();
+            let mut hi = 0usize;
+            for f in fs {
+                if f >= n || f < hi {
+                    continue;
+                }
+                hi = self.end[f] as usize;
+                order.extend(f..hi);
+            }
+        }
+        self.ov_force.clear();
         let mut inh_dirty = vec![false; n];
         let mut anc_until: i32 = -1;
-        for i in 0..n {
+        let total = if use_order { order.len() } else { n };
+        for k in 0..total {
+            let i = if use_order { order[k] } else { k };
             // Cascade inputs: first class/name/style/enabled attribute —
             // re-read only for dirty elements unless scanning everything.
             let mut c = Variant::nil();
@@ -870,17 +906,24 @@ impl Cascade {
                 self.anc_key[i] = ak;
             }
             self.bloom[i] = if p >= 0 { self.bloom[p as usize] | self.own_bloom[p as usize] } else { 0 };
-            if !own && !inh_dirty[i] && (i as i32) >= anc_until {
+            if !own && !inh_dirty[i] && (i as i32) >= anc_until && !(has_forced && forced[i]) {
                 continue;
             }
             let el_var = self.els[i].var.clone();
             let old = styles.get(&el_var);
             let old_fc = self.fc_dict[i].clone();
+            let old_t = if self.tgt.is_empty() { None } else { self.tgt.get(&i).cloned() };
             let new_dict = self.compute(i);
             match old {
                 Some(ov) if !full => {
                     let od = ov.to::<VarDictionary>();
                     if od != new_dict {
+                        changed.push(i as i32);
+                        self.last_old.push(&ov);
+                        styles.set(&el_var, &new_dict);
+                    } else if old_t.is_some() && old_t.as_ref() != self.tgt.get(&i) {
+                        // Overridden element whose own cascade result changed
+                        // under an unchanged override (transition retarget).
                         changed.push(i as i32);
                         self.last_old.push(&ov);
                         styles.set(&el_var, &new_dict);
@@ -1211,6 +1254,33 @@ impl Cascade {
         }
 
         self.warn[i] = warns;
+        // Computed overrides (transitions) replace the cascade result last,
+        // so inheritance, layout values and the output all see them.
+        if !self.ov.is_empty() {
+            if let Some(ov) = self.ov.get(&i).cloned() {
+                self.tgt.insert(i, computed.clone());
+                computed = computed.duplicate_shallow();
+                for (k, e) in ov.iter_shared() {
+                    computed.set(&k, &e);
+                    let pid = self.pid(&gs(&k));
+                    let ed = e.try_to::<VarDictionary>().unwrap_or_default();
+                    let item = Item {
+                        pid,
+                        value: ed.get(&self.k_value).unwrap_or_default(),
+                        origin: ed.get(&self.k_origin).unwrap_or_default(),
+                        entry: e.clone(),
+                    };
+                    match comp.iter_mut().find(|it| it.pid == pid) {
+                        Some(it) => *it = item,
+                        None => comp.push(item),
+                    }
+                }
+            } else if !self.tgt.is_empty() {
+                self.tgt.remove(&i);
+            }
+        } else if !self.tgt.is_empty() {
+            self.tgt.remove(&i);
+        }
         // Layout-relevant values for the native flex pass (versioned).
         let mut lv: Vec<Option<GString>> = vec![None; crate::layout::LAYOUT_PROPS.len()];
         for it in &comp {
@@ -1275,6 +1345,26 @@ impl Cascade {
 
     pub fn len(&self) -> usize {
         self.els.len()
+    }
+
+    /// Computed overrides for element i (empty clears them); see
+    /// UssCascade.set_override.
+    pub fn set_override(&mut self, i: usize, entries: VarDictionary) {
+        if i >= self.els.len() {
+            return;
+        }
+        if entries.is_empty() {
+            if self.ov.remove(&i).is_none() {
+                return;
+            }
+        } else {
+            self.ov.insert(i, entries);
+        }
+        self.ov_force.push(i);
+    }
+
+    pub fn target_style(&self, i: usize) -> Option<VarDictionary> {
+        self.tgt.get(&i).cloned()
     }
 
     /// Direct children (preorder indices) of element i.
@@ -1395,9 +1485,10 @@ impl UxmlNativeCascade {
         mut styles: VarDictionary,
         scan_all: bool,
         dirty: PackedInt32Array,
+        only_forced: bool,
     ) -> PackedInt32Array {
         match self.inner.as_mut() {
-            Some(c) => c.update(&options, force, &key_bits, &mut styles, scan_all, &dirty),
+            Some(c) => c.update(&options, force, &key_bits, &mut styles, scan_all, &dirty, only_forced),
             None => PackedInt32Array::new(),
         }
     }
@@ -1502,6 +1593,26 @@ impl UxmlNativeCascade {
         let out = crate::layout::Pass::new(c, io, &self.recs.recs, scroll_bar_width, warned, warnings).run(host);
         let (r, cs, ins) = out.to_dicts(c);
         args(&[r.to_variant(), cs.to_variant(), ins.to_variant()])
+    }
+
+    /// Computed overrides for preorder index `i` ({property: {value,
+    /// origin}}; empty clears them), applied on the next update.
+    #[func]
+    fn set_override(&mut self, i: i64, entries: VarDictionary) {
+        if let Some(c) = self.inner.as_mut() {
+            if i >= 0 {
+                c.set_override(i as usize, entries);
+            }
+        }
+    }
+
+    /// The pre-override computed style of an overridden element, or null.
+    #[func]
+    fn target_style(&self, i: i64) -> Variant {
+        match self.inner.as_ref().and_then(|c| if i >= 0 { c.target_style(i as usize) } else { None }) {
+            Some(d) => d.to_variant(),
+            None => Variant::nil(),
+        }
     }
 
     #[func]

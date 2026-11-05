@@ -160,8 +160,12 @@ godot --path . --script res://examples/minimal/minimal.gd
   justification, gap), margins, padding, borders, `px` and `%` lengths.
 - **Paint:** background color and image, 9-slice backgrounds, image tint,
   border colors and radii, fonts, text color and text outline.
+- **Transitions:** USS transitions with Unity 6 semantics: all
+  `transition-*` properties and the `transition` shorthand, Unity's
+  easing curves, delays, interrupted and shortened reversed transitions,
+  and run/start/end/cancel signals.
 
-Out of scope, with a diagnostic: UXML templates, `@media`, transitions,
+Out of scope, with a diagnostic: UXML templates, `@media`,
 transforms, absolute positioning, `em`/`rem`/`vh` units, `+` and `~`
 combinators and attribute selectors. The full list is in
 [docs/design.md](docs/design.md).

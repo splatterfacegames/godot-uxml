@@ -101,6 +101,15 @@ var _computed_once := false
 ## Previous computed Dictionary for each index update() returned (aligned).
 var last_old: Array = []
 var _opt_warnings: Array = []
+# Computed overrides (USS transitions, runtime/uss_transitions.gd): per
+# preorder index, {property: {value, origin}} entries written over the
+# cascade result at the end of _compute, so inheritance, layout and the
+# style applier all see the animated value. _tgt keeps the result before
+# the overrides (the transition target); _ov_force lists the indices whose
+# overrides changed since the last update (recomputed even when clean).
+var _ov := {}
+var _tgt := {}
+var _ov_force := PackedInt32Array()
 
 ## UxmlElement -> computed style (property -> {value, origin}), preorder.
 var styles := {}
@@ -551,12 +560,17 @@ func _attr_refs(el: UxmlElement) -> Array:
 ## any model edit); a PackedInt32Array of preorder indices re-reads only
 ## those, everything else keeps the values read last time (the runtime
 ## passes the elements whose UxmlElement.changed fired).
-func update(options: Dictionary = {}, force: bool = false, dirty = null) -> PackedInt32Array:
+##
+## `only_forced`: the caller guarantees that nothing but computed overrides
+## changed since the last update (same options, no attribute edits) — only
+## the subtrees of elements whose overrides changed are visited, so a
+## transition frame does not scan the whole document.
+func update(options: Dictionary = {}, force: bool = false, dirty = null, only_forced: bool = false) -> PackedInt32Array:
 	if _native != null:
 		_opt_warnings = []
 		var kb := _key_bits(options)
 		var dl := PackedInt32Array() if dirty == null else PackedInt32Array(dirty)
-		var ch: PackedInt32Array = _native.call("update", options, force, kb, styles, dirty == null, dl)
+		var ch: PackedInt32Array = _native.call("update", options, force, kb, styles, dirty == null, dl, only_forced)
 		last_old = _native.call("last_old")
 		_computed_once = true
 		return ch
@@ -598,12 +612,45 @@ func update(options: Dictionary = {}, force: bool = false, dirty = null) -> Pack
 			reread[di] = 1
 	var has_ov := not dis_ov.is_empty()
 	var has_es := not es_bits.is_empty()
+	var forced := PackedByteArray()
+	var has_forced := not _ov_force.is_empty()
+	# Visited index ranges [lo, hi) when only overrides changed.
+	var ranges := PackedInt32Array()
+	var use_ranges: bool = only_forced and _computed_once and not force
+	if has_forced:
+		forced.resize(n)
+		var fs := PackedInt32Array()
+		for fi in _ov_force:
+			if fi >= 0 and fi < n:
+				forced[fi] = 1
+				fs.append(fi)
+		_ov_force = PackedInt32Array()
+		if use_ranges:
+			fs.sort()
+			for fi in fs:
+				if not ranges.is_empty() and fi < ranges[ranges.size() - 1]:
+					continue  # inside the previous subtree
+				ranges.append(fi)
+				ranges.append(_end[fi])
+	var nr := ranges.size() / 2
+	var ri := 0
 	var changed := PackedInt32Array()
 	last_old = []
 	var inh_dirty := PackedByteArray()
 	inh_dirty.resize(n)
 	var anc_until := -1
-	for i in n:
+	var i := -1
+	while true:
+		i += 1
+		if use_ranges:
+			while ri < nr and i >= ranges[ri * 2 + 1]:
+				ri += 1
+			if ri >= nr:
+				break
+			if i < ranges[ri * 2]:
+				i = ranges[ri * 2]
+		elif i >= n:
+			break
 		var el: UxmlElement = els[i]
 		var c
 		var nm
@@ -664,15 +711,22 @@ func update(options: Dictionary = {}, force: bool = false, dirty = null) -> Pack
 				anc_until = _end[i]
 			_anc_key[i] = ak
 		_bloom[i] = (_bloom[p] | _own_bloom[p]) if p >= 0 else 0
-		if not own and inh_dirty[i] == 0 and i >= anc_until:
+		if not own and inh_dirty[i] == 0 and i >= anc_until and (not has_forced or forced[i] == 0):
 			continue
 		var old = styles.get(el)
 		var old_fc = _fc[i]
+		var old_t = null if _tgt.is_empty() else _tgt.get(i)
 		_compute(i)
 		if full or old == null:
 			changed.append(i)
 			last_old.append(old)
 		elif old != styles[el]:
+			changed.append(i)
+			last_old.append(old)
+		elif old_t != null and old_t != _tgt.get(i):
+			# Overridden (transitioning) element whose own cascade result
+			# changed under an unchanged override: report it so the
+			# transition retargets.
 			changed.append(i)
 			last_old.append(old)
 		elif (old as Dictionary).keys() == (styles[el] as Dictionary).keys():
@@ -687,8 +741,42 @@ func update(options: Dictionary = {}, force: bool = false, dirty = null) -> Pack
 				inh_dirty[ch] = 1
 				ch = _end[ch]
 	_computed_once = true
-	_last_changed = changed
+	# Accumulated until effective_flags() consumes it: one restyle may run
+	# several updates (transition passes).
+	_last_changed.append_array(changed)
 	return changed
+
+
+## Write computed overrides for preorder index `i` ({property: {value,
+## origin}}; empty clears them). They apply at the end of the element's
+## cascade on the next update(), which recomputes the element even when
+## none of its inputs changed.
+func set_override(i: int, entries: Dictionary) -> void:
+	if _native != null:
+		_native.call("set_override", i, entries)
+		return
+	if entries.is_empty():
+		if not _ov.has(i):
+			return
+		_ov.erase(i)
+	else:
+		_ov[i] = entries
+	_ov_force.append(i)
+
+
+## The computed style of preorder index `i` without its overrides (the
+## value the cascade itself resolved). Same object as `styles[el]` when the
+## element has no overrides.
+func target_style(i: int) -> Dictionary:
+	if _native != null:
+		var t = _native.call("target_style", i)
+		if t != null:
+			return t
+	else:
+		var t2 = _tgt.get(i)
+		if t2 != null:
+			return t2
+	return styles.get(els[i], {})
 
 
 ## Effective disabled (attribute/runtime, descending) and display:none
@@ -1039,6 +1127,17 @@ func _compute(i: int) -> void:
 				doc.source, node.open_tag_start, doc.path
 			))
 
+	if not _ov.is_empty():
+		var ov = _ov.get(i)
+		if ov != null:
+			_tgt[i] = computed
+			computed = computed.duplicate()
+			for prop in ov:
+				computed[prop] = ov[prop]
+		elif not _tgt.is_empty():
+			_tgt.erase(i)
+	elif not _tgt.is_empty():
+		_tgt.erase(i)
 	styles[node] = computed
 	_warn[i] = warns
 	if node.children.is_empty():
