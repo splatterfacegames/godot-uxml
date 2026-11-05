@@ -31,6 +31,9 @@ extends RefCounted
 ##   template-depth-exceeded - <Instance> nesting deeper than 32 (left empty)
 ##   override-ignored      - AttributeOverrides class/name/style (Unity ignores)
 ##   override-target-missing - AttributeOverrides element-name matched nothing
+##   binding-failed        - a data binding that cannot run: unknown property,
+##                           unresolved path, a target the control does not
+##                           have, an unknown converter group (runtime)
 
 static func make(
 	kind: String,

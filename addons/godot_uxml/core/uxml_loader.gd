@@ -62,6 +62,11 @@ static func load_source(
 		style_from = expander.style_from
 		doc.element_paths = expander.element_paths
 
+	# <Bindings> UxmlObjects are instructions, not elements: they leave the
+	# tree before any sheet, cascade or layout pass sees it.
+	if source.find(UxmlBindings.BINDINGS_TAG) >= 0 or source.find(UxmlBindings.DATA_BINDING_TAG) >= 0 or templated:
+		doc.warnings.append_array(UxmlBindings.extract(doc))
+
 	var loaded := {} ## resolved path -> sheet index
 	var chain: Array = [] ## paths currently being loaded (cycle detection)
 	var style_reported := {} ## template <Style> failures, once per location
@@ -232,6 +237,8 @@ static func _report_unsupported_tags(doc: UxmlDocumentModel) -> void:
 	var seen := {}
 	var seen_attrs := {}
 	for element in doc.root.walk():
+		if UxmlBindings.is_binding_tag(element.local):
+			continue  # UxmlBindings validates binding UxmlObjects
 		# Attributes outside the grammar the addon consumes warn once per
 		# name — the value stays in the model, it just has no effect.
 		# Namespace declarations and namespaced attributes are exempt.

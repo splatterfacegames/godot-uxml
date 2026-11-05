@@ -53,8 +53,8 @@ const RECOGNIZED_UNMAPPED := ["IntegerField", "FloatField", "Foldout"]
 ## UXML attributes the addon consumes or accepts as part of the document
 ## grammar. Namespace declarations (`xmlns:*`) and any namespaced attribute
 ## are always accepted and never reach this check. Anything not listed —
-## including real Unity attributes for features godot-uxml does not
-## implement, like `picking-mode` or `binding-path` — produces one
+## including real Unity attributes of controls godot-uxml does not
+## implement yet — produces one
 ## `unsupported-attribute` diagnostic per attribute name per document; the
 ## value stays in the model but has no effect.
 const KNOWN_ATTRIBUTES := {
@@ -73,6 +73,14 @@ const KNOWN_ATTRIBUTES := {
 	# Templates (<Template>, <Instance>, <AttributeOverrides>, slots)
 	"template": true, "path": true, "element-name": true,
 	"content-container": true, "slot": true, "slot-name": true,
+	# VisualElement / BindableElement base attributes (Unity 6000.3):
+	# data binding (UxmlBinding) and the common attributes
+	# (UxmlCommonAttributes). usage-hints is accepted as a no-op hint.
+	"data-source": true, "data-source-path": true, "data-source-type": true,
+	"binding-path": true, "tabindex": true, "picking-mode": true,
+	"view-data-key": true, "usage-hints": true, "language-direction": true,
+	# ListView AutoAssign: rows get the bound itemsSource as data source.
+	"binding-source-selection-mode": true,
 }
 
 
@@ -91,5 +99,7 @@ static func is_non_visual(local_name: String) -> bool:
 ## until a milestone maps them they warn like any unknown control.
 static func is_known_control(local_name: String) -> bool:
 	if NON_VISUAL_TAGS.has(local_name) or TEMPLATE_TAGS.has(local_name):
+		return true
+	if UxmlBindings.is_binding_tag(local_name):
 		return true
 	return IMPLICIT_CLASSES.has(local_name) and not RECOGNIZED_UNMAPPED.has(local_name)

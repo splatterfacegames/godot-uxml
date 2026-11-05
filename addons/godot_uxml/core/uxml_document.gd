@@ -25,6 +25,10 @@ var warnings: Array = []
 ## references in their attributes (image, item-template) resolve against it.
 ## Empty for a document without templates.
 var element_paths: Dictionary = {}
+## Element -> Array of DataBinding descriptors read from its <Bindings>
+## child (see UxmlBindings). The <Bindings> elements themselves are no
+## longer in the tree. Empty for a document without bindings.
+var bindings: Dictionary = {}
 
 
 ## The file `element`'s attributes were authored in.

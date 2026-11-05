@@ -24,6 +24,7 @@ func _initialize() -> void:
 		["res://tests/test_runtime.gd", "runtime"],
 		["res://tests/test_templates.gd", "templates"],
 		["res://tests/test_transitions.gd", "transitions"],
+		["res://tests/test_binding.gd", "binding"],
 	]:
 		var cls = load(entry[0])
 		if cls == null:

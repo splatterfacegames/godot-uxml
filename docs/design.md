@@ -55,6 +55,7 @@ UxmlResourceResolver ──────────────▶│ follows <S
 | `uxml_document.gd` | `UxmlDocumentModel` | `source`, `path`, `root`, `sheets`, `style_roots`, `warnings` |
 | `uxml_loader.gd` | `UxmlLoader` | `load_file(path, project_root)`, `load_source(source, path, resolver, uss)` |
 | `uxml_templates.gd` | `UxmlTemplates` | template expansion (`<Template>`, `<Instance>`, `<AttributeOverrides>`, `content-container`, slots) before the sheets load |
+| `uxml_bindings.gd` | `UxmlBindings` | removes `<Bindings>` UxmlObjects from the tree into `UxmlDocumentModel.bindings`; PropertyPath parser |
 | `style_resolver.gd` | `UssStyleResolver` | `resolve(doc, options) -> {styles, warnings}` (a one-shot `UssCascade`); var() substitution |
 | `uss_cascade.gd` | `UssCascade` | compiled, bucketed, incremental cascade: `update(options, force, dirty, only_forced) -> changed indices`, `styles`, `last_old`, `collect_warnings()`, computed overrides: `set_override(i, entries)`, `target_style(i)` |
 
@@ -76,10 +77,14 @@ UxmlResourceResolver ──────────────▶│ follows <S
   (single-pass: `&#38;lt;` → literal `&lt;`, never `<`).
   Consumers read `name`, `class`, `style`, `enabled`, `text`, `label`,
   `value`, `low-value`, `high-value`, `choices`, `src`, `image`, etc.
-  Attributes outside `UssControls.KNOWN_ATTRIBUTES` — including real Unity
-  attributes for unimplemented features like `picking-mode` and
-  `binding-path` — warn `unsupported-attribute` once per name; the value is
-  preserved. Namespace declarations and namespaced attributes are exempt.
+  Attributes outside `UssControls.KNOWN_ATTRIBUTES` warn
+  `unsupported-attribute` once per name; the value is preserved. Namespace
+  declarations and namespaced attributes are exempt. Every attribute of the
+  Unity 6000.3 `VisualElement` and `BindableElement` base classes is known:
+  `name`, `class`, `style`, `enabled`, `focusable`, `tooltip`, `tabindex`,
+  `picking-mode`, `view-data-key`, `usage-hints`, `language-direction`,
+  `content-container`, `data-source`, `data-source-path`,
+  `data-source-type` and `binding-path`.
 - `<Style>` requires a non-empty `src`: missing or empty `src` warns
   `malformed`.
 - Text between tags is ignored (UXML has no text nodes — Label text lives in
@@ -154,6 +159,43 @@ The semantics are Unity 6 (6000.0) semantics.
   wins. Repeated names warn `duplicate-name`.
 - A document without template syntax skips the expansion step and loads
   exactly as before.
+
+### Data binding (model)
+
+Unity UXML declares a binding as a UxmlObject child of the bound element:
+
+```xml
+<ui:Label text="-">
+    <Bindings>
+        <ui:DataBinding property="text" data-source-path="player.name"
+            binding-mode="ToTarget" update-trigger="OnSourceChanged"/>
+    </Bindings>
+</ui:Label>
+```
+
+- `<Bindings>` and `<DataBinding>` are instructions. After the template
+  expansion, `UxmlBindings.extract()` removes every `<Bindings>` element
+  from the tree. The cascade (GDScript and native), the layout and the
+  factory never see the elements, so a `<Bindings>` child takes no space
+  and gets no control. `UxmlDocumentModel.bindings` maps each bound element
+  to its DataBinding descriptors. A document without binding syntax skips
+  the step.
+- DataBinding attributes: `property`, `data-source`, `data-source-path`,
+  `data-source-type`, `binding-mode` (`TwoWay` default, `ToSource`,
+  `ToTarget`, `ToTargetOnce`), `update-trigger` (`OnSourceChanged`
+  default, `EveryUpdate`, `WhenDirty`), `source-to-ui-converters` and
+  `ui-to-source-converters` (comma-separated group ids).
+- Diagnostics: a DataBinding without `property` (`malformed`); a bad mode,
+  trigger or path (`unsupported-value`: the default is used, or the
+  binding is dropped for a bad path); an unknown DataBinding attribute
+  (`unsupported-attribute`); a binding type defined in C# such as
+  `LocalizedString` (`unsupported-feature`); a `<Bindings>` directly under
+  `<UXML>` and a `<DataBinding>` outside `<Bindings>` (`malformed`).
+- Property paths use Unity PropertyPath text: `a.b[2].c`, `[3]`,
+  `map["key"]`, `map[key]`. `UxmlBindings.parse_path()` returns the parts
+  (String names, int indices) or null for invalid text.
+- ListView item templates are parsed at runtime. The document runs the
+  same extraction on the pooled rows before the factory runs.
 
 ### Malformed-input policy (explicit)
 
@@ -322,6 +364,8 @@ UxmlDocument (Control)
 | `runtime/control_factory.gd` | `UxmlControlFactory` | tag→native mapping, attribute wiring, image loading through the resolver |
 | `runtime/style_applier.gd` | `UxmlStyleApplier` | computed style → styleboxes/colors/fonts, display/visibility/disabled, base-state restore |
 | `runtime/uss_transitions.gd` | `UssTransitions` | USS transitions: start/retarget/cancel rules, easing, per-frame values as computed overrides, transition events |
+| `runtime/uxml_binding.gd` | `UxmlBinding` | runtime data binding: sources, contexts, update triggers, converters, two-way write-back |
+| `runtime/uxml_common_attributes.gd` | `UxmlCommonAttributes` | `tabindex` focus ring, `picking-mode`, `language-direction`, `usage-hints`, `view-data-key` view state |
 
 ### Control mapping
 
@@ -349,6 +393,212 @@ to its range default, an out-of-range DropdownField `index` selects the
 first item. On DropdownField `value` selects by *choice text*
 (`value="1080"` picks the "1080" item, never index 1080) while `index`
 is the explicit positional selector and wins when both are given.
+
+
+### Data binding (runtime)
+
+`UxmlBinding` (one per document, kept across loads) implements Unity 6
+runtime data binding. `UxmlDocument` calls `setup()` at the end of
+`_index()`, after the controls exist and before the first restyle, so the
+first layout measures the bound values.
+
+Data sources:
+
+- A data source is any Godot Object, Dictionary or Array.
+- `set_data_source(source, element = null)` sets the source of the
+  document root (null or "") or of an element (name, `UxmlElement` or one
+  of its Controls). The document-level source and the sources of named
+  elements stay through `load_document()` and `reload()`.
+- The `data-source` attribute names an asset. The runtime looks for, in
+  this order: a key given to `UxmlDocument.register_data_source_asset()`
+  (the raw value, the value without query and fragment, the value without
+  `project://database/`, the resolved path), a `.json` file (parsed to a
+  Dictionary or Array), a Godot resource (`ResourceLoader`). Other values
+  give `missing-file`.
+- `data-source-type` is stored and returned by `get_data_source_type()`
+  (the nearest value at or above the element). Unity uses the type for
+  authoring only. The runtime also uses the type for nothing else.
+
+Context (Unity `GetHierarchicalDataSourceContext`):
+
+- The walk starts at the element and goes up to the nearest element, the
+  element included, that has a data source. The document root has the
+  document-level source.
+- Every `data-source-path` on the walk is put in front of the path, the
+  path of the element that holds the source included. Paths above that
+  element are not used.
+- A DataBinding with its own `data-source` uses that source and its own
+  `data-source-path` only. Other bindings append their path to the
+  element context path.
+- `get_data_source_context(element)` returns `{source, path}`.
+
+Path access:
+
+- A name part reads an Object property, a Dictionary key or a member of a
+  built-in value (`x`, `y`, `r`, `position`, ...). An int part indexes an
+  Array or a packed array.
+- A camelCase name that the source does not have falls back to its
+  snake_case form: `playerName` reads `player_name`. Unity C# member names
+  in authored UXML thus read GDScript properties.
+- A write stores a value-type part (Vector2, Color, packed array) back in
+  its container. A Dictionary write needs an existing key, as Unity needs
+  an existing property. The written value is converted to the type of the
+  current value (`type_convert`).
+
+Update rules (Unity `BindingUpdater.ShouldProcessBindingAtStage`):
+
+- `ToSource` never writes the UI.
+- `EveryUpdate` writes the UI every frame.
+- A dirty binding writes the UI. A new binding is dirty. A binding is also
+  dirty after its context changes (`set_data_source`,
+  `set_data_source_path`) and after `mark_binding_dirty()`.
+- Else `ToTargetOnce` does not write the UI again.
+- Else `OnSourceChanged` writes the UI after a change notification:
+  `notify_changed(source, path)`, a source `property_changed` signal with
+  zero arguments or one argument (the property path), a source `changed`
+  signal (`Resource.emit_changed()`), or a new value of the source method
+  `get_view_hash_code()` (Unity `IDataSourceViewHashProvider`, polled once
+  per frame).
+- Else `WhenDirty` does not write the UI.
+- A change at path P updates the bindings whose path starts with P (Unity
+  `IsPrefix`). An empty path on either side matches.
+- Updates run in one deferred flush per frame. `update_bindings()` runs the
+  flush at once.
+
+Targets. `property` accepts the Unity C# name or the UXML attribute name:
+
+| property | target |
+| --- | --- |
+| `text` | Label / Button / Toggle text; TextField value |
+| `value` | Slider / SliderInt value, Toggle state, TextField text, DropdownField selected choice |
+| `label` | field caption, Toggle text |
+| `lowValue`, `highValue` (`low-value`, `high-value`) | Slider range |
+| `choices`, `index` | DropdownField items and selection |
+| `tooltip` | `tooltip_text` |
+| `enabledSelf` (`enabled`) | the `set_enabled()` override |
+| `visible` | `style.visibility` |
+| `focusable`, `tabIndex`, `pickingMode`, `languageDirection` | the attribute, applied at once |
+| `image` (`sprite`, `texture`), `tintColor` | Image texture and modulate |
+| `placeholderText`, `isReadOnly`, `maxLength` | TextField options |
+| `itemsSource` | ListView item count (see below) |
+| `usageHints` | accepted, no effect |
+| `style.<name>` | inline USS property; `<name>` is the IStyle C# name (`backgroundColor`, `unityFontStyleAndWeight`) or the USS name |
+
+- Element targets write through the control and update the model
+  attribute (`set_attribute`). A text, label, choices or image change asks
+  for a relayout. A `style.*` target rewrites the `style` attribute as the
+  authored inline style plus the bound declarations, so the incremental
+  cascade restyles only that element. A null value removes the bound
+  declaration.
+- Style values: a String is used as written; a number gets `px`, except
+  unitless properties (`opacity`, `flex-grow`, `flex-shrink`,
+  `aspect-ratio`, `scale`, `-unity-slice-*`) and `rotate` (`deg`); a Color
+  becomes `rgba()`; a Vector2 becomes two lengths; a bool sets
+  `display`/`visibility`; a Resource with a path becomes `url()`.
+- A text value is written as C# `ToString()` writes it: an integral float
+  has no `.0`.
+- A focused LineEdit or TextEdit is not overwritten from the source
+  (Unity `DataBinding.UpdateUI`).
+- An unknown property, an unresolved path, a target that the control does
+  not have and an unknown converter group give one `binding-failed`
+  diagnostic per element and message. A binding without a data source
+  waits without a diagnostic.
+
+Two-way:
+
+- For `TwoWay` and `ToSource` bindings of `value` (and of `text` on a
+  TextField, `index` on a DropdownField), a user edit writes the UI value
+  to the source: HSlider `value_changed` (int for SliderInt), CheckBox
+  `toggled`, LineEdit/TextEdit `text_changed`, OptionButton
+  `item_selected`. The same edits emit the document `value_changed`
+  signal.
+- After the write, the other bindings of that source and path update.
+- A UI write from the source does not echo back to the source.
+
+Converters (Unity `ConverterGroups`):
+
+- `UxmlDocument.register_converter(group_id, callable, source_type = -1)`
+  adds a converter to a group. `callable.call(value)` returns the new
+  value. `source_type` is a `Variant.Type`; -1 accepts any type.
+- A binding applies the groups that `source-to-ui-converters` (source to
+  UI) or `ui-to-source-converters` (UI to source) name. In one group an
+  exact type match wins over -1. A later group wins over an earlier group.
+- `register_global_converter()` converters apply when no named group
+  converts the value.
+- The registry is global, as in Unity. `unregister_converter_group()`
+  removes a group.
+
+`binding-path`: Unity binds `binding-path` to a SerializedObject in the
+Editor only. The runtime maps `binding-path="p"` on a BindableElement to a
+`TwoWay`, `OnSourceChanged` DataBinding with `data-source-path="p"`. The
+target is `text` on Label, Button and TextElement, `itemsSource` on
+ListView and `value` on every other field. The path is relative to the
+element data source context, so `data-source` and `data-source-path` on
+ancestors apply. The `binding-path` values of parent elements do not
+compose. `binding-path` on an element that is not a BindableElement
+(VisualElement, TemplateContainer, ScrollView, Image, Box) gives
+`binding-failed`. A DataBinding of the same property replaces the
+`binding-path` binding.
+
+ListView: a binding of `itemsSource` to an Array sets the item count. With
+`binding-source-selection-mode="AutoAssign"` each row gets the array as
+data source and `[index]` as data source path when the row is bound, so
+row bindings read `items[index]` (Unity
+`BaseListViewController.BindItem`). A bind callable given to
+`set_list_source()` still runs after the automatic step. A change to an
+item notifies through the array: `notify_changed(items)`.
+
+Code API: `add_binding(element, property, path, options)` (Unity
+`SetBinding`; `options` has `mode`, `trigger`, `data_source`, `to_ui`,
+`to_source`), `remove_binding(element, property)` (`ClearBinding`),
+`get_bindings(element)`.
+
+Cost: a document without bindings creates no records and connects no
+signals. The frame hook (`SceneTree.process_frame`) exists only while an
+`EveryUpdate` binding or a `get_view_hash_code()` source exists, and stops
+while the document is out of the tree. A flush visits the records only
+when a record is pending; a frame tick visits only the `EveryUpdate`
+records. Each write touches only the bound element.
+
+### Common attributes (runtime)
+
+`UxmlCommonAttributes` (one per document) applies these attributes after
+the controls exist. A document without the attributes does not change.
+
+- `tabindex`: the Unity focus ring order. Focusable elements with
+  `tabindex > 0` come first, in ascending order (tree order for equal
+  values). Elements with `tabindex = 0` follow in tree order. An element
+  with `tabindex < 0` leaves the Tab ring and keeps pointer focus
+  (`FOCUS_CLICK`). An unfocusable element ignores the attribute. The ring
+  is written as `focus_next`/`focus_previous` chains on the focus targets.
+  Tab and Shift-Tab on a ring member skip members that are hidden,
+  disabled or unfocusable. A document without `tabindex` keeps the Godot
+  tree order. `get_focus_ring()` returns the targets in order.
+- `picking-mode="Position|Ignore"`: `Ignore` sets `mouse_filter = IGNORE`
+  on the element control and its inner native. Pointer events go to the
+  controls below, and the children of the element stay pickable, as in
+  Unity. The applier keeps the value through restyles (`uxml_mouse` meta).
+- `language-direction="Inherit|LTR|RTL"`: sets `text_direction` on the
+  Label, Button, LineEdit and TextEdit controls of the element and on the
+  field caption. `Inherit` uses the nearest ancestor value; with no value
+  above, the control keeps the Godot default (`AUTO`). The layout is not
+  mirrored, as in Unity.
+- `usage-hints`: Unity renderer hints (`DynamicTransform`,
+  `GroupTransform`, `MaskContainer`, `DynamicColor`,
+  `DynamicPostProcessing`, `LargePixelCoverage`, `None`; separated by
+  commas, `|` or spaces). The runtime checks the names
+  (`unsupported-value` for unknown names) and ignores the hints.
+- `view-data-key`: the full key is the `view-data-key` values of the
+  element and of its ancestors, root first, joined with `__` (Unity
+  `GetFullHierarchicalViewDataKey` without the leading separator). Only an
+  element with its own key keeps view data. `get_view_data()` returns
+  `{full key: {"scroll_offset": Vector2}}` for keyed ScrollView and
+  ListView elements. `set_view_data(dict)` replaces the store and applies
+  it. `load_document()` and `reload()` capture the live state before the
+  old tree goes and restore it after the first layout of the new tree. A
+  scroll offset is applied again after each container sort until the
+  scroll range allows the offset or the user scrolls. Unity keeps view
+  data only in Editor windows; here the store is available at runtime.
 
 ### Layout
 
@@ -581,6 +831,18 @@ var slider: HSlider = doc.get_native("volume")    # interactive inner
 doc.set_enabled("advanced-panel", false)  # subtree disable + :disabled
 doc.set_class("item", "row selected")     # re-resolve with new classes
 doc.refresh()                             # after unseen mutations
+
+# Data binding (Unity 6 runtime binding)
+doc.set_data_source(player)               # document root; or (src, "panel")
+doc.set_data_source_path("stats", "panel")
+doc.notify_changed(player, "stats.hp")    # OnSourceChanged bindings update
+doc.update_bindings()                     # flush now instead of end of frame
+doc.mark_binding_dirty("hp-label")        # WhenDirty bindings
+doc.add_binding("hp-label", "text", "stats.hp", {"mode": "ToTarget"})
+UxmlDocument.register_converter("percent", func(v): return "%d%%" % v)
+UxmlDocument.register_data_source_asset("Assets/Data/Player.asset", player)
+var state := doc.get_view_data()          # view-data-key scroll offsets
+doc.set_view_data(state)
 doc.relayout()                            # per-frame text updates (no re-apply)
 doc.transition_end.connect(_on_end)       # (name, property, elapsed_time)
 doc.transitions_manual = true             # tests: step transition time by hand
@@ -632,8 +894,10 @@ rows that scrolled out; slots past the item count are `display: none`.
   `unsupported-selector`, rule dropped.
 - `Foldout`, `IntegerField`, `FloatField` and all unmapped controls —
   `unsupported-control`, children preserved inside a `UxmlBox`.
-- Attributes outside `UssControls.KNOWN_ATTRIBUTES` (e.g. `picking-mode`,
-  `binding-path`) — `unsupported-attribute`.
+- Attributes outside `UssControls.KNOWN_ATTRIBUTES` (attributes of
+  controls that are not mapped yet) — `unsupported-attribute`.
+- Binding types defined in C# (CustomBinding subclasses such as
+  `LocalizedString`) — `unsupported-feature`, the binding is ignored.
 - Unity `resource("name")` lookup semantics and `Packages/com.x` package
   *contents* beyond direct file mapping; Unity asset GUID resolution.
 - Unity theme sheet / control parts (`unity-content-viewport` etc.) —

@@ -57,9 +57,63 @@ Status values:
 | --- | --- |
 | `<Style src>` | done |
 | `Template`, `Instance`, `AttributeOverrides`, `content-container`, slots | done |
-| Data binding (`data-source`, `data-source-path`, `<Bindings>`, `binding-path`) | planned |
+| Data binding: `data-source`, `data-source-path`, `data-source-type` | done (see "Data binding") |
+| `<Bindings>` / `<DataBinding>` UxmlObjects | done; the elements leave the tree at load |
+| `binding-path` | done: maps to a TwoWay binding of the element value on its data source |
 | `Columns` / `Column` UxmlObjects | planned |
-| `tabindex`, `picking-mode`, `view-data-key`, `usage-hints`, `language-direction` | planned |
+| `tabindex`, `picking-mode`, `view-data-key`, `usage-hints`, `language-direction` | done (see "UXML attributes") |
+
+## UXML attributes (VisualElement and BindableElement)
+
+| Attribute | Status |
+| --- | --- |
+| `name`, `class`, `style`, `enabled`, `focusable`, `tooltip`, `content-container` | done |
+| `tabindex` | done: Unity focus ring order (positive first, then 0 in tree order; negative leaves the Tab ring) |
+| `picking-mode` | done: `Ignore` sets `mouse_filter` IGNORE; children stay pickable |
+| `view-data-key` | done: ScrollView and ListView scroll offset; `get_view_data()`/`set_view_data()`, restored on load and reload. Other view state follows when the controls exist (Foldout, TabView, TwoPaneSplitView, MultiColumn views) |
+| `usage-hints` | done: names validated, no effect (renderer hints) |
+| `language-direction` | done: `text_direction` on text controls, inherited |
+| `data-source`, `data-source-path`, `data-source-type`, `binding-path` | done |
+| `binding-source-selection-mode` (ListView) | done: `AutoAssign` gives each row `itemsSource` and `[index]` |
+
+## Data binding
+
+| Feature | Status |
+| --- | --- |
+| Hierarchical data source context and path composition | done (Unity `GetHierarchicalDataSourceContext`) |
+| Data sources: Object, Dictionary, Array; on the document or an element | done |
+| `data-source` asset references | done: registered keys, `.json` files, Godot resources |
+| PropertyPath syntax `a.b[2].c`, `map["key"]` | done |
+| Binding modes `TwoWay`, `ToSource`, `ToTarget`, `ToTargetOnce` | done |
+| Update triggers `OnSourceChanged`, `EveryUpdate`, `WhenDirty` | done |
+| Change notification | done: `notify_changed()`, `property_changed`/`changed` signals, `get_view_hash_code()` polling |
+| Converter groups (`source-to-ui-converters`, `ui-to-source-converters`) | done: registered Callables, matched by source type |
+| Global converters | done |
+| Element targets (`text`, `value`, `label`, `lowValue`, `highValue`, `choices`, `index`, `tooltip`, `enabledSelf`, `visible`, `focusable`, `tabIndex`, `pickingMode`, `image`, ...) | done |
+| `style.*` targets | done: written as inline USS |
+| Two-way write-back from user edits | done |
+| `SetBinding`/`ClearBinding` from code | done: `add_binding()`/`remove_binding()` |
+| CustomBinding subclasses (C#) | not available: C# code; diagnosed `unsupported-feature` |
+
+Deviations from Unity:
+
+- `OnSourceChanged` on a source with no change signal and no
+  `get_view_hash_code()` updates only after `notify_changed()`. Unity
+  updates such a binding every frame. Use `EveryUpdate` for that behavior.
+- A converter matches the source value type only. Unity matches the pair
+  of source type and target type.
+- A `data-source` attribute names a Unity asset. The runtime cannot load
+  Unity assets, so the value must be a registered key, a `.json` file or a
+  Godot resource.
+- `binding-path` binds to the element data source, not to a Unity
+  SerializedObject. The `binding-path` values of parent elements do not
+  compose.
+- A camelCase path part that the source does not have reads the
+  snake_case property (an addition).
+- Unity keeps view data only in Editor windows. The runtime gives the
+  view data to game code.
+- Binding failures are `binding-failed` diagnostics, one per element and
+  message. Unity logs a console message per failed update.
 
 ## Controls (UnityEngine.UIElements)
 
