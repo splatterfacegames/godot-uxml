@@ -1208,7 +1208,8 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	for k in n:
 		var child: UxmlElement = kids[k]
 		var m := _margins(child, asx)
-		var nat := _measure(child, area.size, _stretch_hint(child, row, align_items, ac, m))
+		var nat := _measure(child, area.size,
+			-1.0 if _hinted.is_empty() else _stretch_hint(child, row, align_items, ac, m))
 		var hyp: float
 		var basis := _len(child, P_BASIS, am)
 		if not is_nan(basis):
