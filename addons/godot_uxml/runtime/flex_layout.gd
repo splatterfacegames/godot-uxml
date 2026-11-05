@@ -57,9 +57,6 @@ const ALIGN_CONTENT := ["flex-start", "center", "flex-end", "stretch", "space-be
 const DIRECTIONS := ["column", "row", "column-reverse", "row-reverse"]
 const WRAPS := ["nowrap", "wrap", "wrap-reverse"]
 
-const PAD_NAMES := ["padding-top", "padding-right", "padding-bottom", "padding-left"]
-const MAR_NAMES := ["margin-top", "margin-right", "margin-bottom", "margin-left"]
-const BOR_NAMES := ["border-top-width", "border-right-width", "border-bottom-width", "border-left-width"]
 # Edge arrays are [t, r, b, l].
 const T := 0
 const R := 1
@@ -67,6 +64,7 @@ const B := 2
 const L := 3
 
 static var _empty_style := {}
+
 
 var _styles: Dictionary = {}
 var _measurer: Callable
@@ -81,7 +79,8 @@ var _scroll_bar_width: float = 0.0
 var _volatile: Dictionary = {}
 
 # Per-pass memos.
-var _st := {}         # el -> style dict
+var _recs := {}       # el -> layout record (this pass)
+var _shared_recs = null  # caller-owned el -> record cache across passes
 var _pad_m := {}      # el -> [cb_width, PackedFloat64Array]
 var _mar_m := {}      # el -> [cb_width, PackedFloat64Array]
 var _bor_m := {}      # el -> PackedFloat64Array
@@ -89,7 +88,13 @@ var _kids_m := {}     # el -> Array
 var _enum_m := {}     # el -> {prop: String}
 var _num_m := {}      # el -> {prop: float}
 var _meas_m := {}     # el -> Array of [ax, ay, hint, Vector2]
-var _vol_m := {}      # el -> bool (subtree contains a volatile element)
+var _sens_m := {}     # el -> _sens bits
+var _vl_m := {}       # el -> volatile elements in subtree
+var _vw := {}         # volatile el -> tracked actual control width
+var _vmemo := {}      # volatile el -> [set memo, read memo]
+var _volatile_width: Callable
+static var _no_list: Array = []
+static var _no_state := PackedFloat64Array()
 
 
 ## Compute layout for `root` inside `host_size`. `options` may carry
@@ -117,6 +122,8 @@ static func compute(
 	l._file = String(options.get("file", ""))
 	l._scroll_bar_width = float(options.get("scroll_bar_width", 0.0))
 	l._volatile = options.get("volatile", {})
+	l._shared_recs = options.get("records")
+	l._volatile_width = options.get("volatile_width", Callable())
 	if options.has("warned"):
 		l._warned = options["warned"]
 	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
@@ -128,41 +135,138 @@ static func compute(
 
 
 # ---------------------------------------------------------------------------
-# Style access
+# Style access — pre-parsed layout records
 # ---------------------------------------------------------------------------
+#
+# Every layout property of an element is parsed once into a record:
+#   [style Dictionary (identity), kinds PackedByteArray, values
+#    PackedFloat64Array, raws Array, problems Dictionary pid -> String,
+#    enums Dictionary name -> String]
+# Records hold parse results only — diagnostics are still emitted at the
+# exact use sites (and in the exact order) the original accessors emitted
+# them. With options["records"] (a caller-owned Dictionary) records survive
+# across passes and are rebuilt only when the element's computed style
+# Dictionary is a different object.
 
-func _style(el: UxmlElement) -> Dictionary:
-	var s = _st.get(el)
-	if s == null:
-		s = _styles.get(el, _empty_style)
-		_st[el] = s
-	return s
+const P_W := 0
+const P_H := 1
+const P_MINW := 2
+const P_MINH := 3
+const P_MAXW := 4
+const P_MAXH := 5
+const P_BASIS := 6
+const P_PAD := 7      # 7..10 top,right,bottom,left
+const P_MAR := 11     # 11..14
+const P_BOR := 15     # 15..18
+const P_RGAP := 19
+const P_CGAP := 20
+const P_GROW := 21
+const P_SHRINK := 22
+const NP := 23
+const PNAMES := [
+	"width", "height", "min-width", "min-height", "max-width", "max-height", "flex-basis",
+	"padding-top", "padding-right", "padding-bottom", "padding-left",
+	"margin-top", "margin-right", "margin-bottom", "margin-left",
+	"border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+	"row-gap", "column-gap", "flex-grow", "flex-shrink",
+]
+const ENUM_NAMES := [
+	"display", "flex-direction", "flex-wrap", "justify-content",
+	"align-items", "align-content", "align-self",
+]
+# kinds
+const K_NONE := 0     # property absent
+const K_PX := 1
+const K_PCT := 2
+const K_AUTO := 3     # auto / none / initial (parse_length "auto"/"none")
+const K_BAD := 4      # unparseable: problems[pid]
+const K_AUTOKW := 5   # edges only: the literal keyword auto (diagnosed)
+const K_NUM := 6      # grow/shrink: a number
+const K_NAN := 7      # grow/shrink: not a number
 
 
-func _prop(el: UxmlElement, name: String) -> Variant:
-	var entry = _style(el).get(name)
-	return null if entry == null else entry["value"]
+static func _build_rec(st: Dictionary) -> Array:
+	var kinds := PackedByteArray()
+	kinds.resize(NP)
+	var vals := PackedFloat64Array()
+	vals.resize(NP)
+	var raws: Array = []
+	raws.resize(NP)
+	var probs := {}
+	for pid in NP:
+		var entry = st.get(PNAMES[pid])
+		if entry == null:
+			continue
+		var raw = entry["value"]
+		raws[pid] = raw
+		if pid == P_GROW or pid == P_SHRINK:
+			var n := UssValues.parse_number(String(raw))
+			if is_nan(n):
+				kinds[pid] = K_NAN
+			else:
+				kinds[pid] = K_NUM
+				vals[pid] = n
+			continue
+		if pid >= P_PAD and pid < P_BOR and String(raw).strip_edges() == "auto":
+			kinds[pid] = K_AUTOKW
+			continue
+		var p := UssValues.parse_length(String(raw))
+		match p["kind"]:
+			"px":
+				kinds[pid] = K_PX
+				vals[pid] = p["value"]
+			"percent":
+				kinds[pid] = K_PCT
+				vals[pid] = p["value"]
+			"invalid":
+				kinds[pid] = K_BAD
+				probs[pid] = p["problem"]
+			_:
+				kinds[pid] = K_AUTO
+	var enums := {}
+	for name in ENUM_NAMES:
+		var entry = st.get(name)
+		if entry != null:
+			enums[name] = String(entry["value"])
+	return [st, kinds, vals, raws, probs, enums]
+
+
+func _rec(el: UxmlElement) -> Array:
+	var r = _recs.get(el)
+	if r != null:
+		return r
+	var st: Dictionary = _styles.get(el, _empty_style)
+	if _shared_recs != null:
+		var sr = _shared_recs.get(el)
+		if sr != null and is_same(sr[0], st):
+			_recs[el] = sr
+			return sr
+	r = _build_rec(st)
+	if _shared_recs != null:
+		_shared_recs[el] = r
+	_recs[el] = r
+	return r
 
 
 func _str(el: UxmlElement, name: String, default: String) -> String:
-	var v = _prop(el, name)
-	return default if v == null else String(v)
+	var v = _rec(el)[5].get(name)
+	return default if v == null else v
 
 
-func _num(el: UxmlElement, name: String, default: float) -> float:
+func _num(el: UxmlElement, pid: int, default: float) -> float:
 	var m: Dictionary = _num_m.get(el, {})
-	var hit = m.get(name)
+	var hit = m.get(pid)
 	if hit != null:
 		return hit
 	var out := default
-	var v = _prop(el, name)
-	if v != null:
-		var n := UssValues.parse_number(String(v))
-		if is_nan(n):
-			_warn_once(el, name, '%s: "%s" is not a number; %s used' % [name, v, default])
-		else:
-			out = n
-	m[name] = out
+	var rec := _rec(el)
+	var k: int = rec[1][pid]
+	if k == K_NAN:
+		var name: String = PNAMES[pid]
+		_warn_once(el, name, '%s: "%s" is not a number; %s used' % [name, rec[3][pid], default])
+	elif k == K_NUM:
+		out = rec[2][pid]
+	m[pid] = out
 	_num_m[el] = m
 	return out
 
@@ -181,45 +285,41 @@ func _enum(el: UxmlElement, name: String, valid: Array, default: String) -> Stri
 	return v
 
 
-## A length value: NAN for auto. Auto covers the auto/none keywords,
-## unparseable text (warned once), and percentages against an indefinite
-## base (base < 0).
-func _len(el: UxmlElement, name: String, base: float) -> float:
-	var raw = _prop(el, name)
-	if raw == null:
-		return NAN
-	return _len_raw(el, name, raw, base)
-
-
-func _len_raw(el: UxmlElement, name: String, raw, base: float) -> float:
-	var p := UssValues.parse_length(String(raw))
-	match p["kind"]:
-		"px":
-			return p["value"]
-		"percent":
+## A length value from the record: NAN for auto. Auto covers the auto/none
+## keywords, unparseable text (warned once), percentages against an
+## indefinite base (base < 0), and an absent property.
+func _lenr(el: UxmlElement, rec: Array, pid: int, base: float) -> float:
+	match rec[1][pid]:
+		K_PX:
+			return rec[2][pid]
+		K_PCT:
 			if base < 0.0:
 				return NAN
-			return base * p["value"] / 100.0
-		"invalid":
-			_warn_once(el, name, "%s: %s" % [name, p["problem"]])
+			return base * rec[2][pid] / 100.0
+		K_BAD:
+			var name: String = PNAMES[pid]
+			_warn_once(el, name, "%s: %s" % [name, rec[4][pid]])
 			return NAN
-		_:
-			return NAN
+	return NAN
+
+
+func _len(el: UxmlElement, pid: int, base: float) -> float:
+	return _lenr(el, _rec(el), pid, base)
 
 
 ## A box dimension (width/height/flex-basis): px value, or -1 for auto.
-func _dim(el: UxmlElement, name: String, base: float) -> float:
-	var r := _len(el, name, base)
+func _dim(el: UxmlElement, pid: int, base: float) -> float:
+	var r := _lenr(el, _rec(el), pid, base)
 	return -1.0 if is_nan(r) else r
 
 
 ## A min/max bound. is_min: -1 means "no declared bound" (the caller decides
 ## the auto floor); !is_min: INF means none.
-func _bound(el: UxmlElement, name: String, base: float, is_min: bool) -> float:
-	var raw = _prop(el, name)
-	if raw == null:
+func _bound(el: UxmlElement, pid: int, base: float, is_min: bool) -> float:
+	var rec := _rec(el)
+	if rec[1][pid] == K_NONE:
 		return -1.0 if is_min else INF
-	var r := _len_raw(el, name, raw, base)
+	var r := _lenr(el, rec, pid, base)
 	if is_nan(r):
 		return -1.0 if is_min else INF
 	return r
@@ -230,23 +330,25 @@ func _bound(el: UxmlElement, name: String, base: float, is_min: bool) -> float:
 ## subset — diagnosed once and treated as 0. Margins may be negative (CSS
 ## semantics: they pull the box, and neighbors, backward); padding may not —
 ## a negative padding is invalid and diagnosed rather than silently clamped.
-func _edges(el: UxmlElement, names: Array, cb_width: float, allow_negative: bool) -> PackedFloat64Array:
+func _edges(el: UxmlElement, base_pid: int, cb_width: float, allow_negative: bool) -> PackedFloat64Array:
 	var out := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
-	var st := _style(el)
+	var rec := _rec(el)
+	var kinds: PackedByteArray = rec[1]
 	for k in 4:
-		var name: String = names[k]
-		var entry = st.get(name)
-		if entry == null:
+		var pid := base_pid + k
+		var kind := kinds[pid]
+		if kind == K_NONE:
 			continue
-		var raw = entry["value"]
-		if String(raw).strip_edges() == "auto":
+		if kind == K_AUTOKW:
+			var name: String = PNAMES[pid]
 			_warn_once(el, name, "%s: auto is not supported; 0 used" % name)
 			continue
-		var r := _len_raw(el, name, raw, cb_width)
+		var r := _lenr(el, rec, pid, cb_width)
 		if is_nan(r):
 			continue
 		elif r < 0.0 and not allow_negative:
-			_warn_once(el, name, "%s: negative values are invalid; 0 used" % name)
+			var name2: String = PNAMES[pid]
+			_warn_once(el, name2, "%s: negative values are invalid; 0 used" % name2)
 		else:
 			out[k] = r
 	return out
@@ -256,7 +358,7 @@ func _padding(el: UxmlElement, cb_width: float) -> PackedFloat64Array:
 	var m = _pad_m.get(el)
 	if m != null and m[0] == cb_width:
 		return m[1]
-	var e := _edges(el, PAD_NAMES, cb_width, false)
+	var e := _edges(el, P_PAD, cb_width, false)
 	_pad_m[el] = [cb_width, e]
 	return e
 
@@ -265,7 +367,7 @@ func _margins(el: UxmlElement, cb_width: float) -> PackedFloat64Array:
 	var m = _mar_m.get(el)
 	if m != null and m[0] == cb_width:
 		return m[1]
-	var e := _edges(el, MAR_NAMES, cb_width, true)
+	var e := _edges(el, P_MAR, cb_width, true)
 	_mar_m[el] = [cb_width, e]
 	return e
 
@@ -277,40 +379,38 @@ func _borders(el: UxmlElement) -> PackedFloat64Array:
 	if m != null:
 		return m
 	var out := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
-	var st := _style(el)
+	var rec := _rec(el)
+	var kinds: PackedByteArray = rec[1]
 	for k in 4:
-		var name: String = BOR_NAMES[k]
-		var entry = st.get(name)
-		if entry == null:
-			continue
-		var p := UssValues.parse_length(String(entry["value"]))
-		if p["kind"] == "px":
-			out[k] = maxf(0.0, p["value"])
-		elif p["kind"] == "invalid":
-			_warn_once(el, name, "%s: %s" % [name, p["problem"]])
-		elif p["kind"] == "percent":
-			_warn_once(el, name, "%s: percentages are not supported for border width" % name)
+		var pid := P_BOR + k
+		match kinds[pid]:
+			K_PX:
+				out[k] = maxf(0.0, rec[2][pid])
+			K_BAD:
+				var name: String = PNAMES[pid]
+				_warn_once(el, name, "%s: %s" % [name, rec[4][pid]])
+			K_PCT:
+				var name2: String = PNAMES[pid]
+				_warn_once(el, name2, "%s: percentages are not supported for border width" % name2)
 	_bor_m[el] = out
 	return out
 
 
-## The gap named `name` ("row-gap"/"column-gap"). The `gap` shorthand is
-## expanded by the cascade (UssProperties.expand_shorthand), so the computed
-## style only ever carries longhands — reading `gap` here would bypass the
-## shorthand/longhand ordering the cascade already resolved.
+## The gap `pid` (P_RGAP/P_CGAP). The `gap` shorthand is expanded by the
+## cascade (UssProperties.expand_shorthand), so the computed style only ever
+## carries longhands — reading `gap` here would bypass the shorthand/
+## longhand ordering the cascade already resolved.
 ## base is the content size on the gap's axis.
-func _gap(el: UxmlElement, name: String, base: float) -> float:
-	var raw = _prop(el, name)
-	if raw == null:
-		return 0.0
-	var p := UssValues.parse_length(String(raw))
-	match p["kind"]:
-		"px":
-			return maxf(0.0, p["value"])
-		"percent":
-			return 0.0 if base < 0.0 else maxf(0.0, base * p["value"] / 100.0)
-		"invalid":
-			_warn_once(el, name, "%s: %s" % [name, p["problem"]])
+func _gap(el: UxmlElement, pid: int, base: float) -> float:
+	var rec := _rec(el)
+	match rec[1][pid]:
+		K_PX:
+			return maxf(0.0, rec[2][pid])
+		K_PCT:
+			return 0.0 if base < 0.0 else maxf(0.0, base * rec[2][pid] / 100.0)
+		K_BAD:
+			var name: String = PNAMES[pid]
+			_warn_once(el, name, "%s: %s" % [name, rec[4][pid]])
 	return 0.0
 
 
@@ -358,20 +458,28 @@ func _reverse_main(el: UxmlElement) -> bool:
 	return _enum(el, "flex-direction", DIRECTIONS, "column").ends_with("-reverse")
 
 
-func _has_volatile(el: UxmlElement) -> bool:
-	if _volatile.is_empty():
-		return false
-	var hit = _vol_m.get(el)
+## Which inputs of _measure(el, avail, hint) can change its result:
+## bit 1 avail.x (a percentage width/min-width/max-width/padding), bit 2
+## avail.y (a percentage height/min-height/max-height), bit 4 the hint (el
+## is a layout leaf). Everything else in _measure depends on the element's
+## own style and its children, which are measured against el's own
+## explicit size — never against avail.
+func _sens(el: UxmlElement) -> int:
+	var hit = _sens_m.get(el)
 	if hit != null:
 		return hit
-	var v := _volatile.has(el)
-	if not v:
-		for child in el.children:
-			if _has_volatile(child):
-				v = true
-				break
-	_vol_m[el] = v
-	return v
+	var kinds: PackedByteArray = _rec(el)[1]
+	var s := 0
+	if (kinds[P_W] == K_PCT or kinds[P_MINW] == K_PCT or kinds[P_MAXW] == K_PCT
+			or kinds[P_PAD] == K_PCT or kinds[P_PAD + 1] == K_PCT
+			or kinds[P_PAD + 2] == K_PCT or kinds[P_PAD + 3] == K_PCT):
+		s |= 1
+	if kinds[P_H] == K_PCT or kinds[P_MINH] == K_PCT or kinds[P_MAXH] == K_PCT:
+		s |= 2
+	if _flex_children(el).is_empty():
+		s |= 4
+	_sens_m[el] = s
+	return s
 
 
 # ---------------------------------------------------------------------------
@@ -388,20 +496,32 @@ func _measure(
 	avail: Vector2,
 	border_w_hint: float = -1.0
 ) -> Vector2:
+	# Canonical memo key: avail reaches the result only through the
+	# element's OWN percentage props (children are measured against its own
+	# explicit size), and the hint only matters for leaves. Subtrees holding
+	# volatile (wrapping-label) measures also key on those labels' current
+	# widths and replay the widths the real calls would leave behind.
+	var sens := _sens(el)
+	var kx := avail.x if sens & 1 else 0.0
+	var ky := avail.y if sens & 2 else 0.0
+	var kh := border_w_hint if sens & 4 else -1.0
+	var vl := _vlist(el)
+	var entry := _vstate(vl) if not vl.is_empty() else _no_state
 	var memo: Array
-	var pure := not _has_volatile(el)
-	if pure:
-		var m = _meas_m.get(el)
-		if m != null:
-			memo = m
-			for e in memo:
-				if e[0] == avail.x and e[1] == avail.y and e[2] == border_w_hint:
-					return e[3]
-		else:
-			memo = []
-			_meas_m[el] = memo
-	var w := _dim(el, "width", avail.x)
-	var h := _dim(el, "height", avail.y)
+	var m = _meas_m.get(el)
+	if m != null:
+		memo = m
+		for e in memo:
+			if e[0] == kx and e[1] == ky and e[2] == kh and e[4] == entry:
+				var ex: PackedFloat64Array = e[5]
+				for k in vl.size():
+					_vw[vl[k]] = ex[k]
+				return e[3]
+	else:
+		memo = []
+		_meas_m[el] = memo
+	var w := _dim(el, P_W, avail.x)
+	var h := _dim(el, P_H, avail.y)
 	var pad := _padding(el, avail.x)
 	var bor := _borders(el)
 	var in_w: float = pad[L] + pad[R] + bor[L] + bor[R]
@@ -415,7 +535,7 @@ func _measure(
 			hint = maxf(0.0, border_w_hint - in_w)
 		elif w >= 0.0:
 			hint = maxf(0.0, w - in_w)
-		var intr: Vector2 = _measurer.call(el, _style_for_measure(el), hint)
+		var intr := _measure_call(el, hint)
 		bw = w if w >= 0.0 else intr.x + in_w
 		bh = h if h >= 0.0 else intr.y + in_h
 	else:
@@ -424,23 +544,91 @@ func _measure(
 		var nat := _measure_content(el, Vector2(cw, ch))
 		# Native chrome (e.g. a ScrollContainer's scrollbars) can floor the
 		# auto size, but an authored px/% always wins.
-		var chrome: Vector2 = _measurer.call(el, _style_for_measure(el), cw)
+		var chrome := _measure_call(el, cw)
 		bw = w if w >= 0.0 else maxf(nat.x, chrome.x) + in_w
 		bh = h if h >= 0.0 else maxf(nat.y, chrome.y) + in_h
 	# The border box can never be smaller than its own padding+border —
 	# the floor overrides explicit dims and max bounds alike (Yoga).
 	var out := Vector2(
 		maxf(
-			clampf(bw, _min_or(el, "min-width", avail.x, 0.0), _bound(el, "max-width", avail.x, false)),
+			clampf(bw, _min_or(el, P_MINW, avail.x, 0.0), _bound(el, P_MAXW, avail.x, false)),
 			in_w
 		),
 		maxf(
-			clampf(bh, _min_or(el, "min-height", avail.y, 0.0), _bound(el, "max-height", avail.y, false)),
+			clampf(bh, _min_or(el, P_MINH, avail.y, 0.0), _bound(el, P_MAXH, avail.y, false)),
 			in_h
 		)
 	)
-	if pure:
-		memo.append([avail.x, avail.y, border_w_hint, out])
+	memo.append([kx, ky, kh, out, entry, _vstate(vl) if not vl.is_empty() else _no_state])
+	return out
+
+
+## The measurer, with volatile elements emulated. A volatile measure is a
+## pure function of the control's actual width: a call with a hint >= 0 sets
+## that width first (the engine may clamp it — the real resulting width is
+## read back through options["volatile_width"]), a call without one reads
+## at the current width. Tracking that width per element lets results be
+## memoized while every real call still happens at the exact width the
+## original call sequence would have measured at.
+func _measure_call(el: UxmlElement, hint: float) -> Vector2:
+	if not _volatile.has(el):
+		return _measurer.call(el, _style_for_measure(el), hint)
+	var vm: Array = _vmemo.get(el, [])
+	if vm.is_empty():
+		vm = [{}, {}]  # [set-calls: hint -> [actual width, result], reads: width -> result]
+		_vmemo[el] = vm
+		if not _vw.has(el):
+			_vw[el] = float(_volatile[el])
+	if hint >= 0.0:
+		var hit = vm[0].get(hint)
+		if hit != null:
+			_vw[el] = hit[0]
+			return hit[1]
+		var res: Vector2 = _measurer.call(el, _style_for_measure(el), hint)
+		var actual: float = _volatile_width.call(el) if _volatile_width.is_valid() else hint
+		vm[0][hint] = [actual, res]
+		vm[1][actual] = res
+		_vw[el] = actual
+		return res
+	var cur: float = _vw[el]
+	var hit2 = vm[1].get(cur)
+	if hit2 != null:
+		return hit2
+	# Measure at the tracked width: setting a width the control already
+	# reached is a no-op, so this reads exactly what a hint-less call at
+	# that point of the original sequence read.
+	var res2: Vector2 = _measurer.call(el, _style_for_measure(el), cur)
+	vm[1][cur] = res2
+	return res2
+
+
+## Volatile elements inside el's subtree (el included), document order.
+func _vlist(el: UxmlElement) -> Array:
+	if _volatile.is_empty():
+		return _no_list
+	var hit = _vl_m.get(el)
+	if hit != null:
+		return hit
+	var out: Array = []
+	if _volatile.has(el):
+		out.append(el)
+	for child in el.children:
+		var sub := _vlist(child)
+		if not sub.is_empty():
+			out.append_array(sub)
+	if out.is_empty():
+		out = _no_list
+	_vl_m[el] = out
+	return out
+
+
+func _vstate(vl: Array) -> PackedFloat64Array:
+	var out := PackedFloat64Array()
+	out.resize(vl.size())
+	for k in vl.size():
+		var e: UxmlElement = vl[k]
+		var v = _vw.get(e)
+		out[k] = float(_volatile[e]) if v == null else v
 	return out
 
 
@@ -450,8 +638,8 @@ func _style_for_measure(el: UxmlElement) -> Dictionary:
 	return _styles.get(el, {})
 
 
-func _min_or(el: UxmlElement, name: String, base: float, fallback: float) -> float:
-	var b := _bound(el, name, base, true)
+func _min_or(el: UxmlElement, pid: int, base: float, fallback: float) -> float:
+	var b := _bound(el, pid, base, true)
 	return fallback if b < 0.0 else b
 
 
@@ -464,8 +652,8 @@ func _measure_content(el: UxmlElement, cavail: Vector2) -> Vector2:
 	var wrap := _enum(el, "flex-wrap", WRAPS, "nowrap") != "nowrap"
 	var main := 0 if row else 1
 	var cross := 1 - main
-	var gap_m := _gap(el, "column-gap" if row else "row-gap", cavail[main])
-	var gap_c := _gap(el, "row-gap" if row else "column-gap", cavail[cross])
+	var gap_m := _gap(el, P_CGAP if row else P_RGAP, cavail[main])
+	var gap_c := _gap(el, P_RGAP if row else P_CGAP, cavail[cross])
 	var lines_main := PackedFloat64Array()
 	var lines_cross := PackedFloat64Array()
 	var cur_main := 0.0
@@ -584,14 +772,14 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	var cross := 1 - main
 	var am := area.size[main]
 	var ac := area.size[cross]
-	var gap_m := _gap(el, "column-gap" if row else "row-gap", am)
-	var gap_c := _gap(el, "row-gap" if row else "column-gap", ac)
-	var size_prop := "width" if row else "height"
-	var cross_prop := "height" if row else "width"
-	var min_main := "min-" + size_prop
-	var max_main := "max-" + size_prop
-	var min_cross := "min-" + cross_prop
-	var max_cross := "max-" + cross_prop
+	var gap_m := _gap(el, P_CGAP if row else P_RGAP, am)
+	var gap_c := _gap(el, P_RGAP if row else P_CGAP, ac)
+	var size_prop := P_W if row else P_H
+	var cross_prop := P_H if row else P_W
+	var min_main := P_MINW if row else P_MINH
+	var max_main := P_MAXW if row else P_MAXH
+	var min_cross := P_MINH if row else P_MINW
+	var max_cross := P_MAXH if row else P_MAXW
 	var asx: float = area.size.x
 	# Margin edge indices along main/cross: start/end.
 	var ms_i := L if row else T
@@ -635,7 +823,7 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 		var m := _margins(child, asx)
 		var nat := _measure(child, area.size)
 		var hyp: float
-		var basis := _len(child, "flex-basis", am)
+		var basis := _len(child, P_BASIS, am)
 		if not is_nan(basis):
 			hyp = basis
 		else:
@@ -670,8 +858,8 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 		it_min[k] = mn
 		it_max[k] = mx
 		it_inc[k] = in_cross
-		it_grow[k] = maxf(0.0, _num(child, "flex-grow", 0.0))
-		it_shrink[k] = maxf(0.0, _num(child, "flex-shrink", 1.0))
+		it_grow[k] = maxf(0.0, _num(child, P_GROW, 0.0))
+		it_shrink[k] = maxf(0.0, _num(child, P_SHRINK, 1.0))
 		if row:
 			it_mmain[k] = m[L] + m[R]
 			it_mcross[k] = m[T] + m[B]

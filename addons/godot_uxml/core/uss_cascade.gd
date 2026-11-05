@@ -83,6 +83,7 @@ var _anc_key: Array = []
 var _fc: Array = []                    # for_children Dictionary per element
 var _fc_customs: Array = []            # custom-property value map of _fc (shared read-only)
 var _warn: Array = []                  # per element warnings
+var _arefs: Array = []                 # per element attribute refs (see _attr_refs)
 var _computed_once := false
 ## Previous computed Dictionary for each index update() returned (aligned).
 var last_old: Array = []
@@ -145,6 +146,7 @@ func _index_tree() -> void:
 	_fc.resize(n)
 	_fc_customs.resize(n)
 	_warn.resize(n)
+	_arefs.resize(n)
 
 
 # ---------------------------------------------------------------------------
@@ -373,71 +375,112 @@ static func _inline(text: String) -> Array:
 
 
 # ---------------------------------------------------------------------------
-# State bits (the resolver's _build_state_map, as bitmasks)
+# State keys (the resolver's `states` option — rare, kept on the slow path)
 # ---------------------------------------------------------------------------
 
-func _state_bits(options: Dictionary, attr_enabled: Array) -> PackedInt32Array:
+## Per-element bits contributed by `states` selector keys, matched with NO
+## states active (a key never switches itself on) and root = document root.
+## Empty when the option is absent.
+func _key_bits(options: Dictionary) -> PackedInt32Array:
+	var key_bits := PackedInt32Array()
+	var states_opt: Dictionary = options.get("states", {})
+	if states_opt.is_empty():
+		return key_bits
 	var n := els.size()
-	var bits := PackedInt32Array()
-	bits.resize(n)
+	key_bits.resize(n)
+	var entries: Array = []
+	for key in states_opt.keys():
+		var parsed := UssParser.parse_selectors(String(key))
+		var bad := UssSelector.unsupported_fragment(parsed["selectors"])
+		if parsed["selectors"].is_empty() or bad != "":
+			_opt_warnings.append(UxmlDiagnostic.make(
+				"unsupported-selector",
+				'states key "%s" is not a usable USS selector; it is ignored' % key,
+				doc.source, 0, doc.path
+			))
+			continue
+		var m := 0
+		for s in states_opt[key]:
+			m |= int(STATE_BITS.get(s, 0))
+		entries.append([parsed["selectors"], m])
+	if not entries.is_empty():
+		var parents := {}
+		for i in range(1, n):
+			parents[els[i]] = els[_parent[i]]
+		var base_ctx := {"parents": parents, "states": {}, "root": doc.root}
+		for i in n:
+			var node: UxmlElement = els[i]
+			for entry in entries:
+				for sel in entry[0]:
+					if UssSelector.matches(sel, node, base_ctx):
+						key_bits[i] |= entry[1]
+						break
+	return key_bits
+
+
+# ---------------------------------------------------------------------------
+# Update
+# ---------------------------------------------------------------------------
+
+## The attribute Dictionaries an element's cascade inputs live in:
+## [attributes Array, size, class, name, style, enabled] (each the FIRST
+## attribute of that name, like get_attribute, or null). Values are read
+## through these on every update, so in-place value edits (set_class, or
+## game code writing the model) are seen; the record is rebuilt whenever
+## the attributes Array is replaced or changes size.
+func _attr_refs(el: UxmlElement) -> Array:
+	var c = null
+	var nm = null
+	var st = null
+	var en = null
+	for a in el.attributes:
+		var an: String = a["name"]
+		if an == "class":
+			if c == null:
+				c = a
+		elif an == "name":
+			if nm == null:
+				nm = a
+		elif an == "style":
+			if st == null:
+				st = a
+		elif an == "enabled":
+			if en == null:
+				en = a
+	return [el.attributes, el.attributes.size(), c, nm, st, en]
+
+
+## Recompute every element whose result could have changed (all of them
+## when `force` or on the first call). Returns the preorder indices whose
+## computed style Dictionary differs from the previous one (previous
+## Dictionaries in `last_old`, aligned); `styles` holds the new results.
+##
+## One preorder pass does everything: read the element's cascade inputs,
+## derive its pseudo-state bits (disabled descends from the parent, which
+## is already done), decide whether it is dirty, and recompute it.
+## Matching only ever looks at the element and its ancestors, all of which
+## are final by the time the element is reached.
+func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
+	var n := els.size()
+	_opt_warnings = []
 	var global := 0
 	for s in options.get("active_states", []):
 		global |= int(STATE_BITS.get(s, 0))
-
-	# States keys: matched with NO states active (a key never switches
-	# itself on), root = document root — the original slow path, rare.
-	var key_bits := PackedInt32Array()
-	var states_opt: Dictionary = options.get("states", {})
-	if not states_opt.is_empty():
-		key_bits.resize(n)
-		var entries: Array = []
-		for key in states_opt.keys():
-			var parsed := UssParser.parse_selectors(String(key))
-			var bad := UssSelector.unsupported_fragment(parsed["selectors"])
-			if parsed["selectors"].is_empty() or bad != "":
-				_opt_warnings.append(UxmlDiagnostic.make(
-					"unsupported-selector",
-					'states key "%s" is not a usable USS selector; it is ignored' % key,
-					doc.source, 0, doc.path
-				))
-				continue
-			var m := 0
-			for s in states_opt[key]:
-				m |= int(STATE_BITS.get(s, 0))
-			entries.append([parsed["selectors"], m])
-		if not entries.is_empty():
-			var parents := {}
-			for i in range(1, n):
-				parents[els[i]] = els[_parent[i]]
-			var base_ctx := {"parents": parents, "states": {}, "root": doc.root}
-			for i in n:
-				var node: UxmlElement = els[i]
-				for entry in entries:
-					for sel in entry[0]:
-						if UssSelector.matches(sel, node, base_ctx):
-							key_bits[i] |= entry[1]
-							break
-
-	var own_dis := PackedByteArray()
-	own_dis.resize(n)
-	for i in n:
-		own_dis[i] = 1 if attr_enabled[i] == "false" else 0
+	var key_bits := _key_bits(options)
+	var has_keys := not key_bits.is_empty()
+	# Own-disabled overrides by index: 1 = runtime disabled, 2 = runtime
+	# SetEnabled(true) (cancels the attribute; written last so it wins).
+	var dis_ov := {}
 	for el in options.get("disabled_elements", {}):
 		var i = index.get(el)
 		if i != null:
-			own_dis[i] = 1
+			dis_ov[i] = 1
 	for el in options.get("enabled_elements", {}):
 		var i = index.get(el)
 		if i != null:
-			own_dis[i] = 2 # override: never own-disabled
+			dis_ov[i] = 2
+	var es_bits := {}
 	var es: Dictionary = options.get("element_states", {})
-	var dis := PackedByteArray()
-	dis.resize(n)
-	for i in n:
-		var p := _parent[i]
-		var d := (p >= 0 and dis[p] == 1) or own_dis[i] == 1
-		dis[i] = 1 if d else 0
-		bits[i] = global | (BIT_DISABLED if d else BIT_ENABLED)
 	for el in es:
 		var i = index.get(el)
 		if i == null:
@@ -445,58 +488,7 @@ func _state_bits(options: Dictionary, attr_enabled: Array) -> PackedInt32Array:
 		var m := 0
 		for s in es[el]:
 			m |= int(STATE_BITS.get(s, 0))
-		bits[i] |= m
-	if not key_bits.is_empty():
-		for i in n:
-			bits[i] |= key_bits[i]
-	return bits
-
-
-# ---------------------------------------------------------------------------
-# Update
-# ---------------------------------------------------------------------------
-
-## Recompute every element whose result could have changed (all of them
-## when `force` or on the first call). Returns the preorder indices whose
-## computed style Dictionary differs from the previous one; `styles` holds
-## the new results.
-func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
-	var n := els.size()
-	_opt_warnings = []
-	# One pass over attributes per element: class/name/style/enabled.
-	var a_cls: Array = []
-	var a_name: Array = []
-	var a_style: Array = []
-	var a_en: Array = []
-	a_cls.resize(n)
-	a_name.resize(n)
-	a_style.resize(n)
-	a_en.resize(n)
-	for i in n:
-		var el: UxmlElement = els[i]
-		var c = null
-		var nm = null
-		var st = null
-		var en = null
-		for a in el.attributes:
-			var an: String = a["name"]
-			if an == "class":
-				if c == null:
-					c = a["value"]
-			elif an == "name":
-				if nm == null:
-					nm = a["value"]
-			elif an == "style":
-				if st == null:
-					st = a["value"]
-			elif an == "enabled":
-				if en == null:
-					en = a["value"]
-		a_cls[i] = c
-		a_name[i] = nm
-		a_style[i] = st
-		a_en[i] = en
-	var bits := _state_bits(options, a_en)
+		es_bits[i] = m
 
 	var full := force or not _computed_once
 	var changed := PackedInt32Array()
@@ -505,10 +497,34 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 	inh_dirty.resize(n)
 	var anc_until := -1
 	for i in n:
-		var c = a_cls[i]
-		var nm = a_name[i]
-		var st = a_style[i]
-		var b := bits[i]
+		var el: UxmlElement = els[i]
+		var r = _arefs[i]
+		var attrs: Array = el.attributes
+		if r == null or not is_same(r[0], attrs) or r[1] != attrs.size():
+			r = _attr_refs(el)
+			_arefs[i] = r
+		var a = r[2]
+		var c = null if a == null else a["value"]
+		a = r[3]
+		var nm = null if a == null else a["value"]
+		a = r[4]
+		var st = null if a == null else a["value"]
+		a = r[5]
+		var own_d: int = 1 if a != null and a["value"] == "false" else 0
+		var ov = dis_ov.get(i)
+		if ov != null:
+			own_d = ov
+		var p := _parent[i]
+		var b := global
+		if own_d == 1 or (p >= 0 and (_sig_bits[p] & BIT_DISABLED) != 0):
+			b |= BIT_DISABLED
+		else:
+			b |= BIT_ENABLED
+		var eb = es_bits.get(i)
+		if eb != null:
+			b |= eb
+		if has_keys:
+			b |= key_bits[i]
 		var own: bool = (
 			full or b != _sig_bits[i] or c != _sig_cls[i]
 			or nm != _sig_name[i] or st != _sig_style[i]
@@ -527,13 +543,20 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 			_anc_key[i] = ak
 		elif inh_dirty[i] == 0 and i >= anc_until:
 			continue
-		var el: UxmlElement = els[i]
 		var old = styles.get(el)
 		var old_fc = _fc[i]
 		_compute(i)
-		if full or old == null or old != styles[el]:
+		if full or old == null:
 			changed.append(i)
 			last_old.append(old)
+		elif old != styles[el]:
+			changed.append(i)
+			last_old.append(old)
+		elif (old as Dictionary).keys() == (styles[el] as Dictionary).keys():
+			# Equal result in the same key order (Dictionary == ignores
+			# order): keep the previous object so identity-keyed caches
+			# downstream (layout records) stay valid.
+			styles[el] = old
 		if old_fc == null or old_fc != _fc[i]:
 			var ch := i + 1
 			var e := _end[i]
@@ -542,6 +565,12 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 				ch = _end[ch]
 	_computed_once = true
 	return changed
+
+
+## True when the element is effectively disabled after the last update
+## (enabled="false" / runtime set, descending from ancestors).
+func is_disabled(i: int) -> bool:
+	return (_sig_bits[i] & BIT_DISABLED) != 0
 
 
 func _class_set(raw, local: String) -> Dictionary:

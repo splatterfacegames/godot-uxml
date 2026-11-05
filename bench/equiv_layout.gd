@@ -46,6 +46,7 @@ func _compare(name: String, d: UxmlDocument, host: Vector2) -> void:
 	var opts2 := opts.duplicate()
 	opts2["warned"] = {}
 	opts2["volatile"] = d._volatile_measures()
+	opts2["volatile_width"] = d._volatile_width
 	var w2: Array = []
 	var b := UxmlFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w2, opts2)
 	_checks += 1

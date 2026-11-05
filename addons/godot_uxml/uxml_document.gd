@@ -61,8 +61,10 @@ var _el_names: Dictionary = {}      # UxmlElement -> String
 var _parents: Dictionary = {}       # UxmlElement -> UxmlElement
 var _states: Dictionary = {}        # UxmlElement -> {state: true}
 var _disabled_rt: Dictionary = {}   # UxmlElement -> bool (runtime override via set_enabled)
-var _disabled_eff: Dictionary = {}  # UxmlElement -> true (effective, incl. attr + ancestry)
-var _gone_eff: Dictionary = {}      # UxmlElement -> true (effective display:none incl. ancestors)
+# Effective flags per cascade preorder index (attr + runtime + ancestry):
+var _dis: PackedByteArray = PackedByteArray()   # disabled
+var _gone: PackedByteArray = PackedByteArray()  # display:none on self or an ancestor
+var _own_none: PackedByteArray = PackedByteArray()  # display:none on self
 var _rt_warnings: Array = []
 var _applier: UxmlStyleApplier = null  # one per load: its dedupe set and
                                       # resource caches span all restyles
@@ -88,6 +90,7 @@ var _reapply: Array = []
 var _unsettled := true
 var _pending_fresh := false
 var _el_of: Dictionary = {}           # outer Control -> UxmlElement
+var _layout_records: Dictionary = {}  # flex layout's parsed-style cache
 
 ## Computed-style properties that can change neither the flex geometry nor
 ## any control's intrinsic measure: a restyle that only changes these
@@ -213,8 +216,9 @@ func _clear() -> void:
 	_parents.clear()
 	_states.clear()
 	_disabled_rt.clear()
-	_disabled_eff.clear()
-	_gone_eff.clear()
+	_dis = PackedByteArray()
+	_gone = PackedByteArray()
+	_own_none = PackedByteArray()
 	_styles = {}
 	_rt_warnings = []
 	# The applier holds the old _rt_warnings array by reference — it must be
@@ -230,6 +234,7 @@ func _clear() -> void:
 	_unsettled = true
 	_pending_fresh = false
 	_el_of = {}
+	_layout_records = {}
 	_doc = null
 	diagnostics = []
 
@@ -414,10 +419,35 @@ func _restyle_now() -> void:
 		"enabled_elements": runtime_enabled,
 	})
 	_styles = _cascade.styles
-	var old_dis := _disabled_eff
-	var old_gone := _gone_eff
-	_compute_disabled()
-	_compute_gone()
+	var cels: Array = _cascade.els
+	var n := cels.size()
+	if _own_none.size() != n:
+		_own_none.resize(n)
+		_own_none.fill(0)
+		_dis.resize(n)
+		_dis.fill(0)
+		_gone.resize(n)
+		_gone.fill(0)
+	# display:none on the element itself can only change where the computed
+	# style did.
+	for k in changed.size():
+		var ci := changed[k]
+		var disp = _styles[cels[ci]].get("display")
+		_own_none[ci] = 1 if disp != null and String(disp["value"]) == "none" else 0
+	# Effective flags, preorder (parent first). Disabled comes straight from
+	# the cascade's state bits: the document's runtime overrides are passed
+	# to it as disabled/enabled_elements, so the descent rule is identical.
+	# An element whose effective flags flipped is re-applied.
+	var flipped: Array = []
+	var parent: PackedInt32Array = _cascade._parent
+	for i in n:
+		var d := 1 if _cascade.is_disabled(i) else 0
+		var p := parent[i]
+		var g := 1 if _own_none[i] == 1 or (p >= 0 and _gone[p] == 1) else 0
+		if d != _dis[i] or g != _gone[i]:
+			_dis[i] = d
+			_gone[i] = g
+			flipped.append(cels[i])
 	# One applier per load: its warning dedupe and resource caches must
 	# survive restyles or every hover would re-report and re-load misses.
 	if _applier == null:
@@ -439,25 +469,12 @@ func _restyle_now() -> void:
 			seen[el] = true
 			if not need_layout and not _paint_only(olds[k], _styles[el]):
 				need_layout = true
-		# Effective disabled / display:none changes (ancestors included).
+		# Effective disabled / display:none flips (ancestors included).
 		# Disabled flips relayout too: native disabled styling may change
 		# a control's minimum size.
-		for el in old_dis:
-			if not _disabled_eff.has(el):
-				seen[el] = true
-				need_layout = true
-		for el in _disabled_eff:
-			if not old_dis.has(el):
-				seen[el] = true
-				need_layout = true
-		for el in old_gone:
-			if not _gone_eff.has(el):
-				seen[el] = true
-				need_layout = true
-		for el in _gone_eff:
-			if not old_gone.has(el):
-				seen[el] = true
-				need_layout = true
+		for el in flipped:
+			seen[el] = true
+			need_layout = true
 		for el in seen:
 			if _controls.has(el):
 				applied.append(el)
@@ -474,11 +491,13 @@ func _restyle_now() -> void:
 					seen[del] = true
 					applied.append(del)
 	_reapply = applied.slice(0, fresh)
+	var cindex: Dictionary = _cascade.index
 	for el in applied:
 		var c: Control = _controls[el]
 		var st: Dictionary = _styles.get(el, {})
+		var ci: int = cindex[el]
 		_applier.apply(el, c, _natives.get(el, c), st,
-			_disabled_eff.has(el), _gone_eff.has(el))
+			_dis[ci] == 1, _gone[ci] == 1)
 	_full_apply = false
 	_force_layout = false
 	if need_layout:
@@ -516,53 +535,6 @@ static func _paint_only(old, new: Dictionary) -> bool:
 	return true
 
 
-func _compute_disabled() -> void:
-	# Preorder walk over the cascade's index: parent before child.
-	_disabled_eff = {}
-	var els: Array = _cascade.els
-	var parent: PackedInt32Array = _cascade._parent
-	var n := els.size()
-	var dis := PackedByteArray()
-	dis.resize(n)
-	for i in n:
-		var el: UxmlElement = els[i]
-		# A set_enabled() call is an override: it wins over the enabled
-		# attribute for this element. A disabled ancestor still wins over
-		# everything — Unity's SetEnabled disables the whole subtree.
-		var own: bool = (
-			_disabled_rt[el] if _disabled_rt.has(el)
-			else el.get_attribute("enabled") == "false"
-		)
-		var p := parent[i]
-		if own or (p >= 0 and dis[p] == 1):
-			dis[i] = 1
-			_disabled_eff[el] = true
-
-
-## Effective display:none: display is not inherited in USS, but a hidden
-## ancestor makes the whole subtree inert — descendants get the same
-## focus/mouse/input suppression as the element itself.
-func _compute_gone() -> void:
-	_gone_eff = {}
-	var els: Array = _cascade.els
-	var parent: PackedInt32Array = _cascade._parent
-	var n := els.size()
-	var gone := PackedByteArray()
-	gone.resize(n)
-	for i in n:
-		var el: UxmlElement = els[i]
-		var p := parent[i]
-		var g := p >= 0 and gone[p] == 1
-		if not g:
-			var st = _styles.get(el)
-			if st != null:
-				var disp = st.get("display")
-				g = disp != null and String(disp["value"]) == "none"
-		if g:
-			gone[i] = 1
-			_gone_eff[el] = true
-
-
 func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vector2:
 	var c: Control = _controls.get(el)
 	if c == null:
@@ -594,14 +566,21 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 
 ## Elements whose intrinsic measure depends on measurer call history: a
 ## wrapping Label reports its height at the width the previous measure left
-## on it. The layout never memoizes subtrees containing one.
+## on it. Mapped to the control's current width; the layout tracks that
+## width through the pass (see UxmlFlexLayout._measure_call).
 func _volatile_measures() -> Dictionary:
 	var out := {}
 	for el in _controls:
 		var c: Control = _controls[el]
 		if c is Label and c.autowrap_mode != TextServer.AUTOWRAP_OFF:
-			out[el] = true
+			out[el] = c.size.x
 	return out
+
+
+## Current width of a volatile element's control (after the engine clamps
+## a measure-time size write).
+func _volatile_width(el: UxmlElement) -> float:
+	return (_controls[el] as Control).size.x
 
 
 func _scroll_bar_width() -> float:
@@ -624,7 +603,9 @@ func _do_layout() -> void:
 		{"source": _doc.source, "file": _doc.path,
 		 "scroll_bar_width": _scroll_bar_width(),
 		 "warned": _layout_warned,
-		 "volatile": _volatile_measures()}
+		 "volatile": _volatile_measures(),
+		 "volatile_width": _volatile_width,
+		 "records": _layout_records}
 	)
 	_rects = res["rects"]
 	_insets = res["insets"]
