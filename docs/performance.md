@@ -389,3 +389,42 @@ Correctness after the merge: `tests/run_tests.gd` 1418 checks,
 `bench/equiv.gd` 1483 (native) / 1295 (`--gdscript`),
 `bench/equiv_layout.gd` 192 / 192, `bench/equiv_runtime.gd` 1158 / 1158,
 `bench/equiv_parse.gd` 2619 / 2619, 0 failures.
+
+## Input controls as part trees (`unity/controls-inputs`)
+
+Method: `bench/bench.gd -- --quick` and `bench/workloads.gd`, each with and
+without `--no-theme`, two rounds each on origin/main (0552e89) and on the
+branch, run one after the other on the same loaded machine (Xeon W-2135,
+native core). The table gives the best of the two rounds, in ms (median).
+
+| op | main | branch | main, no theme | branch, no theme |
+| --- | ---: | ---: | ---: | ---: |
+| load_document(big) full | 546.0 | 645.9 | 479.6 | 536.1 |
+| load_document(Options.uxml) | 11.6 | 16.2 | 4.4 | 6.8 |
+| hover toggle (button) | 1.33 | 1.25 | 1.16 | 1.12 |
+| set_class churn (card) | 15.1 | 21.4 | 13.0 | 16.6 |
+| resize relayout | 11.8 | 17.2 | 11.6 | 15.7 |
+| idle restyle (no change) | 0.72 | 0.92 | 0.67 | 0.81 |
+| hud frame (8 labels + relayout) | 0.54 | 0.89 | 0.48 | 0.64 |
+| settings: load + first layout | 52.5 | 71.3 | 46.7 | 62.9 |
+| settings: switch tab | 7.6 | 8.9 | 5.6 | 7.1 |
+| inventory: load + first layout | 105.3 | 106.4 | 80.4 | 82.5 |
+| list1k: load + first layout | 1918.2 | 1765.5 | 1187.0 | 1175.3 |
+| listview10k: scroll 3 rows | 2.57 | 2.53 | 2.21 | 1.98 |
+
+- Documents without input controls (inventory, dialog, list1k,
+  listview10k) cost the same as on main: the incremental cascade, the
+  paint-only fast path and the layout cache are unchanged.
+- Documents with input controls cost more because each control is now
+  its part tree: a Slider is 7 to 9 elements, a TextField 3 or 4, where the
+  old mapping had one wrapper. The settings screen (12 rows of Sliders,
+  Toggles and DropdownFields per tab) loads about 35% slower; the large
+  benchmark document (a Slider in every fourth card, a TextField in every
+  fifth) shows the same effect in its steady-state rows.
+- A slider value change writes only the dragger `translate` (paint-only)
+  and, with `fill`, the fill offsets: it does not lay out the document.
+- The pixel-grid rounding has no measurable cost (A/B on the branch with
+  `UxmlDocument.pixel_grid` true and false, alternated: resize relayout
+  16.3 / 17.0 / 17.0 / 16.9 ms, hud relayout 0.59 / 0.69 / 0.67 / 0.58 ms).
+- The machine was loaded during the runs: two rounds of the same revision
+  differ by up to 30% for the same op.
