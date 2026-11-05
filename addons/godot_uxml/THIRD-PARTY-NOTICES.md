@@ -7,7 +7,7 @@ expansion, custom-property substitution and cascade structure in
 `addons/godot_uxml/core/` are GDScript ports of TypeScript sources in
 [ReuHomi/uxml-preview](https://github.com/ReuHomi/uxml-preview) `v0.5.0`
 (commit `8cbd5cb72d7b5fb0e9ea0e7b32dfdc9e10879e4a`), as vendored by
-[splatterfacegames/uxml-editor](https://github.com/splatterfacegames/uxml-editor)
+[jethac/uxml-editor](https://github.com/jethac/uxml-editor)
 at commit `819d9c8d11bd6c50e326797055b80fd8b0cf250d`.
 
 | godot-uxml file | upstream source |

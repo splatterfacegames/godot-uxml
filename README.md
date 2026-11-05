@@ -2,7 +2,7 @@
 
 godot-uxml is a Godot 4 addon. The addon loads Unity UI Toolkit documents
 (UXML) and stylesheets (USS) and makes native Godot controls from the files.
-Authors make the UI in `splatterfacegames/uxml-editor`. The same files then
+Authors make the UI in `jethac/uxml-editor`. The same files then
 run in Godot without changes.
 
 - Engine: Godot 4.7.
@@ -18,25 +18,28 @@ keeps the UXML and USS semantics and maps each element to a real Godot control. 
 keyboard navigation, controller input, theme fonts and signals operate as
 in any other Godot UI.
 
-**Correct before fast.** The cascade and parser are ports of the
-`uxml-preview` reference engine. A parity harness compares godot-uxml
-layout with the 44 golden cases of the reference engine. Equivalence checks
-compare each optimization with the original implementation, value by
-value. The test suite has 588 checks.
+**Fast.** Updates are incremental. A hover or a class change recomputes
+only the elements that the change can affect. A paint-only change does
+not run layout again. The native core keeps style and layout data in Rust
+and places controls directly. On a screen with 1,531 elements, a hover
+restyle takes 1.0 ms. Before optimization, the same restyle took 8.5 s.
+See [Performance](#performance).
+
+**Large lists stay fast.** `ListView` makes only enough rows to fill the
+viewport and uses the rows again during a scroll. A list of 10,000 items
+loads in 57 ms and scrolls in 2 ms.
+
+**Verified.** The optimizations do not change behaviour.
+Equivalence checks compare each optimized path with the original
+implementation, value by value, and find 0 differences. The cascade and
+parser are ports of the `uxml-preview` reference engine. A parity harness
+compares godot-uxml layout with the 44 golden cases of the reference
+engine. The test suite has 588 checks.
 
 **Diagnostics, not silent failure.** Each unsupported feature, selector,
 property, attribute or control gives one diagnostic with file, line and
 column. A malformed document still loads: the parser recovers, reports the
 problem and renders the part of the document that the parser can read.
-
-**Fast.** Updates are incremental. A hover or a class change recomputes
-only the elements that the change can affect. A paint-only change does
-not run layout again. The native core keeps style and layout data in Rust
-and places controls directly. See [Performance](#performance).
-
-**Large lists stay fast.** `ListView` makes only enough rows to fill the
-viewport and uses the rows again during a scroll. A list of 10,000 items
-loads in 57 ms and scrolls in 2 ms.
 
 **Design based on Slint.** The runtime architecture follows the design of
 [Slint](https://slint.dev): an observable model, updates driven by

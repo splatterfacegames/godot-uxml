@@ -1,6 +1,6 @@
 # Goal: Implement godot-uxml
 
-Implement **godot-uxml**: a Godot addon that loads UXML and USS, allowing interfaces authored in `splatterfacegames/uxml-editor` to run in Godot.
+Implement **godot-uxml**: a Godot addon that loads UXML and USS, allowing interfaces authored in `jethac/uxml-editor` to run in Godot.
 
 ## Ownership
 

@@ -13,7 +13,7 @@ The runtime's architecture is inspired by [Slint](https://slint.dev)
 (see "Runtime architecture" below).
 
 Reference semantics are ported from `vendor/uxml-preview` inside
-`splatterfacegames/uxml-editor` @ `819d9c8d11bd6c50e326797055b80fd8b0cf250d`
+`jethac/uxml-editor` @ `819d9c8d11bd6c50e326797055b80fd8b0cf250d`
 (upstream `ReuHomi/uxml-preview` v0.5.0, Apache-2.0). See
 `addons/godot_uxml/THIRD-PARTY-NOTICES.md` for the file-by-file mapping and
 deliberate deltas.
