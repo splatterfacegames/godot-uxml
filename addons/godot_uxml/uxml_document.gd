@@ -73,6 +73,9 @@ var _layout_warned: Dictionary = {}    # shared dedupe for layout warnings
 var _effective_root: String = ""       # root the last successful load used
 var _root_box: UxmlBox = null
 var _restyle_queued := false
+## Use the native flex pass when the extension is loaded (it requires the
+## native cascade). False forces UxmlFlexLayout — the reference path.
+static var use_native_layout := true
 var _cascade: UssCascade = null        # persistent incremental cascade per load
 var _full_apply := true                # next restyle re-applies every control
 var _force_layout := true              # next restyle lays out even if paint-only
@@ -423,6 +426,15 @@ func _restyle_now() -> void:
 		_cascade = UssCascade.new(_doc)
 		_full_apply = true
 		_force_layout = true
+		if _cascade._native != null and use_native_layout:
+			# Native flex pass: hand it the controls per preorder index.
+			var ctl: Array = []
+			var boxed := PackedByteArray()
+			for cel in _cascade.els:
+				var cc = _controls.get(cel)
+				ctl.append(cc)
+				boxed.append(1 if cc is UxmlBox else 0)
+			_cascade._native.call("set_controls", ctl, boxed)
 	var dirty = null
 	if not _scan_all:
 		var dl := PackedInt32Array()
@@ -603,12 +615,15 @@ func _scroll_bar_width() -> float:
 	return 0.0
 
 
-func _do_layout() -> void:
-	if _doc == null:
-		return
-	var prev := _rects
-	var res := UxmlFlexLayout.compute(
-		_doc.root, _styles, size,
+## Run the flex pass for `host` without touching controls' placement:
+## the native pass when the extension is loaded, UxmlFlexLayout otherwise.
+func _compute_layout(host: Vector2) -> Dictionary:
+	if _cascade != null and _cascade._native != null and use_native_layout:
+		var r: Array = _cascade._native.call(
+			"layout", host, _scroll_bar_width(), _layout_warned, _rt_warnings)
+		return {"rects": r[0], "content_sizes": r[1], "insets": r[2]}
+	return UxmlFlexLayout.compute(
+		_doc.root, _styles, host,
 		_measure_leaf, _rt_warnings,
 		{"source": _doc.source, "file": _doc.path,
 		 "scroll_bar_width": _scroll_bar_width(),
@@ -621,6 +636,13 @@ func _do_layout() -> void:
 		 # (the volatile set); every other measure is hint-independent.
 		 "hint_free": true}
 	)
+
+
+func _do_layout() -> void:
+	if _doc == null:
+		return
+	var prev := _rects
+	var res := _compute_layout(size)
 	_rects = res["rects"]
 	_insets = res["insets"]
 	for el in _controls:

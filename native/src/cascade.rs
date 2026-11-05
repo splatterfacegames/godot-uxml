@@ -124,6 +124,7 @@ struct Elem {
     var: Variant,
     local: u32,
     local_var: Variant,
+    local_name: String,
     leaf: bool,
     tag: String,
     line: i64,
@@ -137,6 +138,7 @@ struct Props {
     inherited: Vec<bool>,
     supported: Vec<bool>,
     custom: Vec<bool>,
+    lay: Vec<i8>,
     index: HashMap<String, u32>,
 }
 
@@ -193,6 +195,8 @@ pub struct Cascade {
     fc_dict: Vec<VarDictionary>,
     fc_customs: Vec<Rc<Customs>>,
     warn: Vec<Vec<Variant>>,
+    lay_vals: Vec<Vec<Option<GString>>>,
+    lay_ver: Vec<u64>,
     computed_once: bool,
     next_cid: i64,
     // scratch
@@ -245,6 +249,9 @@ impl Cascade {
         self.props.inherited.push(custom || self.inherited_set.contains_key(&key));
         self.props.supported.push(custom || self.supported_set.contains_key(&key));
         self.props.custom.push(custom);
+        self.props.lay.push(
+            crate::layout::LAYOUT_PROPS.iter().position(|p| *p == s.as_str()).map(|x| x as i8).unwrap_or(-1),
+        );
         self.props.names.push(prop.clone());
         self.props.keys.push(key);
         self.props.index.insert(s, id);
@@ -411,7 +418,7 @@ impl Cascade {
         let path = gs(&doc.get("path"));
         let mut c = Cascade {
             interned: HashMap::new(),
-            props: Props { names: vec![], keys: vec![], inherited: vec![], supported: vec![], custom: vec![], index: HashMap::new() },
+            props: Props { names: vec![], keys: vec![], inherited: vec![], supported: vec![], custom: vec![], lay: vec![], index: HashMap::new() },
             inherited_set: cb.get("inherited")?.try_to().ok()?,
             supported_set: cb.get("supported")?.try_to().ok()?,
             implicit: cb.get("implicit")?.try_to().ok()?,
@@ -457,6 +464,8 @@ impl Cascade {
             fc_dict: vec![],
             fc_customs: vec![],
             warn: vec![],
+            lay_vals: vec![],
+            lay_ver: vec![],
             computed_once: false,
             next_cid: 1,
             k_name: "name".to_variant(),
@@ -516,7 +525,7 @@ impl Cascade {
             let tag = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
             let lid = c.intern(&local);
             c.index.insert(obj.instance_id().to_i64(), i);
-            c.els.push(Elem { obj, var, local: lid, local_var: local.to_variant(), leaf, tag, line, column, offset });
+            c.els.push(Elem { obj, var, local: lid, local_var: local.to_variant(), local_name: local.clone(), leaf, tag, line, column, offset });
         }
         c.parent = parent.as_slice().to_vec();
         c.end = end.as_slice().to_vec();
@@ -539,6 +548,8 @@ impl Cascade {
         c.fc_dict = vec![VarDictionary::new(); n];
         c.fc_customs = vec![c.empty_customs.clone(); n];
         c.warn = vec![vec![]; n];
+        c.lay_vals = vec![vec![None; crate::layout::LAYOUT_PROPS.len()]; n];
+        c.lay_ver = vec![0; n];
 
         // Compiled rules.
         let r_scope_idx = get("_rule_scope_idx").to::<PackedInt32Array>();
@@ -1200,6 +1211,18 @@ impl Cascade {
         }
 
         self.warn[i] = warns;
+        // Layout-relevant values for the native flex pass (versioned).
+        let mut lv: Vec<Option<GString>> = vec![None; crate::layout::LAYOUT_PROPS.len()];
+        for it in &comp {
+            let li = self.props.lay[it.pid as usize];
+            if li >= 0 {
+                lv[li as usize] = it.value.try_to::<GString>().ok();
+            }
+        }
+        if lv != self.lay_vals[i] {
+            self.lay_vals[i] = lv;
+            self.lay_ver[i] += 1;
+        }
         // display:none on the element itself (for effective_flags).
         self.own_none[i] = match computed.get(&self.display_key) {
             Some(e) => {
@@ -1248,6 +1271,51 @@ impl Cascade {
         self.fc[i] = Rc::new(fc_list);
         self.fc_dict[i] = fc_dict;
         computed
+    }
+
+    pub fn len(&self) -> usize {
+        self.els.len()
+    }
+
+    /// Direct children (preorder indices) of element i.
+    pub fn children(&self, i: usize) -> Vec<usize> {
+        let mut out = vec![];
+        let mut ch = i + 1;
+        let e = self.end[i] as usize;
+        while ch < e {
+            out.push(ch);
+            ch = self.end[ch] as usize;
+        }
+        out
+    }
+
+    pub fn non_visual(&self, i: usize) -> bool {
+        self.els[i].local_name == "UXML" || self.els[i].local_name == "Style"
+    }
+
+    pub fn is_scroll_view(&self, i: usize) -> bool {
+        self.els[i].local_name == "ScrollView"
+    }
+
+    pub fn element_var(&self, i: usize) -> Variant {
+        self.els[i].var.clone()
+    }
+
+    pub fn file(&self) -> GString {
+        self.source_file.clone()
+    }
+
+    pub fn location(&self, i: usize) -> (i64, i64, i64) {
+        let e = &self.els[i];
+        (e.offset, e.line, e.column)
+    }
+
+    pub fn layout_values(&self, i: usize) -> &[Option<GString>] {
+        &self.lay_vals[i]
+    }
+
+    pub fn layout_version(&self, i: usize) -> u64 {
+        self.lay_ver[i]
     }
 
     pub fn element_warnings(&self) -> VarArray {
@@ -1300,6 +1368,8 @@ impl Cascade {
 pub struct UxmlNativeCascade {
     base: Base<RefCounted>,
     inner: Option<Cascade>,
+    layout_in: Option<crate::layout::LayoutIn>,
+    recs: crate::layout::RecCache,
 }
 
 #[godot_api]
@@ -1329,6 +1399,38 @@ impl UxmlNativeCascade {
             Some(c) => c.update(&options, force, &key_bits, &mut styles, scan_all, &dirty),
             None => PackedInt32Array::new(),
         }
+    }
+
+    /// The runtime controls per preorder index (null for non-visual), and
+    /// whether each is a UxmlBox (measured by natural_size). Once per load.
+    #[func]
+    fn set_controls(&mut self, controls: VarArray, boxed: PackedByteArray) {
+        let mut ctl = vec![];
+        let mut labels = vec![];
+        for v in controls.iter_shared() {
+            let c = v.try_to::<Gd<godot::classes::Control>>().ok();
+            labels.push(c.as_ref().and_then(|c| c.clone().try_cast::<godot::classes::Label>().ok()));
+            ctl.push(c);
+        }
+        self.layout_in = Some(crate::layout::LayoutIn {
+            controls: ctl,
+            boxed: boxed.as_slice().iter().map(|&b| b != 0).collect(),
+            labels,
+        });
+    }
+
+    /// Native flex pass: [rects, content_sizes, insets] Dictionaries keyed
+    /// by element, exactly as UxmlFlexLayout.compute returns them.
+    /// Diagnostics are deduplicated through `warned` and appended to
+    /// `warnings` (both caller-owned, shared across passes).
+    #[func]
+    fn layout(&mut self, host: Vector2, scroll_bar_width: f64, warned: VarDictionary, warnings: VarArray) -> VarArray {
+        let (Some(c), Some(io)) = (self.inner.as_ref(), self.layout_in.as_ref()) else {
+            return VarArray::new();
+        };
+        self.recs.refresh(c);
+        let out = crate::layout::Pass::new(c, io, &self.recs.recs, scroll_bar_width, warned, warnings).run(host);
+        args(&[out.rects.to_variant(), out.content.to_variant(), out.insets.to_variant()])
     }
 
     #[func]

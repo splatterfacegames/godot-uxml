@@ -33,6 +33,7 @@ func _initialize() -> void:
 				Vector2(800, 600), Vector2(800, 600), Vector2(1280, 800), Vector2(801, 600)]:
 			_compare(pair[1], d, host, {}, {})
 			_compare(pair[1] + " (cached)", d, host, records, xcache)
+			_compare(pair[1] + " (document path)", d, host, {}, {})
 		root.remove_child(d)
 		d.free()
 	print("EQUIV_LAYOUT %s: %d checks, %d failures" % ["OK" if _fails == 0 else "FAIL", _checks, _fails])
@@ -60,7 +61,19 @@ func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary,
 		opts2["xcache"] = xcache
 		opts2["hint_free"] = true
 	var w2: Array = []
-	var b := UxmlFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w2, opts2)
+	var b: Dictionary
+	if name.ends_with("(document path)"):
+		# The runtime's own path (native when the extension is loaded),
+		# with a fresh dedupe set and warnings array.
+		var keep_w = d._layout_warned
+		var keep_rt = d._rt_warnings
+		d._layout_warned = {}
+		d._rt_warnings = w2
+		b = d._compute_layout(host)
+		d._layout_warned = keep_w
+		d._rt_warnings = keep_rt
+	else:
+		b = UxmlFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w2, opts2)
 	_checks += 1
 	var bad := ""
 	for k in ["rects", "content_sizes", "insets"]:
