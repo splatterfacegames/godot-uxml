@@ -1555,6 +1555,7 @@ impl UxmlNativeCascade {
             labels,
             rich,
             text_clip: false,
+            pixel_grid: false,
             auto_size: None,
             fields: ks.iter().map(|&b| b & 2 != 0).collect(),
             texrects,
@@ -1568,6 +1569,14 @@ impl UxmlNativeCascade {
     fn set_auto_size(&mut self, applier: Variant) {
         if let Some(io) = self.layout_in.as_mut() {
             io.auto_size = applier.try_to::<Gd<godot::classes::Object>>().ok();
+        }
+    }
+
+    /// Round the layout output to the pixel grid (LayoutIn::pixel_grid).
+    #[func]
+    fn set_pixel_grid(&mut self, on: bool) {
+        if let Some(io) = self.layout_in.as_mut() {
+            io.pixel_grid = on;
         }
     }
 

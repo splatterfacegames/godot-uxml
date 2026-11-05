@@ -95,6 +95,7 @@ Status values:
 | Global converters | done |
 | Element targets (`text`, `value`, `label`, `lowValue`, `highValue`, `choices`, `index`, `tooltip`, `enabledSelf`, `visible`, `focusable`, `tabIndex`, `pickingMode`, `image`, ...) | done |
 | Targets of part-tree controls (Toggle, RadioButton, RadioButtonGroup, ToggleButtonGroup, Foldout, ProgressBar, GroupBox, HelpBox, PopupWindow: `value`, `text`, `label`, `title`, `lowValue`, `highValue`, `messageType`) | done: written through the control behaviors; two-way for the value controls |
+| Targets of the input controls (Slider, SliderInt, MinMaxSlider, TextField, numeric, composite, DropdownField, EnumField: `value`, `label`, `lowValue`, `highValue`, `pageSize`, `minValue`, `maxValue`, `lowLimit`, `highLimit`, `choices`, `index`, `placeholderText`, `isReadOnly`, `maxLength`, `isDelayed`, ...) | done: through the behaviors, two-way with typed values (see design.md, "Input controls") |
 | `style.*` targets | done: written as inline USS |
 | Two-way write-back from user edits | done |
 | `SetBinding`/`ClearBinding` from code | done: `add_binding()`/`remove_binding()` |
@@ -144,12 +145,12 @@ with Unity dumps (`docs/parity.md`).
 | Toggle, RadioButton, RadioButtonGroup, ToggleButtonGroup | done: part trees, theme, states, values, data binding. Differences to Unity: pixel-grid rounding of centred parts |
 | GroupBox, HelpBox, PopupWindow, Foldout, ProgressBar | done: part trees, theme, values, data binding. HelpBox label width differs (see `docs/parity.md`) |
 | Disabled look (`unity-disabled`, opacity 0.5 on the element) | done |
-| Slider, SliderInt, MinMaxSlider | planned (native mapping works today for Slider/SliderInt) |
-| TextField | planned (native mapping works today) |
-| IntegerField, LongField, FloatField, DoubleField, UnsignedIntegerField, UnsignedLongField, Hash128Field | planned |
-| Vector2Field, Vector2IntField, Vector3Field, Vector3IntField, Vector4Field | planned |
-| RectField, RectIntField, BoundsField, BoundsIntField | planned |
-| DropdownField, EnumField | planned (native mapping works today for DropdownField) |
+| Slider, SliderInt, MinMaxSlider | done: part trees, theme, `direction`, `inverted`, `page-size`, `fill`, `show-input-field`, `low-value`/`high-value`, `min-value`/`max-value`/`low-limit`/`high-limit`; keys, controller, pointer (jump, page, drag, label drag) as Unity's BaseSlider; continuous Slider values. Differences: pixel-grid rounding of the centred parts |
+| TextField | done: part tree, theme, `multiline`, `max-length`, `password`/`mask-character`, `readonly`, `is-delayed`, `placeholder-text`, `hide-placeholder-on-focus`, the selection attributes, `keyboard-type`, `hide-mobile-input`; a Godot LineEdit/TextEdit edits the text (IME, selection, clipboard); `--unity-cursor-color`, `--unity-selection-color`. Differences: no inner ScrollView for `vertical-scroller-visibility` Auto/AlwaysVisible; `select-all-on-mouse-up` and `auto-correction` have no effect; Godot line height |
+| IntegerField, LongField, FloatField, DoubleField, UnsignedIntegerField, UnsignedLongField, Hash128Field | done: part trees, theme, Unity's parsing, expressions (`2*3`, `+=5`, `sqrt(16)`, ...) and formatting (all 451 rows of `bench/parity/probes/numeric.json` match), allowed characters, label dragger |
+| Vector2Field, Vector2IntField, Vector3Field, Vector3IntField, Vector4Field | done: part trees and the runtime theme layout (stacked sub-fields), values, binding |
+| RectField, RectIntField, BoundsField, BoundsIntField | done: two-line groups, Bounds center/extents (`ex`..`ez` are the size, as in Unity), values (`Rect2`, `Rect2i`, `AABB`) |
+| DropdownField, EnumField | done: part trees, theme, `choices`/`index` (the UXML `value` selects nothing, as in Unity 6000.3), the menu (Unity's dropdown classes in a Godot Popup; keys, controller, pointer); EnumField types from `UxmlDocument.register_enum()` or from a bound enum property, `include-obsolete-values`. Differences: the menu does not scroll; author sheets do not style the menu |
 | ScrollView, Scroller | planned (native mapping works today for ScrollView) |
 | ListView | planned (virtualized list works today) |
 | TreeView, MultiColumnListView, MultiColumnTreeView | planned |

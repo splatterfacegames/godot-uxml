@@ -173,11 +173,53 @@ static func compute(
 	if options.has("warned"):
 		l._warned = options["warned"]
 	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
+	var rects: Dictionary = l._rects
+	if bool(options.get("pixel_grid", false)):
+		rects = round_to_pixel_grid(root, rects)
 	return {
-		"rects": l._rects,
+		"rects": rects,
 		"content_sizes": l._content_sizes,
 		"insets": l._insets,
 	}
+
+
+## Yoga's RoundToPixelGrid at one pixel per point, as Unity rounds every
+## layout: a position rounds on its own, a size is the difference of the
+## rounded absolute edges, and children start from the unrounded absolute
+## position. Halves round up. Returns a new Dictionary (the cross-pass
+## cache keeps the unrounded rects). The native layout does the same
+## (layout.rs, round_to_pixel_grid).
+static func round_to_pixel_grid(root: UxmlElement, rects: Dictionary) -> Dictionary:
+	var out := rects.duplicate()
+	_round_node(root, 0.0, 0.0, rects, out)
+	return out
+
+
+static func _round_node(el: UxmlElement, abs_l: float, abs_t: float, src: Dictionary, out: Dictionary) -> void:
+	var r = src.get(el)
+	if r == null:
+		return
+	var rr: Rect2 = r
+	var left := float(rr.position.x)
+	var top := float(rr.position.y)
+	var al := abs_l + left
+	var at := abs_t + top
+	out[el] = Rect2(_pixel(left), _pixel(top),
+		_pixel(al + float(rr.size.x)) - _pixel(al), _pixel(at + float(rr.size.y)) - _pixel(at))
+	for c in el.children:
+		_round_node(c, al, at, src, out)
+
+
+## Yoga's roundValueToPixelGrid (no forced ceil/floor).
+static func _pixel(v: float) -> float:
+	var f := fmod(v, 1.0)
+	if f < 0.0:
+		f += 1.0
+	if absf(f) < 0.0001:
+		return v - f
+	if absf(f - 1.0) < 0.0001:
+		return v - f + 1.0
+	return v - f + (1.0 if (f > 0.5 or absf(f - 0.5) < 0.0001) else 0.0)
 
 
 # ---------------------------------------------------------------------------

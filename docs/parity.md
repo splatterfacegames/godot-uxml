@@ -34,21 +34,35 @@ into `Assets/Cases/<case>/`, starts Unity in batch mode with
   attaches the case USS to the host;
 - runs the optional actions of a `<case>.json` sidecar (`focus`,
   `pointer-move`, `pointer-down`, `pointer-up`, `click`, `key`,
-  `force-state`, `set-value`);
+  `navigate` (a NavigationMoveEvent), `submit`, `blur`, `force-state`,
+  `set-value`);
 - forces styles and layout (`ValidateLayout`) and writes every element,
   parts included: type, name, classes, parent and parent chain, content
   container, logical and hierarchy child counts, panel-space rect, layout
   rect, content rect, pseudo-states, focus and picking data, text and
   text measure, control values (`value`, `lowValue`, `title`, ...), and
-  every `IResolvedStyle` value plus `overflow`.
+  every `IResolvedStyle` value plus `overflow`. The dump also has the
+  computed lengths (`style.computed`: `width`, `top`, `translate`, ...
+  as authored, for example `50%`), the custom colours
+  `--unity-cursor-color` and `--unity-selection-color`, the layout measure
+  of each text element (`layoutMeasure`, Unity's DoMeasure: a password
+  mask, a placeholder, one line for an empty input), and the elements that
+  a control adds outside the case (`overlay`: an open dropdown menu).
+
+`Assets/Editor/UxmlProbe.cs` (`-executeMethod UxmlProbe.Run -probeOut
+<file>`) writes `bench/parity/probes/numeric.json`: how each numeric field
+parses and formats 70 inputs, expressions included. `tests/test_inputs.gd`
+checks `UxmlNumeric` against all rows.
 
 Unity needs a valid license: `run.py` reports Unity's exit code and the
 log path. The cases with project-rooted files (`absolute-import-packages`
 and two others) are skipped, because one Unity project cannot hold every
 case's `Assets/` and `Packages/` folders.
 
-The harness matches elements by tree path ("0/1/0"), parts included, and
-compares:
+The harness matches elements by tree path ("0/1/0"), parts included,
+rounds godot-uxml's layout to the pixel grid as the runtime does
+(`UxmlDocument.pixel_grid`), applies `translate` to the rects as Unity's
+`worldBound` does, and compares:
 
 - structure: type, name and classes;
 - geometry: panel-space rects at 0.1px. Text leaves use Unity's own text
@@ -57,9 +71,12 @@ compares:
   background, text and tint colours, font-size (where godot-uxml sets
   one), `-unity-text-align` and opacity.
 
-Unity's pseudo-states and control values after the case actions go into
-the godot-uxml model first, so a state case tests the theme and the cascade
-for that state. Unity reports layout-derived margins and rects for
+Unity's pseudo-states, control values (Toggle, Slider, MinMaxSlider) and
+run-time state classes (a focused slider's `--movable` dragger, the text
+field placeholder class) after the case actions go into the godot-uxml
+model first, so a state case tests the theme and the cascade for that
+state. The slider dragger translate and the MinMaxSlider dragger box come
+from the same functions as in the runtime (`UxmlInputParts.layout_styles`). Unity reports layout-derived margins and rects for
 `display: none` subtrees (zeros, stale rects); those elements are compared
 on structure only.
 
@@ -67,17 +84,20 @@ on structure only.
 
 ### Unity
 
-**41 of 64 cases match exactly. 13 more differ only by pixel-grid
-rounding. Structure: 572/719 elements. Geometry: 2137/2268 values, and
-74 more within 0.5px. Style: 14663/14690 values.** Before the theme had
-the disabled opacity: 36 and 11.
+**79 of 92 cases match exactly. 1 more differs only by pixel-grid
+rounding. Structure: 1274/1445 elements. Geometry: 4897/4956 values, and
+2 more within 0.5px. Style: 32133/32162 values.** The 64 cases from before
+the input controls: 54 match exactly (before: 41, and 13 more within
+pixel rounding). The 28 input control cases: 25 match exactly.
 
 | difference | cases | cause |
 | --- | --- | --- |
-| up to 0.5px | most `ctl-*` cases with centred parts (checkmarks, help box labels, progress titles) | Unity rounds every layout edge to the pixel grid (Yoga's RoundToPixelGrid). godot-uxml keeps fractions. |
-| ScrollView parts (`unity-content-and-vertical-scroll-container`, `unity-content-viewport`, ...) | `scrollview-*`, `child-combinator-through-parts`, `inventory` | ScrollView still maps to a native `ScrollContainer`; the ScrollView part tree is the next task. |
-| help box label width | `ctl-helpbox` | deliberate theme deviation: the label grows, because godot-uxml measures a wrapping Label without a max-content width. |
+| ScrollView parts (`unity-content-and-vertical-scroll-container`, `unity-content-viewport`, ...) | `scrollview-*`, `child-combinator-through-parts`, `inventory` | ScrollView still maps to a native `ScrollContainer`; the ScrollView part tree is the task of the container controls. |
+| inner ScrollView of a multiline TextField | `ctl-textfield-multiline` | `vertical-scroller-visibility` AlwaysVisible: Unity puts a ScrollView in the input; godot-uxml uses the multiline container (see design.md, "Input controls"). |
+| help box label width | `ctl-helpbox`, `ctl-styled-parts` | deliberate theme deviation: the label grows, because godot-uxml measures a wrapping Label without a max-content width. |
 | narrow field | `ctl-basefield` (150px container) | Unity clamps a text measure to the available width, so a long field label shrinks to its 150px minimum and the input collapses. godot-uxml measures the full text. |
+| text wider than its input | `ctl-numeric` (Hash128Field, 1px) | Unity lays out an overflowing input text 1px wider than its measure. |
+| click position of the dragger | `ctl-slider-click` (0.2px) | Unity keeps the dragger at the clicked pixel when the value maps less than half a pixel away; the harness places the dragger from the value. |
 | `/Assets/…` image size | `absolute-import-assets`, `absolute-import-project` | resource resolution, not controls (unchanged from before). |
 
 Per-control status against Unity (structure, classes, states, values,
@@ -88,14 +108,23 @@ geometry and theme style):
 | VisualElement, TemplateContainer, Box, Label, TextElement, Image | match |
 | Button | match (theme box, hover/active/focus/disabled colours) |
 | RepeatButton | match (no theme box; `delay`/`interval` repeat) |
-| Toggle | match except pixel rounding of the centred checkmark |
-| RadioButton, RadioButtonGroup | match except pixel rounding |
+| Toggle | match |
+| RadioButton, RadioButtonGroup | match |
 | ToggleButtonGroup | match (button position classes, `:checked` selection, focus border) |
 | GroupBox, PopupWindow | match |
 | HelpBox | structure and style match; label width differs (see above) |
-| Foldout | match except pixel rounding; depth classes, collapse |
-| ProgressBar | match except pixel rounding; fill = value / high-value |
+| Foldout | match; depth classes, collapse |
+| ProgressBar | match; fill = value / high-value |
 | BaseField label rule | match (min-width 150px, grows with text); narrow fields differ |
+| Slider, SliderInt | match: horizontal, vertical, inverted, fill, show-input-field, focus (`--movable`), hover, press, disabled, keyboard values, click and page values (`ctl-slider*`, `ctl-hover-slider*`) |
+| MinMaxSlider | match: thumbs, dragger box, focus, keys (`ctl-minmaxslider`, `ctl-focus-minmax`, `ctl-hover-minmax`) |
+| TextField | match: single line, placeholder, password, readonly, max-length, focus, hover, disabled, multiline without scroller; differs with an inner ScrollView |
+| IntegerField, LongField, FloatField, DoubleField, UnsignedIntegerField, UnsignedLongField | match (`ctl-numeric`, `ctl-numeric-focus`, `ctl-hover-numeric`); parsing and formatting match all 451 probe rows |
+| Hash128Field | structure and style match; 1px text width (see above) |
+| Vector2/3/4Field, Vector2/3IntField, RectField, RectIntField, BoundsField, BoundsIntField | match (`ctl-vectors`, `ctl-rects`) |
+| DropdownField | match: index, the ignored UXML `value`, focus, hover, disabled, open (`:active`) |
+| EnumField | match: display names, default entry, open |
+| author styles on input parts | match (`ctl-styled-inputs`) |
 
 ### Reference engine
 
@@ -119,9 +148,8 @@ Unity.
 
 ## What would close the gaps
 
-- Pixel-grid rounding of the layout output (Yoga's rounding rule), in the
-  GDScript and the native layout alike.
 - A max-content width for wrapping Labels, and Unity's clamp of a text
   measure to the available width.
-- ScrollView, ListView, TreeView, TabView and the field controls as part
-  trees (the framework in docs/design.md, "Control parts").
+- ScrollView, ListView, TreeView and TabView as part trees (the framework
+  in docs/design.md, "Control parts"); the multiline TextField and the
+  dropdown menu then get their inner ScrollView.

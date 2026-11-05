@@ -421,7 +421,7 @@ sees the result of the steps before it.
 | `uxml_document.gd` | `UxmlDocument` | public `Control`; orchestrates load→build→style→layout, owns runtime states and signals |
 | `runtime/uss_values.gd` | `UssValues` | px/%/auto/none lengths, numbers, hex/`rgb()`/`rgba()`/named colors, `url()` extraction |
 | `runtime/uxml_box.gd` | `UxmlBox` | `Control` that draws the element's own stylebox/texture — containers get real USS chrome |
-| `runtime/uxml_field.gd` | `UxmlField` | caption `Label` + inner control wrapper; `field_node()`, `caption_node()` |
+| `runtime/uxml_field.gd` | `UxmlField` | caption `Label` + inner control wrapper (no control uses it since the input controls became part trees) |
 | `runtime/flex_layout.gd` | `UxmlFlexLayout` | pure geometry: `compute(root, styles, host_size, measurer, warnings, options)` → `{rects, content_sizes}` |
 | `runtime/control_factory.gd` | `UxmlControlFactory` | tag→native mapping, attribute wiring, image loading through the resolver |
 | `runtime/style_applier.gd` | `UxmlStyleApplier` | computed style → styleboxes/colors/fonts, display/visibility/disabled, base-state restore |
@@ -433,6 +433,13 @@ sees the result of the steps before it.
 | `runtime/controls/uxml_behaviors.gd` | `UxmlBehaviors` | one `Behavior` per control: value, pseudo-states on parts, attribute changes, `value_changed` |
 | `runtime/controls/uxml_toggle.gd` | `UxmlToggle` | the interactive box of Toggle/RadioButton: click, `ui_accept`, `toggled`, `button_pressed` |
 | `runtime/controls/uxml_repeat_button.gd` | `UxmlRepeatButton` | Button that fires on press and repeats after `delay`, every `interval` |
+| `runtime/controls/uxml_input_parts.gd` | `UxmlInputParts` | part trees of the input controls; the layout-dependent part styles (slider dragger, MinMaxSlider box); EnumField types |
+| `runtime/controls/uxml_input_behaviors.gd` | `UxmlInputBehaviors` | behaviors of the input controls: keys, controller, pointer, values, binding |
+| `runtime/controls/uxml_numeric.gd` | `UxmlNumeric` | numeric field rules: C# parsing, Unity's ExpressionEvaluator, C# formatting, Hash128 |
+| `runtime/controls/uxml_slider.gd` | `UxmlSlider` | the focusable control of a Slider, SliderInt or MinMaxSlider |
+| `runtime/controls/uxml_popup_field.gd` | `UxmlPopupField` | the focusable control of a DropdownField or EnumField |
+| `runtime/controls/uxml_popup_menu.gd` | `UxmlPopupMenu` | the dropdown menu: a UXML document with Unity's dropdown classes in a Godot `Popup` |
+| `runtime/controls/uxml_text_input.gd` | `UxmlTextInput` | the Godot `LineEdit`/`TextEdit` inside a text element part |
 | `themes/unity-default.uss` | — | the default theme, written from Unity 6000.3 measurements |
 
 ### Control mapping
@@ -451,12 +458,13 @@ Every element gets one Godot control, part elements included (see
 | `PopupWindow` | `Label` (draws the title; the content part is a child) | same |
 | `GroupBox`, `HelpBox`, `ProgressBar`, `RadioButtonGroup`, `ToggleButtonGroup` | `UxmlBox` | same |
 | `Image` | `UxmlBox` hosting a full-rect `TextureRect` | the `TextureRect` |
-| `Slider`, `SliderInt` | `UxmlField(HSlider)` (`SliderInt`: `step=1, rounded`) | the `HSlider` |
-| `TextField` | `UxmlField(LineEdit)`, `TextEdit` when `multiline="true"` | the editor |
-| `DropdownField` | `UxmlField(OptionButton)` | the `OptionButton` |
+| `Slider`, `SliderInt`, `MinMaxSlider` | `UxmlSlider` (its parts are `UxmlBox`es) | same |
+| `TextField`, `IntegerField`, `LongField`, `FloatField`, `DoubleField`, `UnsignedIntegerField`, `UnsignedLongField`, `Hash128Field` | `UxmlBox`; the text element part is a `LineEdit` (`TextEdit` for `multiline="true"`) | the `LineEdit`/`TextEdit` |
+| `Vector2Field` ... `Vector4Field`, `Vector2IntField`, `Vector3IntField`, `RectField`, `RectIntField`, `BoundsField`, `BoundsIntField` | `UxmlBox`; the sub-fields are numeric fields | the editor of the first sub-field |
+| `DropdownField`, `EnumField` | `UxmlPopupField` | same |
 | `ScrollView`, `ListView` | `UxmlBox` hosting `ScrollContainer` + content `Control` | the `ScrollContainer` |
 
-The last four rows keep the native widgets until their part trees exist.
+The last row keeps the native widget until its part tree exists.
 `get_element(name)` returns the element's outer control; `get_native(name)`
 returns the interactive control. Missing names return `null`; duplicate
 `name` attributes keep the first and emit a `duplicate-name` diagnostic.
@@ -464,16 +472,16 @@ Part names (`unity-checkmark`, `unity-content`, ...) are not in the name
 index: `get_element("unity-checkmark")` returns `null`.
 
 Attributes: `name`, `tooltip`, `focusable`, `text`, `label`, `value`,
-`low-value`, `high-value`, `choices`, `index`, `src`, `image`, `title`,
-`delay`, `interval`, `message-type`, `is-multiple-selection`,
-`allow-empty-selection`,
-`placeholder-text`, `max-length`, `readonly`, `multiline`, `mask-char`,
-`enabled` (runtime state), `class`/`style` (cascade). Invalid values warn
-`unsupported-value` and fall back — e.g. `value="abc"` on a Slider clamps
-to its range default, an out-of-range DropdownField `index` selects the
-first item. On DropdownField `value` selects by *choice text*
-(`value="1080"` picks the "1080" item, never index 1080) while `index`
-is the explicit positional selector and wins when both are given.
+`src`, `image`, `title`, `delay`, `interval`, `message-type`,
+`is-multiple-selection`, `allow-empty-selection`, `enabled` (runtime
+state), `class`/`style` (cascade), and the attributes of the input
+controls (see "Input controls"). Invalid values warn `unsupported-value`
+and fall back to Unity's default. For example, `value="abc"` on a Slider
+gives the low value, and an out-of-range DropdownField `index` selects
+nothing. A DropdownField selects by `index` only: Unity 6000.3 maps the
+UXML `value` attribute of a DropdownField to a placeholder property, so
+`value` selects nothing (measured: `ctl-dropdown`). A `value` from code or
+from a binding selects by choice text.
 
 
 ### Data binding (runtime)
@@ -551,18 +559,20 @@ Targets. `property` accepts the Unity C# name or the UXML attribute name:
 | property | target |
 | --- | --- |
 | `text` | Label / Button / TextElement text; the text part of Toggle, RadioButton and Foldout; GroupBox, HelpBox and PopupWindow text; TextField value |
-| `value` | Slider / SliderInt value; Toggle, RadioButton and Foldout state; RadioButtonGroup index; ToggleButtonGroup selected indices (an Array, or one int); ProgressBar value; TextField text; DropdownField selected choice |
+| `value` | Slider / SliderInt / MinMaxSlider value (float, int, Vector2); Toggle, RadioButton and Foldout state; RadioButtonGroup index; ToggleButtonGroup selected indices (an Array, or one int); ProgressBar value; TextField text; numeric field value; composite field value (Vector2/3/4, Vector2i/3i, Rect2, Rect2i, AABB); DropdownField selected choice; EnumField value (int) |
 | `label` | field caption; the label part of Toggle, RadioButton, RadioButtonGroup and ToggleButtonGroup |
 | `lowValue`, `highValue`, `title` | ProgressBar range and title |
 | `messageType` (`message-type`) | HelpBox icon variant (`None`, `Info`, `Warning`, `Error` or the enum index) |
 | `lowValue`, `highValue` (`low-value`, `high-value`) | Slider range (ProgressBar: see above) |
+| `pageSize`, `direction`, `inverted`, `fill`, `showInputField` | Slider options |
+| `minValue`, `maxValue`, `lowLimit`, `highLimit` | MinMaxSlider values and limits |
 | `choices`, `index` | DropdownField items and selection |
 | `tooltip` | `tooltip_text` |
 | `enabledSelf` (`enabled`) | the `set_enabled()` override |
 | `visible` | `style.visibility` |
 | `focusable`, `tabIndex`, `pickingMode`, `languageDirection` | the attribute, applied at once |
 | `image` (`sprite`, `texture`), `tintColor` | Image texture and modulate |
-| `placeholderText`, `isReadOnly`, `maxLength` | TextField options |
+| `placeholderText`, `isReadOnly`, `maxLength`, `isDelayed`, `isPasswordField`, `maskChar`, `hidePlaceholderOnFocus` | text and numeric field options |
 | `itemsSource` | ListView item count (see below) |
 | `usageHints` | accepted, no effect |
 | `style.<name>` | inline USS property; `<name>` is the IStyle C# name (`backgroundColor`, `unityFontStyleAndWeight`) or the USS name |
@@ -602,6 +612,9 @@ Targets. `property` accepts the Unity C# name or the UXML attribute name:
   `unity-disabled` class on the element.
 - A focused LineEdit or TextEdit is not overwritten from the source
   (Unity `DataBinding.UpdateUI`).
+- An EnumField bound to an Object property with an enum hint
+  (`@export var mode: Mode`) takes its entries from the hint when no enum
+  is registered for its `type`.
 - An unknown property, an unresolved path, a target that the control does
   not have and an unknown converter group give one `binding-failed`
   diagnostic per element and message. A binding without a data source
@@ -611,10 +624,8 @@ Two-way:
 
 - For `TwoWay` and `ToSource` bindings of `value` (and of `text` on a
   TextField, `index` on a DropdownField), a user edit writes the UI value
-  to the source: HSlider `value_changed` (int for SliderInt),
-  LineEdit/TextEdit `text_changed`, OptionButton `item_selected`, and the
-  `ui_changed` signal of a part-tree behavior (Toggle, RadioButton,
-  Foldout, RadioButtonGroup, ToggleButtonGroup).
+  to the source through the `ui_changed` signal of the control behavior
+  (every value control is a part tree).
   `Behavior.bind_read(property)` gives the UI value. The same edits emit
   the document `value_changed` signal.
 - After the write, the other bindings of that source and path update.
@@ -820,9 +831,135 @@ To add a control (field and container controls next):
 5. Check: `bench/parity.gd` (Unity section), tests in
    `tests/test_controls.gd`, `bench/equiv*.gd`.
 
-The native widgets that remain (`UxmlField` for Slider, TextField and
-DropdownField; ScrollView/ListView) keep working unchanged. When a field
-control moves to parts, its `UxmlField` mapping goes.
+ScrollView and ListView keep the native `ScrollContainer` until their
+part trees exist. The input controls are part trees (next section).
+
+#### Input controls
+
+`UxmlInputParts` builds the input controls. `UxmlParts._builder` calls
+`UxmlInputParts.builder(local)` for every tag without a builder of its
+own. Measured part trees (Unity 6000.3, `bench/parity/unity/ctl-slider*`,
+`ctl-minmaxslider`, `ctl-textfield*`, `ctl-numeric*`, `ctl-vectors`,
+`ctl-rects`, `ctl-dropdown*`, `ctl-enum*`):
+
+| control | parts |
+| --- | --- |
+| `Slider`, `SliderInt` | [label with `unity-base-slider__label`, `unity-base-field__label--with-dragger`] input > `#unity-drag-container` > (`#unity-tracker` [> `#unity-fill` when `fill`], `#unity-dragger-border`, `#unity-dragger`), then `TextField#unity-text-field.unity-base-slider__text-field` when `show-input-field`; the control class `unity-base-slider--horizontal` or `--vertical` follows `direction` |
+| `MinMaxSlider` | [label] input > (`#unity-tracker`, `#unity-dragger` > (`#unity-thumb-min`, `#unity-thumb-max`)) |
+| `TextField` | [label] `TextInput#unity-text-input` (`--single-line` or `--multiline`) > `TextElement.unity-text-element--inner-input-field-component`; multiline: > `.unity-base-text-field__multiline-container` > the TextElement |
+| numeric fields | [label, with `--with-dragger` except Hash128Field] `<Type>Input#unity-text-input` (`IntegerInput`, `LongInput`, `FloatInput`, `DoubleInput`, `UnsignedIntegerInput`, `UnsignedLongInput`, `Hash128Input`) > TextElement |
+| `Vector2Field` ... `Vector4Field`, int variants | [label] input > one FloatField or IntegerField per component (`#unity-x-input`, ... `.unity-composite-field__field`, the first also `--first`, labels X, Y, Z, W); two-field lines end with `.unity-composite-field__field-spacer` |
+| `RectField`, `RectIntField` | as the vectors, in two `.unity-composite-field__field-group` lines (x, y; `#unity-width-input`, `#unity-height-input` with labels W, H) |
+| `BoundsField`, `BoundsIntField` | [label] input > two Vector3(Int)Fields (`#unity-m_Center-input` "Center" and `#unity-m_Extent-input` "Extents"; `#unity-m_Position-input` "Position" and `#unity-m_Size-input` "Size") |
+| `DropdownField` | [label] input > (`PopupTextElement.unity-base-popup-field__text`, `.unity-base-popup-field__arrow`) |
+| `EnumField` | [label] input > (`TextElement.unity-enum-field__text`, `.unity-enum-field__arrow`) |
+
+Geometry that Unity computes from the layout uses the same static
+functions in the runtime and in `bench/parity.gd`:
+
+- `slider_layout`: Unity moves the dragger and the dragger border with
+  `style.translate`, `value share x (container - dragger - margins)`, and
+  only when the new position is half a pixel or more away. A translate is
+  paint-only, so a value change does not lay out the document.
+- `min_max_layout`: the MinMaxSlider dragger `left` and `width` (rounded
+  to the pixel, halves to even) and the thumb offsets.
+- `fill_style`: the unfilled share of the track as `right` (or `left`,
+  `top`, `bottom`) in percent.
+
+`UxmlDocument._layout_hooks` holds a callable per slider; the document
+calls the hooks after each layout pass, in both layout paths.
+
+Behaviors (`UxmlInputBehaviors`, from Unity's source of BaseSlider,
+ClampedDragger, FieldMouseDragger, TextValueField and
+KeyboardTextEditor):
+
+- Slider, SliderInt: focus adds `unity-base-slider--movable` to the
+  dragger and `:focus` to the slider and its input part. While the
+  dragger is movable, `ui_left`/`ui_right` (`ui_down`/`ui_up` for a
+  vertical slider; joypad d-pad too) change the value by the power of ten
+  nearest to 1/100 of the range (x 10 with Shift, at least 1 for
+  SliderInt) and round to a multiple of that step. `ui_accept` toggles
+  `--movable`. Home and End select the lowest and highest values, PageUp
+  and PageDown move by `page-size` steps. `inverted` swaps the directions.
+- Slider pointer: a press in the drag container sets `:active` on the drag
+  container. With `page-size="0"` the dragger centre jumps to the
+  pointer, then the pointer drags the dragger. With a page size the value
+  pages toward the pointer, again after 250 ms and then every 30 ms while
+  held. A drag on the label changes the value by the pointer delta x
+  1/100 of the range x 0.03. A Slider value is continuous: the drag value
+  rounds to the decimals that one pixel of the track represents (Unity's
+  IMGUI rule), never to step 1.
+- The optional input field shows the value with `g7` (SliderInt: the
+  integer). Each edit sets the slider; text that does not evaluate gives
+  0, as in Unity.
+- MinMaxSlider: focus makes the min thumb movable (`--movable`);
+  `ui_accept` cycles min, max, both and none; `ui_left`/`ui_right` move
+  the movable thumbs. A press on a thumb drags the thumb, a press inside
+  the range drags both, a press outside moves the nearest thumb.
+- TextField: the value is the text. A field without `is-delayed` changes
+  its value on each edit; a delayed field commits on Enter and at the end
+  of editing. Escape (`ui_cancel`) restores the text from the start of the
+  edit. `max-length`, `password` with `mask-character` (the old
+  `mask-char` spelling still works), `readonly`, `placeholder-text`
+  (the input part gets `unity-base-text-field__input--placeholder`),
+  `hide-placeholder-on-focus`, `select-all-on-focus`,
+  `select-word-by-double-click`, `select-line-by-triple-click`,
+  `vertical-scroller-visibility` (TextEdit grows with its text for
+  `Hidden`), `hide-mobile-input` and `keyboard-type` (Godot's virtual
+  keyboard) apply to the editor. Shift+Enter commits a multiline field.
+- Numeric fields: only Unity's allowed characters can be typed. The text
+  evaluates with `UxmlNumeric` (Unity's ExpressionEvaluator: `2*3`,
+  `+=5`, `sqrt(16)`, `L(0,10)`, ...) on each edit, or on commit for
+  `is-delayed`. At the end of editing the text shows the value with the
+  format of the field (`#######0`, `g7`, `R`). A drag on the label changes
+  the value (Unity's NumericFieldDraggerUtility); `readonly` removes the
+  dragger and its class.
+- Composite fields: an edit of a sub-field sends one `value_changed` with
+  the composite value.
+- DropdownField, EnumField: a left press or `ui_accept` opens the menu
+  (`UxmlPopupMenu`); the field is `:active` while the menu is open. The
+  menu is a UXML document with Unity's dropdown classes
+  (`unity-base-dropdown__container-outer`, `__item`, `__checkmark`,
+  `__label`); the selected item is `:checked`. A click chooses an item;
+  `ui_up`/`ui_down` move the highlight (`:hover`), `ui_accept` chooses,
+  `ui_cancel` or a click outside closes the menu. The menu opens above the
+  field when the space below is too small.
+- EnumField: `UxmlDocument.register_enum(type_name, values, obsolete)`
+  gives a `type` its entries (a GDScript enum Dictionary or an Array of
+  names). The names show as Unity's ObjectNames.NicifyVariableName shows
+  them ("FlexStart" as "Flex Start"). `include-obsolete-values` shows the
+  obsolete names too. Without a registered type, a binding to a property
+  with an enum hint gives the entries.
+
+Value types of `value_changed` and of `bind_read`:
+
+| control | type |
+| --- | --- |
+| Slider, FloatField, DoubleField | `float` (a float field value is the 32-bit value in its shortest decimal form: 5.1, not 5.099999904632568) |
+| SliderInt, IntegerField, LongField, UnsignedIntegerField | `int` |
+| UnsignedLongField | `int` with the 64 bits of the value: values above 2^63 - 1 are negative; the field shows them unsigned |
+| Hash128Field | `String`, 32 lower-case hex digits |
+| MinMaxSlider | `Vector2` |
+| TextField, DropdownField | `String` |
+| EnumField | `int` |
+| Vector2/3/4Field, Vector2/3IntField | `Vector2`, `Vector3`, `Vector4`, `Vector2i`, `Vector3i` |
+| RectField, RectIntField | `Rect2`, `Rect2i` |
+| BoundsField, BoundsIntField | `AABB` (BoundsField: position = center - extents, size = 2 x extents; Unity reads `ex`..`ez` as the size) |
+
+Deviations from Unity:
+
+- A multiline TextField with `vertical-scroller-visibility` `Auto` or
+  `AlwaysVisible` gets the multiline container, not Unity's inner
+  ScrollView; the TextEdit scrolls on its own. The ScrollView part tree is
+  the task of the container controls.
+- The menu inner container is a VisualElement, not a ScrollView: a long
+  menu does not scroll.
+- Unity attaches the menu to the document root, so author sheets also
+  style the menu there. Here only the theme styles the menu.
+- `select-all-on-mouse-up` and `auto-correction` are accepted without an
+  effect (Godot's LineEdit selects on focus and has no auto-correction).
+- A text editor is a Godot LineEdit, so its line height follows Godot's
+  font metrics (a TextField is 42 px high at 14 px, Unity 39 px).
 
 ### Default theme
 
@@ -901,6 +1038,17 @@ floor also overrides explicit dims and `max-*`, and applies on the cross
 axis. Otherwise only an authored `min-*` floors shrink; `max-*` also
 caps `align-items: stretch`. This was verified against the installed
 package, not assumed from CSS.
+
+Pixel grid: Unity rounds every layout to the pixel grid (Yoga's
+RoundToPixelGrid at one pixel per point). `UxmlDocument.pixel_grid`
+(default true) does the same in both layout paths
+(`UxmlFlexLayout.round_to_pixel_grid`, `round_node` in `layout.rs`). A
+position rounds on its own; a size is the difference of the rounded
+absolute edges; the children start from the unrounded absolute position;
+halves round up. The rounding runs on the output only, so the cross-pass
+cache keeps the unrounded results. `UxmlFlexLayout.compute` rounds only
+with `options["pixel_grid"]`; the reference-engine comparison in
+`bench/parity.gd` does not round, the Unity comparison does.
 
 Re-layout happens on document resize, on any state/style change that can
 affect geometry (coalesced — several state changes per frame cost one
@@ -1007,8 +1155,9 @@ spatial navigation; disabled/hidden/display:none controls are skipped by
 the engine. `focusable` applies to the element's real focus target — the
 inner native for wrapped fields — so `focusable="false"` removes the
 field from tab order and `focusable="true"` never adds an extra wrapper
-stop. Sliders consume `ui_left`/`ui_right` to change value without
-moving focus. Focused ScrollViews scroll on `ui_up`/`ui_down`/
+stop. A focused slider consumes `ui_left`/`ui_right` (`ui_down`/`ui_up`
+when vertical) to change its value without moving focus, until
+`ui_accept` clears Unity's `--movable` state. Focused ScrollViews scroll on `ui_up`/`ui_down`/
 `ui_page_*` via the document (consumed only when there is overflow —
 otherwise the keys pass through to navigation). `UxmlDocument` adds
 `JOY_BUTTON_A` → `ui_accept` and d-pad → `ui_*` bindings once when an
@@ -1019,7 +1168,8 @@ action has no joypad events — Godot's defaults otherwise lack
 
 Document signals: `button_pressed(name)`, `value_changed(name, value)`
 (`float` for Slider, `int` for SliderInt, `bool` for Toggle, `String`
-for TextField, item text for DropdownField), `loaded(success)`. Native
+for TextField, item text for DropdownField; the other input controls in
+"Input controls"), `loaded(success)`. Native
 signals (`pressed`, `toggled`, `text_changed`, ...) remain directly
 connectable on the controls `get_element`/`get_native` returns —
 `value_changed` fires exactly once per real edit.
@@ -1158,18 +1308,18 @@ rows that scrolled out; slots past the item count are `display: none`.
 - Binding types defined in C# (CustomBinding subclasses such as
   `LocalizedString`) — `unsupported-feature`, the binding is ignored.
 - Unity asset GUID resolution.
-- Part trees for Slider, SliderInt, TextField, DropdownField, ScrollView
-  and ListView (`unity-content-viewport` etc.) — these controls keep their
-  native Godot widgets for now.
+- Part trees for ScrollView and ListView (`unity-content-viewport` etc.):
+  these controls keep their native Godot widgets for now.
 - Full Unity UI Toolkit API compatibility.
 
 ## Native-chrome differences (intentional)
 
 - With the default theme, a Button paints the theme's USS box on every
   Godot stylebox slot. With `theme_path = ""`, a Button keeps Godot's theme
-  chrome where no USS box is authored. Slider, TextField and DropdownField
-  keep Godot chrome inside their `UxmlField`. `UxmlBox`/`UxmlField` paint the authored
-  stylebox themselves so container chrome is faithful.
+  chrome where no USS box is authored. The input controls are part trees
+  with USS boxes; a text field editor keeps an empty Godot theme, never
+  Godot's LineEdit chrome. `UxmlBox` paints the authored stylebox itself
+  so container chrome is faithful.
 - Text measurement is Godot's (`get_combined_minimum_size`), not Unity's
   text engine — intrinsic label sizes can differ slightly. Auto-height
   labels re-measure at their assigned width when wrapping.

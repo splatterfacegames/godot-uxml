@@ -129,6 +129,12 @@ const LIST_DEFAULT_ITEM_HEIGHT := 22.0
 var _scan_all := true                 # next restyle re-reads every element's attributes
 var _transitions: UssTransitions = null  # running USS transitions (per load)
 
+## Round the layout to the pixel grid as Unity does (Yoga's
+## RoundToPixelGrid at one pixel per point): element positions and sizes
+## land on whole pixels. Both layout paths round the same way. Read at
+## every layout.
+var pixel_grid := true
+
 ## When true, transitions advance only through advance_transitions() —
 ## deterministic time for tests and tools. When false (default) they follow
 ## the frame clock (_process delta).
@@ -862,6 +868,7 @@ func _scroll_bar_width() -> float:
 ## the native pass when the extension is loaded, UxmlFlexLayout otherwise.
 func _compute_layout(host: Vector2) -> Dictionary:
 	if _cascade != null and _cascade._native != null and use_native_layout:
+		_cascade._native.call("set_pixel_grid", pixel_grid)
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var r: Array = _cascade._native.call(
@@ -880,7 +887,8 @@ func _compute_layout(host: Vector2) -> Dictionary:
 		 "xcache": _layout_xcache,
 		 # _measure_leaf only reads its width hint for wrapping Labels
 		 # (the volatile set); every other measure is hint-independent.
-		 "hint_free": true}
+		 "hint_free": true,
+		 "pixel_grid": pixel_grid}
 	)
 
 
@@ -893,6 +901,7 @@ func _do_layout() -> void:
 		return
 	if _native_layout():
 		# Native layout + placement; results stay native.
+		_cascade._native.call("set_pixel_grid", pixel_grid)
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var force := PackedInt32Array()

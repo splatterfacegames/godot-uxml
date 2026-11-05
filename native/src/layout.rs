@@ -285,6 +285,9 @@ pub struct LayoutIn {
     /// Some control carries `uxml_clip_text` (overflow: hidden text); while
     /// false the measurer skips the meta check (UxmlStyleApplier.clip_texts).
     pub text_clip: bool,
+    /// Round the output to the pixel grid (UxmlDocument.pixel_grid; Unity's
+    /// RoundToPixelGrid). Same rule as UxmlFlexLayout.round_to_pixel_grid.
+    pub pixel_grid: bool,
     /// UxmlField wrappers (insets via set_content_insets).
     pub fields: Vec<bool>,
     /// TextureRect natives (Image elements: anchor offsets follow insets).
@@ -502,6 +505,11 @@ impl<'a> Pass<'a> {
 
     pub fn run(mut self, host: Vector2) -> Out {
         self.layout(0, Rect2::new(Vector2::ZERO, host), d(host.x));
+        if self.io.pixel_grid {
+            let mut rounded = self.out.rects.clone();
+            round_node(self.c, 0, 0.0, 0.0, &self.out.rects, &mut rounded);
+            self.out.rects = rounded;
+        }
         self.out
     }
 
@@ -1597,4 +1605,41 @@ fn abs_free(mode: &str, reverse: bool, outer: f64, sz: f64, lead: f64) -> f64 {
         at_end = !at_end;
     }
     if at_end { outer - sz } else { lead }
+}
+
+
+// ------------------------------------------------------------- pixel grid
+
+/// Yoga's RoundToPixelGrid at one pixel per point (UxmlFlexLayout.
+/// round_to_pixel_grid): a position rounds on its own, a size is the
+/// difference of the rounded absolute edges, children start from the
+/// unrounded absolute position.
+fn round_node(c: &Cascade, i: usize, abs_l: f64, abs_t: f64, src: &[Option<Rect2>], out: &mut [Option<Rect2>]) {
+    let Some(r) = src[i] else { return };
+    let left = d(r.position.x);
+    let top = d(r.position.y);
+    let al = abs_l + left;
+    let at = abs_t + top;
+    out[i] = Some(Rect2::new(
+        Vector2::new(f(pixel(left)), f(pixel(top))),
+        Vector2::new(f(pixel(al + d(r.size.x)) - pixel(al)), f(pixel(at + d(r.size.y)) - pixel(at))),
+    ));
+    for ch in c.children(i) {
+        round_node(c, ch, al, at, src, out);
+    }
+}
+
+/// Yoga's roundValueToPixelGrid (no forced ceil/floor); C fmod semantics.
+fn pixel(v: f64) -> f64 {
+    let mut fr = v % 1.0;
+    if fr < 0.0 {
+        fr += 1.0;
+    }
+    if fr.abs() < 0.0001 {
+        return v - fr;
+    }
+    if (fr - 1.0).abs() < 0.0001 {
+        return v - fr + 1.0;
+    }
+    v - fr + if fr > 0.5 || (fr - 0.5).abs() < 0.0001 { 1.0 } else { 0.0 }
 }

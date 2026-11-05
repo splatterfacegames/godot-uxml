@@ -388,7 +388,7 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		return _measure_fixed(el, style, hint)
 	var panel := Vector2(dump["panel"]["width"], dump["panel"]["height"])
 	var res := UxmlFlexLayout.compute(doc.root, styles, panel, measurer, [],
-		{"scroll_bar_width": SCROLLBAR})
+		{"scroll_bar_width": SCROLLBAR, "pixel_grid": true})
 	# Styles Unity's controls compute from the layout (a slider's dragger
 	# translate, a MinMaxSlider's dragger box): the same functions as the
 	# runtime behaviors, then the cascade and the layout again.
@@ -405,7 +405,7 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	if relaid:
 		styles = UssStyleResolver.resolve(doc, {"element_states": es})["styles"]
 		res = UxmlFlexLayout.compute(doc.root, styles, panel, measurer, [],
-			{"scroll_bar_width": SCROLLBAR})
+			{"scroll_bar_width": SCROLLBAR, "pixel_grid": true})
 	var abs := _abs_rects(doc.root, res["rects"], styles)
 	var out := {"name": name, "status": "match", "notes": [], "elements": 0, "struct_ok": 0, "geo_half": 0,
 		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0, "pairs": []}
