@@ -106,6 +106,11 @@ var _pooled: Dictionary = {}          # UxmlElement -> true (inside a pooled row
 ## Unity's default ListView fixed-item-height.
 const LIST_DEFAULT_ITEM_HEIGHT := 22.0
 var _scan_all := true                 # next restyle re-reads every element's attributes
+# Data binding and the VisualElement base attributes (tabindex,
+# picking-mode, view-data-key, ...): runtime/uxml_binding.gd and
+# runtime/uxml_common_attributes.gd. Kept across loads.
+var _attrs: UxmlCommonAttributes = null
+var _binding: UxmlBinding = null
 
 ## Computed-style properties that can change neither the flex geometry nor
 ## any control's intrinsic measure: a restyle that only changes these
@@ -129,6 +134,8 @@ func _init() -> void:
 	_root_box.name = "uxml-root"
 	_root_box.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(_root_box)
+	_attrs = UxmlCommonAttributes.new(self)
+	_binding = UxmlBinding.new(self, _attrs)
 	_ensure_input_map()
 
 
@@ -167,6 +174,10 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED and _doc != null:
 		_do_layout()
+	elif what == NOTIFICATION_ENTER_TREE or what == NOTIFICATION_EXIT_TREE:
+		_binding.set_active(what == NOTIFICATION_ENTER_TREE)
+	elif what == NOTIFICATION_PREDELETE:
+		_binding.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +189,8 @@ func _notification(what: int) -> void:
 ## document itself could not be read (the diagnostic is in `diagnostics`,
 ## the previous tree is gone, nothing stale is left on screen).
 func load_document(path: String, root: String = "") -> int:
+	if _doc != null:
+		_attrs.capture_view_data()
 	_clear()
 	var effective_root := root if not root.is_empty() else project_root
 	_resolver = UxmlResourceResolver.new(effective_root)
@@ -193,6 +206,7 @@ func load_document(path: String, root: String = "") -> int:
 	_effective_root = effective_root
 	_index()
 	_restyle_now()
+	_attrs.restore_view_data()
 	loaded.emit(true)
 	return OK
 
@@ -254,6 +268,8 @@ func _clear() -> void:
 	_scan_all = true
 	_lists = {}
 	_pooled = {}
+	_binding.clear()
+	_attrs.clear()
 	_doc = null
 	diagnostics = []
 
@@ -262,6 +278,8 @@ func _clear() -> void:
 ## control tree, and signal wiring — everything keyed off the element tree.
 func _index() -> void:
 	_expand_lists()
+	if not _lists.is_empty():
+		_rt_warnings.append_array(UxmlBindings.extract(_doc))  # item templates
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
@@ -309,6 +327,8 @@ func _index() -> void:
 		if el == _doc.root:
 			continue
 		_wire(el, _controls[el])
+	_attrs.setup()
+	_binding.setup()
 
 
 # ---------------------------------------------------------------------------
@@ -1058,3 +1078,114 @@ func _lists_after_layout() -> void:
 func relayout() -> void:
 	_force_layout = true
 	_queue_restyle()
+
+
+# ---------------------------------------------------------------------------
+# Data binding (Unity 6 runtime binding; see runtime/uxml_binding.gd)
+# ---------------------------------------------------------------------------
+# `element` arguments: null or "" = the document root, a name, a
+# UxmlElement, or one of the element's Controls.
+
+## Unity VisualElement.dataSource. Any Object, Dictionary or Array. The
+## document-level source and sources set on named elements survive
+## load_document()/reload().
+func set_data_source(source: Variant, element: Variant = null) -> void:
+	_binding.set_data_source(source, element)
+
+
+func get_data_source(element: Variant = null) -> Variant:
+	return _binding.get_data_source(element)
+
+
+## Unity VisualElement.dataSourcePath (PropertyPath text, e.g. "a.b[2]").
+## Returns false for text that is not a property path.
+func set_data_source_path(path: String, element: Variant = null) -> bool:
+	return _binding.set_data_source_path(path, element)
+
+
+func get_data_source_path(element: Variant = null) -> String:
+	return _binding.get_data_source_path(element)
+
+
+## Unity GetHierarchicalDataSourceContext: {source, path}.
+func get_data_source_context(element: Variant = null) -> Dictionary:
+	return _binding.get_context(element)
+
+
+## The nearest data-source-type at or above the element.
+func get_data_source_type(element: Variant = null) -> String:
+	return _binding.get_data_source_type(element)
+
+
+## Unity SetBinding(property, new DataBinding{...}). `options`: mode
+## ("TwoWay", "ToSource", "ToTarget", "ToTargetOnce"), trigger
+## ("OnSourceChanged", "EveryUpdate", "WhenDirty"), data_source, to_ui and
+## to_source (Arrays of converter group ids).
+func add_binding(element: Variant, property: String, path: String, options: Dictionary = {}) -> bool:
+	return _binding.add_binding(element, property, path, options)
+
+
+## Unity ClearBinding. "" removes every binding of the element.
+func remove_binding(element: Variant, property: String = "") -> void:
+	_binding.remove_binding(element, property)
+
+
+func get_bindings(element: Variant) -> Array:
+	return _binding.get_bindings(element)
+
+
+## The source (null = every source) changed at `path` ("" = anywhere).
+## OnSourceChanged bindings below that path update on the next flush.
+func notify_changed(source: Variant = null, path: String = "") -> void:
+	_binding.notify_changed(source, path)
+
+
+## Unity Binding.MarkDirty (for WhenDirty bindings, or to force one).
+func mark_binding_dirty(element: Variant, property: String = "") -> void:
+	_binding.mark_dirty(element, property)
+
+
+## Run pending binding updates now instead of at the end of the frame.
+func update_bindings() -> void:
+	_binding.flush()
+
+
+## Unity ConverterGroups: add `converter` (value -> value) to a group that
+## `source-to-ui-converters` / `ui-to-source-converters` name. Global.
+static func register_converter(group_id: String, converter: Callable, source_type: int = -1) -> void:
+	UxmlBinding.register_converter(group_id, converter, source_type)
+
+
+static func unregister_converter_group(group_id: String) -> void:
+	UxmlBinding.unregister_converter_group(group_id)
+
+
+static func register_global_converter(converter: Callable, source_type: int = -1) -> void:
+	UxmlBinding.register_global_converter(converter, source_type)
+
+
+## Give a `data-source` attribute value (Unity asset reference) a Godot
+## source. null removes the entry. Global; register before the load.
+static func register_data_source_asset(key: String, source: Variant) -> void:
+	UxmlBinding.register_data_source_asset(key, source)
+
+
+# ---------------------------------------------------------------------------
+# View data (view-data-key) and focus ring (tabindex)
+# ---------------------------------------------------------------------------
+
+## View state per full view-data-key ("outer__inner"):
+## {key: {"scroll_offset": Vector2}}. Save it with the game and give it
+## back with set_view_data(). The document also keeps it across
+## load_document()/reload().
+func get_view_data() -> Dictionary:
+	return _attrs.get_view_data()
+
+
+func set_view_data(data: Dictionary) -> void:
+	_attrs.set_view_data(data)
+
+
+## The focus targets in Tab order, when the document uses tabindex.
+func get_focus_ring() -> Array:
+	return _attrs.focus_ring()
