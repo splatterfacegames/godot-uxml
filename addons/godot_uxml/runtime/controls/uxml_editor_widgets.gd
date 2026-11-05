@@ -22,6 +22,8 @@ extends RefCounted
 
 ## The control of an editor control element, or null for a plain box.
 static func create_control(el: UxmlElement, factory) -> Control:
+	if not UxmlEditorParts.TAGS.has(el.local) and not UxmlEditorParts.POPUP.has(el.local) 			and el.local != "BreadcrumbItem":
+		return null
 	match el.local:
 		"ToolbarButton", "BreadcrumbItem":
 			var b := Button.new()

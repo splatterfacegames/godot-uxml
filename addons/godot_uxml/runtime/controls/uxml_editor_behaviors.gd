@@ -23,6 +23,8 @@ extends RefCounted
 
 
 static func create(el: UxmlElement) -> UxmlBehaviors.Behavior:
+	if not UxmlEditorParts.TAGS.has(el.local) and not UxmlEditorParts.POPUP.has(el.local) 			and el.local != "BreadcrumbItem":
+		return null  # every runtime tag: one lookup
 	match el.local:
 		"ColorField":
 			return ColorBehavior.new()

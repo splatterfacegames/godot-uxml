@@ -78,6 +78,8 @@ static func is_editor_control(local: String) -> bool:
 
 ## The builder for an editor control tag, or an invalid Callable.
 static func builder(local: String) -> Callable:
+	if not TAGS.has(local) and not POPUP.has(local):
+		return Callable()  # every runtime tag: one lookup
 	match local:
 		"ColorField":
 			return _build_color_field

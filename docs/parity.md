@@ -49,6 +49,27 @@ into `Assets/Cases/<case>/`, starts Unity in batch mode with
   mask, a placeholder, one line for an empty input), and the elements that
   a control adds outside the case (`overlay`: an open dropdown menu).
 
+Editor cases. A sidecar with `"editor": "dark"` or `"editor": "light"`
+dumps the case in an editor panel instead of the runtime panel: the
+dumper creates the panel with `EditorPanel.FindOrCreate` (as a GUIView
+creates the panel of an editor window), puts the common dark or light
+editor sheet on the panel root (`UIElementsEditorUtility.GetCommonDarkStyleSheet`,
+`GetCommonLightStyleSheet`), sets pixelsPerPoint to 1 (batch mode reports
+the screen scale) and sets the editor skin for the session
+(`EditorGUIUtility.skinIndex`), because some editor controls (Toolbar)
+load a sheet for the current skin. The user's skin comes back at the
+end. `"bind": "DumpTarget"` binds a ScriptableObject
+(`Assets/Editor/DumpTarget.cs`, `DumpSmallTarget.cs`) to the case root
+with `BindingExtensions.Bind`, so PropertyField and InspectorElement
+build their fields. More actions: `set-prop` (a C# property without a
+UXML attribute, such as `ToolbarSpacer.flex`), `breadcrumbs`
+(`ToolbarBreadcrumbs.PushItem`), and a `set-value` of a Color, curve,
+gradient, enum or uint. The harness applies the same skin
+(`UxmlTheme.attach` with the editor theme), Unity's built-in layers and
+tags (`set_layer_names`, `set_tags`), the `set-prop` values as attributes,
+and, for bound cases, the fields that the PropertyField and the
+InspectorElement build from a Godot stand-in of DumpTarget.
+
 `Assets/Editor/UxmlProbe.cs` (`-executeMethod UxmlProbe.Run -probeOut
 <file>`) writes `bench/parity/probes/numeric.json`: how each numeric field
 parses and formats 70 inputs, expressions included. `tests/test_inputs.gd`
@@ -84,9 +105,11 @@ on structure only.
 
 ### Unity
 
-**94 of 109 cases match exactly. 1 more differs only by pixel-grid
-rounding. Structure: 2201/2225 elements. Geometry: 6997/7092 values, and
-2 more within 0.5px. Style: 46096/46098 values.** The 109 cases are the
+**112 of 127 cases match exactly. 1 more differs only by pixel-grid
+rounding. Structure: 3237/3261 elements. Geometry: 10477/10572 values,
+and 2 more within 0.5px. Style: 68716/68718 values.** The 18 editor
+control cases (`ed-*`, 12 in the dark skin and 6 in the light skin) all
+match exactly. Before the editor controls: 94 of 109. The 109 cases are the
 81 cases of the container branch (55 exact there) and the 28 input
 control cases (25 exact on the input branch); together they match better
 than either branch alone: the size field of a ListView footer is now a
@@ -144,6 +167,14 @@ geometry and theme style):
 | MultiColumnListView | structure matches; pixel rounding of the header icon, Label height in cells |
 | TabView, Tab | match, except the underline of a Tab outside a TabView |
 | TwoPaneSplitView, IMGUIContainer | match |
+| ColorField | match, dark and light (`ed-colorfield*`): alpha, opaque, no alpha, HDR, no eyedropper, disabled, hover |
+| CurveField, GradientField | match, dark and light (`ed-curve-gradient*`, `ed-field-states*`): labels, no label, HDR, disabled, focus |
+| ObjectField | match, dark and light (`ed-objectfield*`): typed, Object, no label, disabled, hover |
+| EnumFlagsField, MaskField, LayerField, LayerMaskField, RenderingLayerMaskField, TagField | match, dark and light (`ed-masks*`): display texts (Nothing, Everything, names, composites), masks, disabled |
+| Toolbar, ToolbarButton, ToolbarToggle, ToolbarMenu, ToolbarSpacer, ToolbarBreadcrumbs, ToolbarSearchField, ToolbarPopupSearchField | match, dark and light (`ed-toolbar*`): flexible spacers, breadcrumbs, toggles with text and label, hover, active, checked, disabled |
+| PropertyField | match (`ed-propertyfield`): int, float with label, string, bool, Color, Vector2, enum, flags, curve, gradient, texture, layer mask |
+| InspectorElement | match (`ed-inspector`): script field, label alignment at 450px |
+| runtime controls in the editor theme | match, dark and light (`ed-runtime*`): Label, Button, Toggle, TextField, IntegerField, FloatField, DropdownField, Vector3Field, Foldout, Slider, RadioButton, HelpBox, ProgressBar |
 
 ### Reference engine
 

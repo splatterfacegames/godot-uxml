@@ -1,0 +1,11 @@
+.panel {
+    padding: 4px;
+}
+
+#color > .unity-base-field__label {
+    color: rgb(255, 200, 0);
+}
+
+.unity-toolbar-button:hover {
+    color: rgb(255, 255, 255);
+}

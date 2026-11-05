@@ -195,11 +195,25 @@ with Unity dumps (`docs/parity.md`).
 
 ## Controls (UnityEditor.UIElements)
 
-Unity provides these controls only inside the Unity Editor.
+Unity provides these controls only inside the Unity Editor. godot-uxml
+builds the controls as Unity part trees (measured in an editor panel with
+the dark and the light editor skin: `bench/parity/unity/ed-*.json`). A
+document with an editor control gets the editor theme in place of the
+runtime theme (`UxmlDocument.editor_theme`, `editor_skin`; see
+design.md, "Editor controls").
 
 | Control | Status |
 | --- | --- |
-| ColorField, CurveField, GradientField, ObjectField | planned |
-| EnumFlagsField, MaskField, LayerField, LayerMaskField, RenderingLayerMaskField, TagField | planned |
-| Toolbar, ToolbarButton, ToolbarToggle, ToolbarMenu, ToolbarSpacer, ToolbarBreadcrumbs, ToolbarSearchField, ToolbarPopupSearchField | planned |
-| PropertyField, InspectorElement | planned: these need a Unity SerializedObject, so the Godot form binds to a Godot Object instead |
+| Editor theme (dark and light skins) | done: `themes/unity-editor.uss` and `unity-editor-dark.uss` / `unity-editor-light.uss`, attached for a document with an editor control (`editor_theme` "auto", "always", "never"); the editor look of the runtime controls too. Differences: the container controls keep the runtime look |
+| ColorField | done: part tree, theme, `show-alpha`, `hdr`, `show-eye-dropper`, value (`Color`), binding; a Godot ColorPicker popup; the eyedropper samples the viewport. Matches Unity in `ed-colorfield*` |
+| CurveField | done: part tree, theme, value (a Godot `Curve`), binding; the input draws the curve; a curve editor popup. Differences: the curve fills the curve bounds (no `ranges`) |
+| GradientField | done: part tree, theme, value (a Godot `Gradient`), `hdr`, `color-space`, binding; the preview over a checker; a gradient editor popup. Unity 6000.3 reads no UXML `hdr` (measured) |
+| ObjectField | done: part tree, theme, `type`, `allow-scene-objects`, value (`Object`), binding, drop; Unity's object picker maps to a popup of the `res://` files of the type (scene nodes with `allow-scene-objects`), or to `UxmlDocument.set_object_picker()` |
+| EnumFlagsField, MaskField | done: part trees, theme, `choices`, `choices-masks`, `type` (registered enums), Unity's display text (Nothing, Everything, names), the multi-select menu with Nothing and Everything (a Godot PopupMenu, as Unity's editor uses an OS menu), int values, binding. Unity 6000.3 reads no UXML `choices-masks` (measured); godot-uxml reads the attribute |
+| LayerField, LayerMaskField, RenderingLayerMaskField, TagField | done: part trees, theme, menus, values, binding. Unity's project layers and tags map to Godot's project settings (physics and render layer names, global groups) or to `set_layer_names()`, `set_rendering_layer_names()`, `set_tags()` |
+| Toolbar, ToolbarButton, ToolbarToggle, ToolbarSpacer | done: part trees, theme (hover, active, checked), `button_pressed`, `value_changed`, `flex` (Unity 6000.3 reads `flex` from C# only; godot-uxml also reads the attribute) |
+| ToolbarMenu | done: part tree, theme, `variant`, a PopupMenu of `set_menu_items()` entries |
+| ToolbarBreadcrumbs | done: `push_breadcrumb()`, `pop_breadcrumb()`, item callbacks, first-item class |
+| ToolbarSearchField, ToolbarPopupSearchField | done: part trees, theme, text value, cancel button, the search menu of the popup variant. Unity 6000.3 reads no UXML `value` (measured); godot-uxml follows Unity |
+| PropertyField | done: `binding-path`, `label`; the field for the type and hint of the bound Godot property (bool, int, float, String, enum, flags, layers, ranges, Color, vectors, rects, AABB, Curve, Gradient, Object), Unity's names and classes, two-way binding. Differences: arrays and Dictionaries get a "No GUI implemented" Label |
+| InspectorElement | done: one PropertyField per editor property of the data source Object, the script first as Unity's m_Script, Unity's label alignment, two-way binding |
