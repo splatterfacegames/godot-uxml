@@ -81,7 +81,15 @@ var _sig_style: Array = []
 var _sig_bits: PackedInt32Array
 var _anc_key: Array = []
 var _fc: Array = []                    # for_children Dictionary per element
-var _fc_customs: Array = []            # custom-property value map of _fc (shared read-only)
+var _fc_customs: Array = []            # [id, custom-property map of _fc] (shared, read-only)
+var _bloom: PackedInt64Array           # per element: feature bits of all its ancestors
+var _own_bloom: PackedInt64Array       # per element: its own class/name/type bits
+var _sel_need: PackedInt64Array        # per selector: bits its non-rightmost compounds need
+var _sel_entries: Array = []           # per selector: lazily shared computed entries
+var _subst: Dictionary = {}            # customs id -> {value -> substituted (false = failed)}
+var _next_cid := 1
+const _EMPTY_CP := [0, {}]
+static var _empty_fc := {}
 var _warn: Array = []                  # per element warnings
 var _arefs: Array = []                 # per element attribute refs (see _attr_refs)
 var _computed_once := false
@@ -145,6 +153,8 @@ func _index_tree() -> void:
 	_anc_key.resize(n)
 	_fc.resize(n)
 	_fc_customs.resize(n)
+	_bloom.resize(n)
+	_own_bloom.resize(n)
 	_warn.resize(n)
 	_arefs.resize(n)
 
@@ -264,6 +274,17 @@ func _add_rule(f: Dictionary) -> void:
 					_anc_names[nm] = true
 				_anc_states |= mask
 		_sel_parts.append(parts)
+		var need := 0
+		for pi2 in parts.size() - 1:
+			var cp2: Array = parts[pi2]
+			for x in cp2[0]:
+				need |= _fbits("<" + x)
+			for x in cp2[1]:
+				need |= _fbits("#" + x)
+			for x in cp2[2]:
+				need |= _fbits("." + x)
+		_sel_need.append(need)
+		_sel_entries.append(null)
 		_sel_spec.append((names << 40) | (classes << 20) | types)
 		_sel_states.append(UssSelector.states_required_by(sel))
 		_sel_origins.append(null)
@@ -276,6 +297,22 @@ func _add_rule(f: Dictionary) -> void:
 			_bucket_add(_b_type, right[0][0], s)
 		else:
 			_b_any.append(s)
+
+
+## Two bloom-filter bits for a feature key ("<Type", "#name", ".class").
+static func _fbits(key: String) -> int:
+	var h := key.hash()
+	return (1 << (h & 63)) | (1 << ((h >> 6) & 63))
+
+
+func _own_bits(i: int) -> int:
+	var b := _fbits("<" + _local[i])
+	var nm = _name[i]
+	if nm != null:
+		b |= _fbits("#" + String(nm))
+	for c in _cls_set[i]:
+		b |= _fbits("." + String(c))
+	return b
 
 
 static func _bucket_add(b: Dictionary, key: String, s: int) -> void:
@@ -333,6 +370,29 @@ func _origins_for(s: int) -> Array:
 			origin["states"] = states.duplicate()
 		out.append(origin)
 	_sel_origins[s] = out
+	return out
+
+
+## Shared computed entries for selector `s`: per declaration, an Array of
+## {value, origin} per static shorthand expansion pair (null for var()
+## declarations, which are substituted per element).
+func _entries_for(s: int, origins: Array) -> Array:
+	var e = _sel_entries[s]
+	if e != null:
+		return e
+	var r := _sel_rule[s]
+	var de: Array = _rule_dexp[r]
+	var out: Array = []
+	for d in de.size():
+		var pairs = de[d]
+		if pairs == null:
+			out.append(null)
+			continue
+		var lst: Array = []
+		for pair in pairs:
+			lst.append({"value": pair[1], "origin": origins[d]})
+		out.append(lst)
+	_sel_entries[s] = out
 	return out
 
 
@@ -537,11 +597,13 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 			_sig_name[i] = nm
 			_sig_style[i] = st
 			_sig_bits[i] = b
+			_own_bloom[i] = _own_bits(i)
 			var ak := _anc_key_of(i)
 			if not full and ak != _anc_key[i] and _end[i] > anc_until:
 				anc_until = _end[i]
 			_anc_key[i] = ak
-		elif inh_dirty[i] == 0 and i >= anc_until:
+		_bloom[i] = (_bloom[p] | _own_bloom[p]) if p >= 0 else 0
+		if not own and inh_dirty[i] == 0 and i >= anc_until:
 			continue
 		var old = styles.get(el)
 		var old_fc = _fc[i]
@@ -678,6 +740,7 @@ func _compute(i: int) -> void:
 	cand.append_array(_b_any)
 	cand.sort()
 
+	var bloom := _bloom[i]
 	# Candidates in cascade order: parallel arrays.
 	var c_prop := PackedStringArray()
 	var c_val := PackedStringArray()
@@ -685,6 +748,7 @@ func _compute(i: int) -> void:
 	var c_exp: Array = []
 	var c_origin: Array = []
 	var c_spec := PackedInt64Array()
+	var c_ent: Array = []               # shared entry lists (static rule decls) or null
 
 	var k := 0
 	var nc := cand.size()
@@ -704,6 +768,11 @@ func _compute(i: int) -> void:
 		var best_spec := -1
 		for kk in range(k, k_end):
 			var ss := cand[kk]
+			# Ancestor bloom: a descendant/child selector whose ancestor
+			# features are not all present above this element cannot match.
+			var need := _sel_need[ss]
+			if need != 0 and (bloom & need) != need:
+				continue
 			var parts: Array = _sel_parts[ss]
 			if not _match_from(parts, parts.size() - 1, i, scope_idx):
 				continue
@@ -715,6 +784,7 @@ func _compute(i: int) -> void:
 		if best_sel < 0:
 			continue
 		var origins := _origins_for(best_sel)
+		var ents := _entries_for(best_sel, origins)
 		var dp: PackedStringArray = _rule_dprop[r]
 		var dv: PackedStringArray = _rule_dval[r]
 		var df: PackedInt32Array = _rule_dflag[r]
@@ -726,6 +796,7 @@ func _compute(i: int) -> void:
 			c_exp.append(de[d])
 			c_origin.append(origins[d])
 			c_spec.append(best_spec)
+			c_ent.append(ents[d])
 
 	var st = _sig_style[i]
 	if st != null:
@@ -741,6 +812,7 @@ func _compute(i: int) -> void:
 			c_exp.append(de[d])
 			c_origin.append(_inline_origin(d))
 			c_spec.append(INLINE_SPEC)
+			c_ent.append(null)
 		for problem in inl[4]:
 			warns.append(UxmlDiagnostic.make(
 				"malformed",
@@ -750,7 +822,9 @@ func _compute(i: int) -> void:
 
 	var ncand := c_prop.size()
 	# Custom properties: inherited values, then the winning declarations.
-	var customs: Dictionary = _fc_customs[p] if p >= 0 else {}
+	var cpair: Array = _fc_customs[p] if p >= 0 else _EMPTY_CP
+	var customs: Dictionary = cpair[1]
+	var cid: int = cpair[0]
 	var any_custom := false
 	for j in ncand:
 		if c_flag[j] & F_CUSTOM:
@@ -767,6 +841,7 @@ func _compute(i: int) -> void:
 		customs = customs.duplicate()
 		for prop in cw:
 			customs[prop] = c_val[cw[prop]]
+		cid = -1  # private map: not worth memoizing substitutions against
 
 	# Substitute, expand, and pick the winner per longhand. Candidates are
 	# in increasing source order, so "later wins ties" is `>=`.
@@ -775,22 +850,45 @@ func _compute(i: int) -> void:
 	var b_origin: Array = []
 	var b_failed: Array = []
 	var b_spec := PackedInt64Array()
+	var b_ent: Array = []
+	var memo = null
+	if cid > 0:
+		memo = _subst.get(cid)
+		if memo == null:
+			memo = {}
+			if _subst.size() > 4096:
+				_subst.clear()
+			_subst[cid] = memo
 	for j in ncand:
 		var prop := c_prop[j]
 		var pairs: Array
 		var failed := false
 		var raw: String
+		var ents = null
 		if c_flag[j] & F_VAR:
-			var seed := {}
+			var sub
 			if c_flag[j] & F_CUSTOM:
-				seed[prop] = true
-			var sub = UssStyleResolver._substitute_vars(c_val[j], customs, seed)
+				# A custom property's own declaration seeds the cycle set
+				# with its name — never memoized.
+				sub = UssStyleResolver._substitute_vars(c_val[j], customs, {prop: true})
+			elif memo != null:
+				# Substitution is a pure function of (value, customs map);
+				# shared maps are immutable and identified by cid.
+				sub = memo.get(c_val[j])
+				if sub == null:
+					sub = UssStyleResolver._substitute_vars(c_val[j], customs, {})
+					memo[c_val[j]] = false if sub == null else sub
+				elif sub is bool:
+					sub = null
+			else:
+				sub = UssStyleResolver._substitute_vars(c_val[j], customs, {})
 			failed = sub == null or UssStyleResolver._is_cycle(sub)
 			raw = c_val[j] if failed else String(sub)
 			pairs = _expand(prop, raw)
 		else:
 			raw = c_val[j]
 			pairs = c_exp[j]
+			ents = c_ent[j]
 		if pairs.is_empty():
 			warns.append(UxmlDiagnostic.make(
 				"invalid-shorthand",
@@ -800,20 +898,24 @@ func _compute(i: int) -> void:
 			continue
 		var sp := c_spec[j]
 		var org = c_origin[j]
-		for pair in pairs:
+		for pk in pairs.size():
+			var pair: Array = pairs[pk]
 			var lh: String = pair[0]
 			var slot = best.get(lh)
+			var ent = null if ents == null else ents[pk]
 			if slot == null:
 				best[lh] = b_val.size()
 				b_val.append(pair[1])
 				b_origin.append(org)
 				b_failed.append(failed)
 				b_spec.append(sp)
+				b_ent.append(ent)
 			elif sp >= b_spec[slot]:
 				b_val[slot] = pair[1]
 				b_origin[slot] = org
 				b_failed[slot] = failed
 				b_spec[slot] = sp
+				b_ent[slot] = ent
 
 	var computed := inherited.duplicate()
 	for prop in best:
@@ -825,7 +927,8 @@ func _compute(i: int) -> void:
 				doc.source, node.open_tag_start, doc.path
 			))
 			continue
-		computed[prop] = {"value": b_val[slot], "origin": b_origin[slot]}
+		var ent = b_ent[slot]
+		computed[prop] = ent if ent != null else {"value": b_val[slot], "origin": b_origin[slot]}
 		if not _is_supported(prop):
 			warns.append(UxmlDiagnostic.make(
 				"unsupported-property",
@@ -833,20 +936,31 @@ func _compute(i: int) -> void:
 				doc.source, node.open_tag_start, doc.path
 			))
 
+	styles[node] = computed
+	_warn[i] = warns
+	if node.children.is_empty():
+		# Nothing inherits from a leaf.
+		_fc[i] = _empty_fc
+		_fc_customs[i] = cpair
+		return
 	var fc := {}
-	var fcc := {}
 	for prop in computed:
 		if not _is_inherited(prop):
 			continue
 		var e: Dictionary = computed[prop]
-		var v = e["value"]
 		fc[prop] = {
-			"value": v,
+			"value": e["value"],
 			"origin": {"kind": "inherited", "from": node, "origin": e["origin"]},
 		}
-		if prop.begins_with("--"):
-			fcc[prop] = v
-	styles[node] = computed
 	_fc[i] = fc
-	_fc_customs[i] = fcc
-	_warn[i] = warns
+	if not any_custom:
+		# No own custom declarations: the custom properties handed down are
+		# exactly the inherited ones — share the parent's map (and its id).
+		_fc_customs[i] = cpair
+	else:
+		var fcc := {}
+		for prop in fc:
+			if prop.begins_with("--"):
+				fcc[prop] = fc[prop]["value"]
+		_fc_customs[i] = [_next_cid, fcc]
+		_next_cid += 1
