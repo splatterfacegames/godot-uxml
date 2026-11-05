@@ -22,6 +22,8 @@ var _transients := 0
 
 
 func _initialize() -> void:
+	if OS.get_cmdline_user_args().has("--gdscript"):
+		UssCascade.use_native = false  # exercise the GDScript reference path
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 777
 	for pair in [

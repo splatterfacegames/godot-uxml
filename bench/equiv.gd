@@ -15,6 +15,8 @@ var _checks := 0
 
 
 func _initialize() -> void:
+	if OS.get_cmdline_user_args().has("--gdscript"):
+		UssCascade.use_native = false  # exercise the GDScript reference path
 	# The comparator must be able to fail: key order, nested values, arrays.
 	assert(not _diff({"a": 1, "b": 2}, {"b": 2, "a": 1}, "").is_empty())
 	assert(not _diff({"a": {"v": [1, 2]}}, {"a": {"v": [1, 3]}}, "").is_empty())

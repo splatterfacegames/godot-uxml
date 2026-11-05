@@ -92,6 +92,7 @@ const _EMPTY_CP := [0, {}]
 static var _empty_fc := {}
 var _warn: Array = []                  # per element warnings
 var _arefs: Array = []                 # per element attribute refs (see _attr_refs)
+var _sig_en: Array = []                # per element `enabled` attribute value (or null)
 var _computed_once := false
 ## Previous computed Dictionary for each index update() returned (aligned).
 var last_old: Array = []
@@ -177,6 +178,7 @@ func _index_tree() -> void:
 	_own_bloom.resize(n)
 	_warn.resize(n)
 	_arefs.resize(n)
+	_sig_en.resize(n)
 
 
 # ---------------------------------------------------------------------------
@@ -540,11 +542,17 @@ func _attr_refs(el: UxmlElement) -> Array:
 ## is already done), decide whether it is dirty, and recompute it.
 ## Matching only ever looks at the element and its ancestors, all of which
 ## are final by the time the element is reached.
-func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
+##
+## `dirty`: null re-reads every element's attributes (the safe default — sees
+## any model edit); a PackedInt32Array of preorder indices re-reads only
+## those, everything else keeps the values read last time (the runtime
+## passes the elements whose UxmlElement.changed fired).
+func update(options: Dictionary = {}, force: bool = false, dirty = null) -> PackedInt32Array:
 	if _native != null:
 		_opt_warnings = []
 		var kb := _key_bits(options)
-		var ch: PackedInt32Array = _native.call("update", options, force, kb, styles)
+		var dl := PackedInt32Array() if dirty == null else PackedInt32Array(dirty)
+		var ch: PackedInt32Array = _native.call("update", options, force, kb, styles, dirty == null, dl)
 		last_old = _native.call("last_old")
 		_computed_once = true
 		return ch
@@ -578,6 +586,12 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 		es_bits[i] = m
 
 	var full := force or not _computed_once
+	var scan_all: bool = full or dirty == null
+	var reread := PackedByteArray()
+	if not scan_all:
+		reread.resize(n)
+		for di in dirty:
+			reread[di] = 1
 	var has_ov := not dis_ov.is_empty()
 	var has_es := not es_bits.is_empty()
 	var changed := PackedInt32Array()
@@ -587,19 +601,31 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 	var anc_until := -1
 	for i in n:
 		var el: UxmlElement = els[i]
-		var r = _arefs[i]
-		var attrs: Array = el.attributes
-		if r == null or not is_same(r[0], attrs) or r[1] != attrs.size():
-			r = _attr_refs(el)
-			_arefs[i] = r
-		var a = r[2]
-		var c = null if a == null else a["value"]
-		a = r[3]
-		var nm = null if a == null else a["value"]
-		a = r[4]
-		var st = null if a == null else a["value"]
-		a = r[5]
-		var own_d: int = 1 if a != null and a["value"] == "false" else 0
+		var c
+		var nm
+		var st
+		var en
+		if scan_all or reread[i] == 1:
+			var r = _arefs[i]
+			var attrs: Array = el.attributes
+			if r == null or not is_same(r[0], attrs) or r[1] != attrs.size():
+				r = _attr_refs(el)
+				_arefs[i] = r
+			var a = r[2]
+			c = null if a == null else a["value"]
+			a = r[3]
+			nm = null if a == null else a["value"]
+			a = r[4]
+			st = null if a == null else a["value"]
+			a = r[5]
+			en = null if a == null else a["value"]
+			_sig_en[i] = en
+		else:
+			c = _sig_cls[i]
+			nm = _sig_name[i]
+			st = _sig_style[i]
+			en = _sig_en[i]
+		var own_d: int = 1 if en != null and en == "false" else 0
 		if has_ov:
 			var ov = dis_ov.get(i)
 			if ov != null:

@@ -17,6 +17,13 @@ var prefix: String = ""
 var local: String = ""
 var attributes: Array = []
 var children: Array = []
+## Observable mutation (Slint-style reactive model): set_attribute() /
+## remove_attribute() notify `changed` with this element, so a runtime that
+## owns the tree restyles exactly the elements that changed instead of
+## re-reading every attribute on every pass. Editing `attributes` directly
+## still works for code that reads the model, but a running UxmlDocument
+## only sees such edits after refresh().
+var changed: Callable
 ## Half-open span of the open tag in the UXML source, for diagnostics.
 var open_tag_start: int = 0
 var open_tag_end: int = 0
@@ -39,6 +46,36 @@ func get_attribute(attr_name: String) -> Variant:
 
 func has_attribute(attr_name: String) -> bool:
 	return get_attribute(attr_name) != null
+
+
+## Set the first attribute named `attr_name` (appended when absent) and
+## notify `changed` if the value actually changed.
+func set_attribute(attr_name: String, value: String) -> void:
+	for attr in attributes:
+		if attr["name"] == attr_name:
+			if attr["value"] == value:
+				return
+			attr["value"] = value
+			if changed.is_valid():
+				changed.call(self)
+			return
+	attributes.append({"name": attr_name, "value": value, "offset": 0})
+	if changed.is_valid():
+		changed.call(self)
+
+
+## Remove every attribute named `attr_name`; notifies `changed` if any was
+## present.
+func remove_attribute(attr_name: String) -> void:
+	var kept: Array = []
+	for attr in attributes:
+		if attr["name"] != attr_name:
+			kept.append(attr)
+	if kept.size() == attributes.size():
+		return
+	attributes = kept
+	if changed.is_valid():
+		changed.call(self)
 
 
 ## The `class` attribute split on whitespace. Order preserved.

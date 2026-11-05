@@ -94,6 +94,8 @@ var _pending_fresh := false
 var _el_of: Dictionary = {}           # outer Control -> UxmlElement
 var _layout_records: Dictionary = {}  # flex layout's parsed-style cache
 var _layout_xcache: Dictionary = {}   # flex layout's validated cross-pass cache
+var _attr_dirty: Dictionary = {}      # UxmlElement -> true (set_attribute since last restyle)
+var _scan_all := true                 # next restyle re-reads every element's attributes
 
 ## Computed-style properties that can change neither the flex geometry nor
 ## any control's intrinsic measure: a restyle that only changes these
@@ -239,6 +241,8 @@ func _clear() -> void:
 	_el_of = {}
 	_layout_records = {}
 	_layout_xcache = {}
+	_attr_dirty = {}
+	_scan_all = true
 	_doc = null
 	diagnostics = []
 
@@ -278,6 +282,10 @@ func _index() -> void:
 	_controls[_doc.root] = _root_box
 	for el in _controls:
 		_el_of[_controls[el]] = el
+	# Observable model: set_attribute() on any element restyles just it.
+	var on_changed := _on_model_changed
+	for el in _doc.root.walk():
+		el.changed = on_changed
 	for el in _controls:
 		if el == _doc.root:
 			continue
@@ -417,11 +425,22 @@ func _restyle_now() -> void:
 		_cascade = UssCascade.new(_doc)
 		_full_apply = true
 		_force_layout = true
+	var dirty = null
+	if not _scan_all:
+		var dl := PackedInt32Array()
+		var cidx: Dictionary = _cascade.index
+		for el in _attr_dirty:
+			var di = cidx.get(el)
+			if di != null:
+				dl.append(di)
+		dirty = dl
+	_attr_dirty.clear()
+	_scan_all = false
 	var changed := _cascade.update({
 		"element_states": element_states,
 		"disabled_elements": runtime_disabled,
 		"enabled_elements": runtime_enabled,
-	})
+	}, false, dirty)
 	_styles = _cascade.styles
 	var cels: Array = _cascade.els
 	var n := cels.size()
@@ -740,12 +759,13 @@ func set_class(element_name: String, class_string: String) -> void:
 	var el: UxmlElement = _by_name.get(element_name)
 	if el == null:
 		return
-	for attr in el.attributes:
-		if attr["name"] == "class":
-			attr["value"] = class_string
-			_queue_restyle()
-			return
-	el.attributes.append({"name": "class", "value": class_string, "offset": 0})
+	# Through the observable model: notifies _on_model_changed (which
+	# queues the restyle) only if the value actually changed.
+	el.set_attribute("class", class_string)
+
+
+func _on_model_changed(el: UxmlElement) -> void:
+	_attr_dirty[el] = true
 	_queue_restyle()
 
 
@@ -754,6 +774,7 @@ func set_class(element_name: String, class_string: String) -> void:
 func refresh() -> void:
 	_full_apply = true
 	_force_layout = true
+	_scan_all = true  # also picks up direct edits of UxmlElement.attributes
 	_queue_restyle()
 
 

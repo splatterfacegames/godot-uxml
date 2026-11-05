@@ -177,6 +177,7 @@ pub struct Cascade {
     sig_cls: Vec<Variant>,
     sig_name: Vec<Variant>,
     sig_style: Vec<Variant>,
+    sig_en: Vec<Variant>,
     sig_bits: Vec<i32>,
     sig_valid: Vec<bool>,
     anc_key: Vec<AncKey>,
@@ -434,6 +435,7 @@ impl Cascade {
             sig_cls: vec![],
             sig_name: vec![],
             sig_style: vec![],
+            sig_en: vec![],
             sig_bits: vec![],
             sig_valid: vec![],
             anc_key: vec![],
@@ -511,6 +513,7 @@ impl Cascade {
         c.sig_cls = vec![Variant::nil(); n];
         c.sig_name = vec![Variant::nil(); n];
         c.sig_style = vec![Variant::nil(); n];
+        c.sig_en = vec![Variant::nil(); n];
         c.sig_bits = vec![0; n];
         c.sig_valid = vec![false; n];
         c.anc_key = vec![AncKey::default(); n];
@@ -682,7 +685,15 @@ impl Cascade {
         self.index.get(&o.instance_id().to_i64()).copied()
     }
 
-    pub fn update(&mut self, options: &VarDictionary, force: bool, key_bits: &PackedInt32Array, styles: &mut VarDictionary) -> PackedInt32Array {
+    pub fn update(
+        &mut self,
+        options: &VarDictionary,
+        force: bool,
+        key_bits: &PackedInt32Array,
+        styles: &mut VarDictionary,
+        scan_all: bool,
+        dirty: &PackedInt32Array,
+    ) -> PackedInt32Array {
         let n = self.els.len();
         let mut global = 0i32;
         if let Some(a) = options.get("active_states") {
@@ -727,18 +738,37 @@ impl Cascade {
         }
 
         let full = force || !self.computed_once;
+        let scan_all = scan_all || full;
+        let mut reread = vec![false; if scan_all { 0 } else { n }];
+        if !scan_all {
+            for &d in dirty.as_slice() {
+                if d >= 0 && (d as usize) < n {
+                    reread[d as usize] = true;
+                }
+            }
+        }
         let mut changed = PackedInt32Array::new();
         self.last_old = VarArray::new();
         let mut inh_dirty = vec![false; n];
         let mut anc_until: i32 = -1;
         for i in 0..n {
-            // Cascade inputs: first class/name/style/enabled attribute.
-            let attrs = self.els[i].obj.get(&self.sn_attributes).to::<VarArray>();
+            // Cascade inputs: first class/name/style/enabled attribute —
+            // re-read only for dirty elements unless scanning everything.
             let mut c = Variant::nil();
             let mut nm = Variant::nil();
             let mut st = Variant::nil();
             let mut en = Variant::nil();
             let (mut hc, mut hn, mut hs, mut he) = (false, false, false, false);
+            let attrs = if scan_all || reread[i] {
+                self.els[i].obj.get(&self.sn_attributes).to::<VarArray>()
+            } else {
+                c = self.sig_cls[i].clone();
+                nm = self.sig_name[i].clone();
+                st = self.sig_style[i].clone();
+                en = self.sig_en[i].clone();
+                he = !en.is_nil();
+                VarArray::new()
+            };
             for a in attrs.iter_shared() {
                 let ad = a.to::<VarDictionary>();
                 let an = ad.get(&self.k_name).unwrap_or_default();
@@ -755,6 +785,9 @@ impl Cascade {
                     en = ad.get(&self.k_value).unwrap_or_default();
                     he = true;
                 }
+            }
+            if scan_all || reread[i] {
+                self.sig_en[i] = en.clone();
             }
             let mut own_d: u8 = if he && gs(&en).to_string() == "false" { 1 } else { 0 };
             if let Some(&ov) = dis_ov.get(&i) {
@@ -1229,9 +1262,17 @@ impl UxmlNativeCascade {
     }
 
     #[func]
-    fn update(&mut self, options: VarDictionary, force: bool, key_bits: PackedInt32Array, mut styles: VarDictionary) -> PackedInt32Array {
+    fn update(
+        &mut self,
+        options: VarDictionary,
+        force: bool,
+        key_bits: PackedInt32Array,
+        mut styles: VarDictionary,
+        scan_all: bool,
+        dirty: PackedInt32Array,
+    ) -> PackedInt32Array {
         match self.inner.as_mut() {
-            Some(c) => c.update(&options, force, &key_bits, &mut styles),
+            Some(c) => c.update(&options, force, &key_bits, &mut styles, scan_all, &dirty),
             None => PackedInt32Array::new(),
         }
     }

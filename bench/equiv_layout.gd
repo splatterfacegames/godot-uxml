@@ -9,6 +9,8 @@ var _checks := 0
 
 
 func _initialize() -> void:
+	if OS.get_cmdline_user_args().has("--gdscript"):
+		UssCascade.use_native = false  # exercise the GDScript reference path
 	for pair in [
 		["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml"],
 		["res://tests/fixtures/runtime", "Assets/UI/review.uxml"],
