@@ -107,10 +107,30 @@ static var _supported_cache := {}
 static var _inline_origins: Array = []
 
 
+## Use the native backend (godot_uxml_native GDExtension) when it is
+## loaded. The GDScript path below stays the reference implementation and
+## the fallback on platforms without the binary; set false to force it.
+static var use_native := true
+var _native: Object = null
+
+
 func _init(p_doc: UxmlDocumentModel) -> void:
 	doc = p_doc
 	_index_tree()
 	_compile_rules()
+	if use_native and ClassDB.class_exists("UxmlNativeCascade"):
+		var nc: Object = ClassDB.instantiate("UxmlNativeCascade")
+		if nc.call("setup", self, {
+			"subst": func(v: String, customs: Dictionary, seed_prop: String):
+				return UssStyleResolver._substitute_vars(
+					v, customs, {} if seed_prop.is_empty() else {seed_prop: true}),
+			"expand": func(prop: String, raw: String): return UssCascade._expand(prop, raw),
+			"inline": func(text: String): return UssCascade._inline(text),
+			"inherited": UssProperties.INHERITED,
+			"supported": UssProperties.SUPPORTED,
+			"implicit": UssControls.IMPLICIT_CLASSES,
+		}):
+			_native = nc
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +541,13 @@ func _attr_refs(el: UxmlElement) -> Array:
 ## Matching only ever looks at the element and its ancestors, all of which
 ## are final by the time the element is reached.
 func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
+	if _native != null:
+		_opt_warnings = []
+		var kb := _key_bits(options)
+		var ch: PackedInt32Array = _native.call("update", options, force, kb, styles)
+		last_old = _native.call("last_old")
+		_computed_once = true
+		return ch
 	var n := els.size()
 	_opt_warnings = []
 	var global := 0
@@ -635,6 +662,17 @@ func update(options: Dictionary = {}, force: bool = false) -> PackedInt32Array:
 
 ## True when the element is effectively disabled after the last update
 ## (enabled="false" / runtime set, descending from ancestors).
+## Effective disabled flag per preorder index (1 = disabled).
+func disabled_flags() -> PackedByteArray:
+	if _native != null:
+		return _native.call("disabled_flags")
+	var out := PackedByteArray()
+	out.resize(els.size())
+	for i in els.size():
+		out[i] = 1 if (_sig_bits[i] & BIT_DISABLED) != 0 else 0
+	return out
+
+
 func is_disabled(i: int) -> bool:
 	return (_sig_bits[i] & BIT_DISABLED) != 0
 
@@ -666,6 +704,8 @@ func _anc_key_of(i: int) -> Array:
 ## Every diagnostic of the last update, in the original resolver's order:
 ## states-key problems, rule problems, then per element in preorder.
 func collect_warnings() -> Array:
+	if _native != null:
+		return _opt_warnings + _rule_warnings + _native.call("element_warnings")
 	var out: Array = _opt_warnings + _rule_warnings
 	for w in _warn:
 		if w != null and not (w as Array).is_empty():

@@ -444,8 +444,9 @@ func _restyle_now() -> void:
 	# An element whose effective flags flipped is re-applied.
 	var flipped: Array = []
 	var parent: PackedInt32Array = _cascade._parent
+	var dflags := _cascade.disabled_flags()
 	for i in n:
-		var d := 1 if _cascade.is_disabled(i) else 0
+		var d := dflags[i]
 		var p := parent[i]
 		var g := 1 if _own_none[i] == 1 or (p >= 0 and _gone[p] == 1) else 0
 		if d != _dis[i] or g != _gone[i]:

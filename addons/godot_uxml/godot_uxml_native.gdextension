@@ -1,0 +1,11 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.7
+reloadable = true
+
+[libraries]
+; One optimized build serves editor and exported runs alike — the debug
+; entry must not load an unoptimized library (it is ~3x slower than the
+; GDScript fallback). Build with: python native/build.py
+windows.debug.x86_64 = "res://addons/godot_uxml/bin/godot_uxml_native.windows.x86_64.dll"
+windows.release.x86_64 = "res://addons/godot_uxml/bin/godot_uxml_native.windows.x86_64.dll"
