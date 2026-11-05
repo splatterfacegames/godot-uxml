@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ProgressBar name="a" low-value="10" high-value="30" value="20" />
+  <ui:ProgressBar name="b" low-value="-10" high-value="10" value="0" />
+  <ui:ProgressBar name="c" high-value="50" low-value="10" value="30" />
+</ui:UXML>

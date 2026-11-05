@@ -353,7 +353,10 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		var el = ours.get(String(u["path"]))
 		if el != null and u.has("textMeasure"):
 			measures[el] = Vector2(float(u["textMeasure"]["width"]), float(u["textMeasure"]["height"]))
+	# Unity measures text only on elements without children (Yoga leaves).
 	var measurer := func(el: UxmlElement, style: Dictionary, hint: float) -> Vector2:
+		if not el.children.is_empty():
+			return Vector2.ZERO
 		if measures.has(el):
 			return measures[el]
 		return _measure_fixed(el, style, hint)
@@ -364,6 +367,13 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	var out := {"name": name, "status": "match", "notes": [], "elements": 0, "struct_ok": 0,
 		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0, "pairs": []}
 	var seen := {}
+	# Unity does not resolve styles under display:none; those elements are
+	# compared on structure only.
+	var hidden_under := {}
+	for u in uels:
+		var par := String(u["parent"])
+		if hidden_under.has(par) or (par != "" and _udisplay_none(uels, par)):
+			hidden_under[String(u["path"])] = true
 	for u in uels:
 		var path := String(u["path"])
 		out["elements"] += 1
@@ -382,11 +392,13 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		var want := [float(u["rect"]["x"]), float(u["rect"]["y"]),
 			float(u["rect"]["width"]), float(u["rect"]["height"])]
 		var got := [0.0, 0.0, 0.0, 0.0]
-		var hidden := String(u["style"].get("display", "flex")) == "none"
+		# Unity keeps stale rects under a display:none ancestor; only the
+		# hidden element itself (0x0) is compared.
+		var hidden := String(u["style"].get("display", "flex")) == "none" or hidden_under.has(path)
 		if r != null:
 			got = [(r as Rect2).position.x, (r as Rect2).position.y, (r as Rect2).size.x, (r as Rect2).size.y]
 		out["pairs"].append([el, want])
-		if not hidden or r != null:
+		if not hidden_under.has(path) and (not hidden or r != null):
 			for k in 4:
 				out["geo"] += 1
 				if absf(_r1(got[k]) - _r1(want[k])) <= 0.05:
@@ -394,6 +406,11 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 				else:
 					out["notes"].append("%s %s: ours %s vs Unity %s" % [label, ["x", "y", "w", "h"][k], _r1(got[k]), _r1(want[k])])
 		var st: Dictionary = styles.get(el, {})
+		# Unity reports layout-derived margins/padding/borders, which are 0 on
+		# a display:none element; its own and its subtree's styles are not
+		# compared.
+		if hidden_under.has(path) or String(u["style"].get("display", "flex")) == "none":
+			continue
 		for diff in _style_diffs(u["style"], st, out):
 			out["notes"].append("%s %s" % [label, diff])
 	for path in ours:
@@ -404,6 +421,13 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		out["status"] = "differs"
 	out["abs"] = abs
 	return out
+
+
+func _udisplay_none(uels: Array, path: String) -> bool:
+	for u in uels:
+		if String(u["path"]) == path:
+			return String(u["style"].get("display", "flex")) == "none"
+	return false
 
 
 func _ulabel(u: Dictionary) -> String:

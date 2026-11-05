@@ -5,6 +5,10 @@ extends RefCounted
 ## Mouse-dependent checks run only with a real DisplayServer (headless
 ## Godot does not synthesize hover); keyboard and joypad work everywhere.
 ## `h` is the SceneTree harness from run_tests.gd.
+##
+## These documents run without the default theme (theme_path = ""): the
+## checks pin authored-USS geometry and runtime mechanics, and the theme's
+## own geometry is covered by tests/test_controls.gd and bench/parity.gd.
 
 const FIXTURE := "res://tests/fixtures/runtime"
 
@@ -17,6 +21,7 @@ func _init(harness) -> void:
 
 func _load() -> UxmlDocument:
 	var doc := UxmlDocument.new()
+	doc.theme_path = ""  # geometry below is authored USS only (see header)
 	h.root.add_child(doc)
 	doc.size = Vector2(400, 600)
 	doc.load_document("Assets/UI/runtime.uxml", FIXTURE)
@@ -25,6 +30,7 @@ func _load() -> UxmlDocument:
 
 func _load_review() -> UxmlDocument:
 	var doc := UxmlDocument.new()
+	doc.theme_path = ""  # geometry below is authored USS only (see header)
 	h.root.add_child(doc)
 	doc.size = Vector2(400, 600)
 	doc.load_document("Assets/UI/review.uxml", FIXTURE)
@@ -517,6 +523,7 @@ func test_repeated_loads_do_not_leak() -> void:
 # Invalid attribute values warn without crashing.
 func test_invalid_attributes_warn() -> void:
 	var doc := UxmlDocument.new()
+	doc.theme_path = ""  # geometry below is authored USS only (see header)
 	h.root.add_child(doc)
 	doc.size = Vector2(400, 600)
 	doc.load_document("Assets/UI/bad.uxml", FIXTURE)
@@ -718,6 +725,7 @@ func test_style_restoration_and_font_stability() -> void:
 # UXML in Assets/UI, sheet in Assets/Styles, font inside the sheet's dir.
 func test_inherited_asset_origin() -> void:
 	var doc := UxmlDocument.new()
+	doc.theme_path = ""  # geometry below is authored USS only (see header)
 	h.root.add_child(doc)
 	doc.size = Vector2(400, 300)
 	doc.load_document("Assets/UI/panel.uxml", "res://tests/fixtures/origin")
@@ -736,6 +744,7 @@ func test_inherited_asset_origin() -> void:
 # reload() keeps the effective root of the last successful load.
 func test_reload_preserves_effective_root() -> void:
 	var doc := UxmlDocument.new()
+	doc.theme_path = ""  # geometry below is authored USS only (see header)
 	h.root.add_child(doc)
 	doc.size = Vector2(400, 600)
 	h.eq(doc.load_document("Assets/UI/runtime.uxml", FIXTURE), OK,
@@ -1036,6 +1045,7 @@ func test_texture_stylebox_percent_insets() -> void:
 # scrolling re-binds them to item indices instead of creating nodes.
 func test_list_view_virtualization() -> void:
 	var doc := UxmlDocument.new()
+	doc.theme_path = ""  # geometry below is authored USS only (see header)
 	h.root.add_child(doc)
 	doc.size = Vector2(400, 600)
 	doc.load_document("Assets/UI/list.uxml", FIXTURE)

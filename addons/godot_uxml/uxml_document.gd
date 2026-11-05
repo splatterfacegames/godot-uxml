@@ -379,7 +379,11 @@ func _wire(el: UxmlElement, c: Control) -> void:
 func _on_gui_input(ev: InputEvent, el: UxmlElement) -> void:
 	var mb := ev as InputEventMouseButton
 	if mb != null and mb.button_index == MOUSE_BUTTON_LEFT:
-		_set_state(el, "active", mb.pressed)
+		# Unity sets :active on the clickable control, not on its parts: a
+		# part passes the press on to its control, which takes the state.
+		var pc = _controls.get(el)
+		if el.part_of == null or pc is UxmlToggle or pc is BaseButton:
+			_set_state(el, "active", mb.pressed)
 		return
 	var sc := _natives.get(el) as ScrollContainer
 	if sc == null:
@@ -801,6 +805,8 @@ func set_enabled(element_name: String, enabled: bool) -> void:
 	if el == null:
 		return
 	_disabled_rt[el] = not enabled
+	# Unity's SetEnabled also adds/removes `unity-disabled` on the element.
+	UxmlParts.toggle_control_class(el, "unity-disabled", not enabled)
 	_queue_restyle()
 
 

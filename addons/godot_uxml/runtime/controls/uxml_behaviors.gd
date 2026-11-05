@@ -110,9 +110,13 @@ class ToggleBehavior extends Behavior:
 			return
 		_apply_checked(t.button_pressed)
 		t.toggled.connect(_on_toggled)
+		t.focus_entered.connect(_on_focus.bind(true))
+		t.focus_exited.connect(_on_focus.bind(false))
 
 	func _on_toggled(on: bool) -> void:
 		_apply_checked(on)
+		if on and el.local == "RadioButton":
+			_exclusive()
 		_syncing = true
 		el.set_attribute("value", "true" if on else "false")
 		_syncing = false
@@ -122,6 +126,40 @@ class ToggleBehavior extends Behavior:
 	func _apply_checked(on: bool) -> void:
 		set_state(el, "checked", on)
 		set_state(UxmlParts.find_part(el, "input"), "checked", on)
+		var owner := el.part_of
+		if owner != null and owner.local == "Foldout":
+			set_state(owner, "checked", on)  # Unity: an open Foldout is :checked
+
+	## Unity puts :focus on a focused BaseBoolField and on its input.
+	func _on_focus(on: bool) -> void:
+		set_state(UxmlParts.find_part(el, "input"), "focus", on)
+
+	## A RadioButton outside a RadioButtonGroup shares a group with every
+	## RadioButton under the same nearest GroupBox, or the whole document
+	## (Unity's IGroupBox rule); switching one on switches the rest off.
+	func _exclusive() -> void:
+		var p = doc._parents.get(el)
+		while p != null and not (p.local in ["GroupBox", "RadioButtonGroup"] and p.part_of == null):
+			p = doc._parents.get(p)
+		if p != null and p.local == "RadioButtonGroup":
+			return  # the group behavior keeps it exclusive
+		var scope: UxmlElement = p if p != null else doc._doc.root
+		for x in scope.walk():
+			if x == el or x.local != "RadioButton":
+				continue
+			# Radios inside a nested group box belong to that box.
+			var q = doc._parents.get(x)
+			var nested := false
+			while q != null and q != scope:
+				if q.local in ["GroupBox", "RadioButtonGroup"] and q.part_of == null:
+					nested = true
+					break
+				q = doc._parents.get(q)
+			if nested:
+				continue
+			var t := control_of(x) as UxmlToggle
+			if t != null and t.button_pressed:
+				t.button_pressed = false
 
 	func on_model_changed() -> void:
 		if _syncing:
@@ -144,10 +182,13 @@ class RadioGroupBehavior extends Behavior:
 	var _busy := false
 
 	func setup() -> void:
-		var content := UxmlParts.content_container(el)
-		for x in content.children:
-			if x.local == "RadioButton":
-				_radios.append(x)
+		for role in ["choices", "container"]:
+			var box := UxmlParts.find_part(el, role)
+			if box == null:
+				continue
+			for x in box.children:
+				if x.local == "RadioButton":
+					_radios.append(x)
 		var idx := int(UssValues.parse_number(attr("value", "-1")))
 		for i in _radios.size():
 			var t := control_of(_radios[i]) as UxmlToggle
@@ -188,15 +229,6 @@ class ToggleButtonGroupBehavior extends Behavior:
 				_buttons.append(x)
 		var n := _buttons.size()
 		for i in n:
-			var cls := "unity-button-group__button--mid"
-			if n == 1:
-				cls = "unity-button-group__button--standalone"
-			elif i == 0:
-				cls = "unity-button-group__button--left"
-			elif i == n - 1:
-				cls = "unity-button-group__button--right"
-			UxmlParts.set_control_classes(_buttons[i],
-				PackedStringArray(["unity-button-group__button", cls]))
 			_selected.append(false)
 			var b := control_of(_buttons[i]) as BaseButton
 			if b != null:
@@ -255,22 +287,10 @@ class FoldoutBehavior extends Behavior:
 		var t := control_of(_toggle) as UxmlToggle
 		if t != null:
 			t.toggled.connect(_on_toggled)
-		_depth()
 
 	func native() -> Control:
 		var t := control_of(_toggle)
 		return t if t != null else doc._controls.get(el)
-
-	## Unity's `unity-foldout--depth-N`: N Foldout ancestors.
-	func _depth() -> void:
-		var d := 0
-		var p = doc._parents.get(el)
-		while p != null:
-			if p.local == "Foldout" and p.part_of == null:
-				d += 1
-			p = doc._parents.get(p)
-		if d != 0:
-			UxmlParts.set_control_classes(el, PackedStringArray(["unity-foldout--depth-%d" % d]))
 
 	func _on_toggled(on: bool) -> void:
 		if _content != null:
@@ -304,6 +324,8 @@ class ProgressBarBehavior extends Behavior:
 
 ## HelpBox: message-type picks the icon variant; text the label.
 class HelpBoxBehavior extends Behavior:
+	var _warned := false
+
 	func on_model_changed() -> void:
 		var icon := UxmlParts.find_part(el, "icon")
 		if icon != null:
@@ -311,6 +333,13 @@ class HelpBoxBehavior extends Behavior:
 			UxmlParts.help_box_icon(el, icon)
 			if before != icon.attributes and icon.changed.is_valid():
 				icon.changed.call(icon)
+		elif attr("message-type", "None").to_lower() in ["info", "warning", "error"] and not _warned:
+			# Loaded as None: as in Unity the icon is not in the tree, and
+			# godot-uxml fixes the part tree at load.
+			_warned = true
+			doc._rt_warnings.append(UxmlDiagnostic.make("unsupported-value",
+				"HelpBox message-type changed from None after load; reload to show the icon",
+				doc._doc.source, el.open_tag_start, doc._doc.path))
 		sync_text("label", "text")
 
 

@@ -1,0 +1,14 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Button name="b-hover" text="Hover" />
+  <ui:Button name="b-active" text="Active" />
+  <ui:Button name="b-checked" text="Checked" />
+  <ui:Toggle name="t-hover" label="Hover" />
+  <ui:Toggle name="t-active" label="Active" />
+  <ui:Toggle name="t-checked-hover" label="CH" value="true" />
+  <ui:RadioButton name="r-hover" label="Hover" />
+  <ui:RadioButton name="r-focus" label="Focus" value="true" />
+  <ui:Foldout name="fo-hover" text="Hover" />
+  <ui:Foldout name="fo-closed" text="Closed" value="false" />
+  <ui:Foldout name="fo-focus" text="Focus" />
+  <ui:RepeatButton name="rb-hover" text="R" />
+</ui:UXML>

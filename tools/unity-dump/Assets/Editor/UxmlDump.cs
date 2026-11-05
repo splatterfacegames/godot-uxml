@@ -185,7 +185,7 @@ public static class UxmlDump
     // Styles, layout and transforms, the way the panel does before a repaint.
     static void Validate(IPanel panel)
     {
-        for (int pass = 0; pass < 3; pass++)
+        for (int pass = 0; pass < 8; pass++)
         {
             var m = panel.GetType().GetMethod("ValidateLayout", Any, null, Type.EmptyTypes, null);
             if (m == null) throw new Exception("panel has no ValidateLayout");

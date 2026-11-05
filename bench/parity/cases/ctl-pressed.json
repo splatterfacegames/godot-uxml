@@ -1,0 +1,4 @@
+{"actions": [
+  {"op": "pointer-move", "target": "b"},
+  {"op": "pointer-down", "target": "b"}
+]}

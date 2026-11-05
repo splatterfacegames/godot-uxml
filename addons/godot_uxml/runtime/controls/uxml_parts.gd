@@ -43,11 +43,31 @@ static func expand(doc: UxmlDocumentModel) -> void:
 	if doc == null or doc.root == null:
 		return
 	var todo: Array = []
+	var depth := {}  # Foldout -> number of Foldout ancestors
+	_foldout_depths(doc.root, 0, depth)
 	for el in doc.root.walk():
-		if el.part_of == null and has_parts(el.local):
+		if el.part_of != null:
+			continue
+		if depth.has(el):
+			el.set_meta(&"uxml_foldout_depth", depth[el])
+		# Unity's SetEnabled(false) adds `unity-disabled` to the element
+		# itself (not its subtree), which `enabled="false"` does at load.
+		var en = el.get_attribute("enabled")
+		if en != null and String(en).to_lower() == "false":
+			_add_control_classes(el, ["unity-disabled"])
+		if has_parts(el.local):
 			todo.append(el)
 	for el in todo:
 		build(el)
+
+
+static func _foldout_depths(el: UxmlElement, d: int, out: Dictionary) -> void:
+	for c in el.children:
+		if c.local == "Foldout":
+			out[c] = d
+			_foldout_depths(c, d + 1, out)
+		else:
+			_foldout_depths(c, d, out)
 
 
 static func has_parts(local: String) -> bool:
@@ -72,6 +92,27 @@ static func build(el: UxmlElement) -> void:
 		el.set_meta(META_CONTENT, content.part_role)
 	for c in authored:
 		content.children.append(c)
+	if el.local == "ToggleButtonGroup":
+		_button_group_classes(content)
+
+
+## Unity's ToggleButtonGroup marks its buttons by position: --left, --mid,
+## --right, or --standalone for a single button.
+static func _button_group_classes(container: UxmlElement) -> void:
+	var buttons: Array = []
+	for x in container.children:
+		if x.local == "Button":
+			buttons.append(x)
+	var n := buttons.size()
+	for i in n:
+		var pos := "mid"
+		if n == 1:
+			pos = "standalone"
+		elif i == 0:
+			pos = "left"
+		elif i == n - 1:
+			pos = "right"
+		_add_control_classes(buttons[i], ["unity-button-group__button", "unity-button-group__button--" + pos])
 
 
 ## Where authored children of `el` live: a part, or `el` itself.
@@ -268,12 +309,10 @@ static func _build_toggle(el: UxmlElement) -> UxmlElement:
 	return el
 
 
-## BaseBoolField `text`: a Label after the checkmark, or `--no-text`.
+## BaseBoolField `text`: a Label after the checkmark, only when set.
 static func _bool_text(el: UxmlElement, input: UxmlElement, kind: String) -> void:
 	var text := _attr(el, "text")
-	if text.is_empty():
-		_add_control_classes(el, ["unity-%s--no-text" % kind])
-	else:
+	if not text.is_empty():
 		input.children.append(part(el, "Label", "text", "", ["unity-%s__text" % kind], text))
 
 
@@ -289,30 +328,40 @@ static func _build_radio(el: UxmlElement) -> UxmlElement:
 	return el
 
 
-## RadioButtonGroup: [label] input(container); `choices` become RadioButton
-## parts in the container, authored RadioButtons join them.
+## RadioButtonGroup: [label] input > (#choicesContentContainer with one
+## RadioButton per `choices` entry, #contentContainer for authored
+## RadioButtons — the content container).
 static func _build_radio_group(el: UxmlElement) -> UxmlElement:
-	var input := field_parts(el, ["radio-button-group"])
-	var container := part(el, "VisualElement", "container", "",
+	var label := field_label(el, [])
+	if label != null:
+		el.children.append(label)
+	var input := part(el, "VisualElement", "input", "", ["unity-base-field__input"])
+	el.children.append(input)
+	var choices := part(el, "VisualElement", "choices", "choicesContentContainer",
 		["unity-radio-button-group__container"])
-	input.children.append(container)
+	var content := part(el, "VisualElement", "container", "contentContainer",
+		["unity-radio-button-group__container"])
+	input.children.append(choices)
+	input.children.append(content)
 	var raw := _attr(el, "choices")
 	if not raw.is_empty():
 		for choice in raw.split(","):
 			var rb := part(el, "RadioButton", "choice")
 			rb.attributes.append({"name": "text", "value": String(choice).strip_edges(), "offset": 0})
 			_build_nested(rb)
-			container.children.append(rb)
-	return container
+			choices.children.append(rb)
+	return content
 
 
-## ToggleButtonGroup: [label] input > container; authored Buttons go into
-## the container.
+## ToggleButtonGroup: [label] then the button container, which is both the
+## field input and the content container (authored Buttons go into it).
 static func _build_toggle_button_group(el: UxmlElement) -> UxmlElement:
-	var input := field_parts(el, ["toggle-button-group"])
-	var container := part(el, "VisualElement", "container", "",
-		["unity-toggle-button-group__container"])
-	input.children.append(container)
+	var label := field_label(el, [])
+	if label != null:
+		el.children.append(label)
+	var container := part(el, "ButtonGroupContainer", "container",
+		"unity-toggle-button-group__container", ["unity-button-group", "unity-base-field__input"])
+	el.children.append(container)
 	return container
 
 
@@ -324,12 +373,15 @@ static func _build_group_box(el: UxmlElement) -> UxmlElement:
 	return el
 
 
-## HelpBox: icon, label.
+## HelpBox: [icon] label. Unity leaves the icon out of the hierarchy for
+## message-type None.
 static func _build_help_box(el: UxmlElement) -> UxmlElement:
-	var icon := part(el, "VisualElement", "icon", "", ["unity-help-box__icon"])
-	el.children.append(icon)
-	el.children.append(part(el, "Label", "label", "", ["unity-help-box__label"], _attr(el, "text")))
-	help_box_icon(el, icon)
+	if _attr(el, "message-type", "None").to_lower() in ["info", "warning", "error"]:
+		var icon := part(el, "VisualElement", "icon", "", ["unity-help-box__icon"])
+		el.children.append(icon)
+		help_box_icon(el, icon)
+	el.children.append(part(el, "Label", "label", "",
+		["unity-help-box__label", "unity-text-element__selectable"], _attr(el, "text")))
 	return el
 
 
@@ -385,17 +437,16 @@ static func _build_foldout(el: UxmlElement) -> UxmlElement:
 	return content
 
 
+## Unity's `unity-foldout--depth-N`: N Foldout ancestors (set by expand).
 static func _foldout_depth(el: UxmlElement) -> int:
-	# Unity counts Foldout ancestors; the model has no parent links, so the
-	# loader's walk order is used: depth is set again by the behavior once
-	# parents are known. 0 here.
-	return 0
+	return int(el.get_meta(&"uxml_foldout_depth", 0))
 
 
 ## ProgressBar: container > background > (progress, title-container >
 ## title).
 static func _build_progress_bar(el: UxmlElement) -> UxmlElement:
-	var container := part(el, "VisualElement", "container", "", ["unity-progress-bar__container"])
+	var container := part(el, "VisualElement", "container", "unity-progress-bar",
+		["unity-progress-bar__container"])
 	var bg := part(el, "VisualElement", "background", "", ["unity-progress-bar__background"])
 	var progress := part(el, "VisualElement", "progress", "", ["unity-progress-bar__progress"])
 	var tc := part(el, "VisualElement", "title-container", "", ["unity-progress-bar__title-container"])
@@ -420,7 +471,10 @@ static func progress_style(el: UxmlElement, progress: UxmlElement) -> void:
 		hi = 100.0
 	if is_nan(v):
 		v = lo
-	var ratio := 0.0 if is_equal_approx(hi, lo) else clampf((v - lo) / (hi - lo), 0.0, 1.0)
+	# Measured in Unity 6000.3 (ctl-progressbar, ctl-progress-range): the
+	# fill is value / high-value, clamped to 0..1 — low-value does not shift
+	# it (low 10, high 30, value 20 fills 2/3, not 1/2).
+	var ratio := 0.0 if is_zero_approx(hi) else clampf(v / hi, 0.0, 1.0)
 	var right := snappedf((1.0 - ratio) * 100.0, 0.0001)
 	var txt := str(int(right)) if is_equal_approx(right, roundf(right)) else str(right)
 	var style := "right: %s%%;" % txt
