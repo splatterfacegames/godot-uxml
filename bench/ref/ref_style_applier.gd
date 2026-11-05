@@ -167,14 +167,28 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 		var tex := _texture(style, "background-image", el)
 		if sb == null and tex != null:
 			sb = _texture_stylebox(tex, style, el)
+			# USS slicing never pads content: StyleBoxTexture would otherwise
+			# fall back to its texture margins as content margins.
+			for side in ["left", "top", "right", "bottom"]:
+				sb.set("content_margin_" + side, 0.0)
 		elif sb != null and tex != null:
-			# StyleBoxFlat cannot carry a texture; the image wins the fill
-			# and the flat border/background is diagnosed, not silently kept.
-			_warn_once_key(
-				"bg-image-plus-border", el,
-				"background-image combined with border/background styling: the image is drawn, border styling is not"
-			)
-			sb = _texture_stylebox(tex, style, el)
+			# StyleBoxFlat cannot carry a texture; the image wins the fill.
+			# Padding (content margins) carries over to the texture box; only
+			# a visible flat background or border is lost, and diagnosed.
+			var flat := sb as StyleBoxFlat
+			if flat != null and (flat.bg_color.a > 0.0 or flat.border_width_left > 0
+					or flat.border_width_top > 0 or flat.border_width_right > 0
+					or flat.border_width_bottom > 0):
+				_warn_once_key(
+					"bg-image-plus-border", el,
+					"background-image combined with border/background styling: the image is drawn, border styling is not"
+				)
+			var tsb := _texture_stylebox(tex, style, el)
+			for side in ["left", "top", "right", "bottom"]:
+				tsb.set("content_margin_" + side, sb.get("content_margin_" + side))
+			if sb.has_meta("uxml_margins"):
+				tsb.set_meta("uxml_margins", sb.get_meta("uxml_margins"))
+			sb = tsb
 		for slot in _stylebox_slots(c):
 			if sb != null:
 				c.add_theme_stylebox_override(slot, sb)
