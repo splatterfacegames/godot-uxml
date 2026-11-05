@@ -1,10 +1,10 @@
 class_name UxmlTheme
 extends RefCounted
-## The default theme: a USS sheet spliced in AHEAD of every author sheet, so
-## an author rule of equal specificity wins on source order, as Unity's
-## runtime theme does. A theme rule of higher specificity still wins —
-## `.unity-button` (0,1,0) beats an author's `Button { }` (0,0,1) in Unity
-## too.
+## The default theme: a USS sheet spliced in AHEAD of every author sheet
+## and marked `"theme": true`. Unity ranks default-theme matches below every
+## author match, whatever the specificity (an author `Button { margin: 0 }`
+## beats the theme's `.unity-button { margin: 1px 3px }` — measured, see
+## docs/parity.md); UssCascade.AUTHOR_LAYER implements that rank.
 ##
 ## The sheet has no scope (it reaches every element, parts included) and
 ## its url()s resolve inside the theme folder (UxmlResourceResolver
@@ -42,6 +42,7 @@ static func attach(doc: UxmlDocumentModel, path: String) -> void:
 		"origin": path,
 		"items": hit[1],
 		"scope": null,
+		"theme": true,
 	})
 	doc.warnings.append_array(hit[2])
 	doc.style_roots.insert(0, {"sheet": index, "scope": null})

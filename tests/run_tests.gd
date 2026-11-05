@@ -22,6 +22,7 @@ func _initialize() -> void:
 	for entry in [
 		["res://tests/test_layout.gd", "layout"],
 		["res://tests/test_runtime.gd", "runtime"],
+		["res://tests/test_controls.gd", "controls"],
 	]:
 		var cls = load(entry[0])
 		if cls == null:
@@ -920,7 +921,8 @@ func test_out_of_scope_properties_warn() -> void:
 
 
 func test_recognized_but_unmapped_controls_warn() -> void:
-	for tag in ["IntegerField", "FloatField", "Foldout"]:
+	# Foldout left this list when it became a Unity part tree (runtime/controls).
+	for tag in ["IntegerField", "FloatField"]:
 		var doc := UxmlLoader.load_source(
 			'<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:%s name="f"><ui:Label name="k" /></ui:%s></ui:UXML>' % [tag, tag],
 			"inline/test.uxml", _resolver(FIXTURES + "/options")

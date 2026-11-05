@@ -8,7 +8,7 @@ extends Button
 var delay_ms := 0.0
 var interval_ms := 0.0
 var _timer: Timer = null
-var _waiting_delay := false
+var _held := false
 
 
 func _init() -> void:
@@ -34,13 +34,13 @@ func _on_down() -> void:
 		_timer.one_shot = true
 		_timer.timeout.connect(_on_timer)
 		add_child(_timer, false, Node.INTERNAL_MODE_BACK)
-	_waiting_delay = delay_ms > 0.0
+	_held = true
 	var first := delay_ms if delay_ms > 0.0 else interval_ms
 	_timer.start(maxf(first, 1.0) / 1000.0)
 
 
 func _on_timer() -> void:
-	if disabled or not is_pressed():
+	if disabled or not _held:
 		return
 	pressed.emit()
 	if interval_ms > 0.0:
@@ -48,5 +48,6 @@ func _on_timer() -> void:
 
 
 func _stop() -> void:
+	_held = false
 	if _timer != null:
 		_timer.stop()

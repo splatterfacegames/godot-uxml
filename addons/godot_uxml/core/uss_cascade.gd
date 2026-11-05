@@ -32,6 +32,11 @@ const BIT_DISABLED := 32
 const BIT_ENABLED := 64
 ## Inline declarations outrank every selector: above any packed rule key.
 const INLINE_SPEC := 1 << 62
+## Author rules outrank every theme rule (a sheet with "theme": true, see
+## UxmlTheme), whatever the specificity — Unity sorts default-theme matches
+## below author matches. Packed into the specificity key, so the native
+## cascade (which reads `_sel_spec`) agrees by construction.
+const AUTHOR_LAYER := 1 << 61
 
 const F_CUSTOM := 1
 const F_VAR := 2
@@ -259,6 +264,7 @@ func _add_rule(f: Dictionary) -> void:
 	_rule_dflag.append(df)
 	_rule_dexp.append(de)
 
+	var layer := 0 if bool(doc.sheets[f["sheet"]].get("theme", false)) else AUTHOR_LAYER
 	for sel in rule["selectors"]:
 		var s := _sel_rule.size()
 		_sel_rule.append(r)
@@ -311,7 +317,7 @@ func _add_rule(f: Dictionary) -> void:
 				need |= _fbits("." + x)
 		_sel_need.append(need)
 		_sel_entries.append(null)
-		_sel_spec.append((names << 40) | (classes << 20) | types)
+		_sel_spec.append((names << 40) | (classes << 20) | types | layer)
 		_sel_states.append(UssSelector.states_required_by(sel))
 		_sel_origins.append(null)
 		var right: Array = parts[parts.size() - 1]

@@ -422,7 +422,8 @@ static func progress_style(el: UxmlElement, progress: UxmlElement) -> void:
 		v = lo
 	var ratio := 0.0 if is_equal_approx(hi, lo) else clampf((v - lo) / (hi - lo), 0.0, 1.0)
 	var right := snappedf((1.0 - ratio) * 100.0, 0.0001)
-	var style := "right: %s%%;" % right
+	var txt := str(int(right)) if is_equal_approx(right, roundf(right)) else str(right)
+	var style := "right: %s%%;" % txt
 	for a in progress.attributes:
 		if a["name"] == "style":
 			if a["value"] != style:
