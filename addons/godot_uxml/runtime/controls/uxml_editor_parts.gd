@@ -560,7 +560,7 @@ static func godot_class(el: UxmlElement) -> String:
 ## nicified type name).
 static func object_label(el: UxmlElement, v: Variant) -> String:
 	if v == null or (v is Object and not is_instance_valid(v)):
-		return "None (%s)" % UxmlInputParts.nicify(object_type_name(el))
+		return "None (%s)" % nicify(object_type_name(el))
 	return object_name(v)
 
 
@@ -646,6 +646,49 @@ static func _build_inspector(el: UxmlElement) -> UxmlElement:
 # PropertyField and InspectorElement content
 # ---------------------------------------------------------------------------
 
+## Unity's ObjectNames.NicifyVariableName: "m_" and "_" prefixes go, the
+## first letter is upper case, and a space goes before an upper-case
+## letter after a lower-case letter, before the last upper-case letter of
+## a run that a lower-case letter follows, and before a digit run
+## ("Texture2D" -> "Texture 2D", "vector3Value" -> "Vector 3 Value").
+static func nicify(n: String) -> String:
+	var s := n
+	if s.begins_with("m_"):
+		s = s.substr(2)
+	elif s.length() > 1 and s[0] == "k" and _upper(s[1]):
+		s = s.substr(1)
+	elif s.begins_with("_"):
+		s = s.substr(1)
+	var out := ""
+	for i in s.length():
+		var c := s[i]
+		if i > 0:
+			var prev := s[i - 1]
+			var next_low := i + 1 < s.length() and _lower(s[i + 1])
+			if _upper(c) and (_lower(prev) or (next_low and (_upper(prev) or _digit(prev)))):
+				out += " "
+			elif _digit(c) and not _digit(prev) and prev != " " and prev != "_":
+				out += " "
+		if c == "_":
+			if not out.ends_with(" "):
+				out += " "
+			continue
+		out += c.to_upper() if i == 0 else c
+	return out
+
+
+static func _upper(c: String) -> bool:
+	return c != c.to_lower()
+
+
+static func _lower(c: String) -> bool:
+	return c != c.to_upper()
+
+
+static func _digit(c: String) -> bool:
+	return c >= "0" and c <= "9"
+
+
 ## The label of a property: the PropertyField `label` when set, else the
 ## property name as Unity's ObjectNames.NicifyVariableName writes it
 ## ("intValue" -> "Int Value"); a snake_case name is capitalized as the
@@ -656,7 +699,7 @@ static func property_label(name: String) -> String:
 		n = n.substr(2)
 	if n.find("_") > 0:
 		return n.capitalize()
-	return UxmlInputParts.nicify(n)
+	return nicify(n)
 
 
 ## The field tag and its attributes for a Godot property. `info` is a
@@ -762,7 +805,7 @@ static func _hint_enum(hs: String) -> Array:
 		next = int(kv[1]) if kv.size() > 1 else next
 		names.append(n)
 		values.append(next)
-		labels.append(UxmlInputParts.nicify(n) if n.find(" ") < 0 else n)
+		labels.append(nicify(n) if n.find(" ") < 0 else n)
 		next += 1
 	return [names, values, labels]
 
@@ -776,7 +819,7 @@ static func _hint_flags(hs: String) -> Array:
 		var kv := String(item).split(":")
 		var n := kv[0].strip_edges()
 		var m := int(kv[1]) if kv.size() > 1 else bit
-		labels.append(UxmlInputParts.nicify(n) if n.find(" ") < 0 else n)
+		labels.append(nicify(n) if n.find(" ") < 0 else n)
 		masks.append(str(m))
 		bit = m << 1 if kv.size() > 1 and m > 0 else bit << 1
 	return [labels, masks]

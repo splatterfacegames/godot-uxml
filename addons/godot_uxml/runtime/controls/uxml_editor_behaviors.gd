@@ -278,7 +278,7 @@ class CurveBehavior extends EditorBehavior:
 
 	func setup() -> void:
 		super.setup()
-		var init = el.get_meta(&"uxml_initial_value", null)
+		var init = (el.get_meta(&"uxml_initial_value") if el.has_meta(&"uxml_initial_value") else null)
 		_value = init as Curve
 		_view()
 		doc._layout_hooks.append(_after_layout)
@@ -337,7 +337,7 @@ class GradientBehavior extends EditorBehavior:
 
 	func setup() -> void:
 		super.setup()
-		_value = el.get_meta(&"uxml_initial_value", null) as Gradient
+		_value = (el.get_meta(&"uxml_initial_value") if el.has_meta(&"uxml_initial_value") else null) as Gradient
 		if _value == null:
 			# Unity's default: white to white.
 			_value = Gradient.new()
@@ -395,7 +395,7 @@ class ObjectBehavior extends EditorBehavior:
 
 	func setup() -> void:
 		super.setup()
-		_value = el.get_meta(&"uxml_initial_value", null)
+		_value = (el.get_meta(&"uxml_initial_value") if el.has_meta(&"uxml_initial_value") else null)
 		var c := native()
 		if c != null:
 			c.set_drag_forwarding(Callable(), _can_drop, _drop)

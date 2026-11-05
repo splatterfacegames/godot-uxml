@@ -463,30 +463,51 @@ class ObjectPicker extends VBoxContainer:
 			v = ResourceLoader.load(v)
 		chosen.call(v)
 
-	## Every res:// file with an extension the loader reads as `type`
-	## (imported files by their source path), sorted.
+	## Every res:// file of resource type `t`, sorted: files with an
+	## extension the loader reads as `t`, and imported files whose .import
+	## file names a resource type of class `t` (outside the editor the
+	## importers are not registered, so the .import file is the source).
 	static func resource_files(t: String) -> PackedStringArray:
+		var cls := t if ClassDB.class_exists(t) else "Resource"
 		var exts := {}
-		for e in ResourceLoader.get_recognized_extensions_for_type(t if ClassDB.class_exists(t) else "Resource"):
+		for e in ResourceLoader.get_recognized_extensions_for_type(cls):
 			exts[String(e).to_lower()] = true
-		var out := PackedStringArray()
-		_walk("res://", exts, out)
+		var found := {}
+		_walk("res://", cls, exts, found)
+		var out := PackedStringArray(found.keys())
 		out.sort()
 		return out
 
-	static func _walk(dir: String, exts: Dictionary, out: PackedStringArray) -> void:
+	static func _walk(dir: String, cls: String, exts: Dictionary, out: Dictionary) -> void:
 		var d := DirAccess.open(dir)
 		if d == null:
 			return
 		for f in d.get_files():
-			var ext := f.get_extension().to_lower()
-			if ext == "import" or ext == "uid":
+			var path := dir.path_join(f)
+			if f.ends_with(".import"):
+				var src := path.trim_suffix(".import")
+				if not out.has(src) and _import_type_is(path, cls):
+					out[src] = true
 				continue
-			# Imported files count by their source extension: the importer
-			# reports it for its resource type.
-			if exts.has(ext):
-				out.append(dir.path_join(f))
+			if f.ends_with(".remap"):
+				path = path.trim_suffix(".remap")
+				f = f.trim_suffix(".remap")
+			var ext := f.get_extension().to_lower()
+			if ext != "uid" and exts.has(ext):
+				out[path] = true
 		for sub in d.get_directories():
 			if sub.begins_with("."):
 				continue
-			_walk(dir.path_join(sub), exts, out)
+			_walk(dir.path_join(sub), cls, exts, out)
+
+	## The `type="..."` of an .import file's [remap] section is class `cls`.
+	static func _import_type_is(path: String, cls: String) -> bool:
+		var f := FileAccess.open(path, FileAccess.READ)
+		if f == null:
+			return false
+		while not f.eof_reached():
+			var line := f.get_line().strip_edges()
+			if line.begins_with("type="):
+				var ty := line.substr(5).strip_edges().trim_prefix("\"").trim_suffix("\"")
+				return ty == cls or (ClassDB.class_exists(ty) and ClassDB.is_parent_class(ty, cls))
+		return false

@@ -18,7 +18,13 @@ func _initialize() -> void:
 	# Suites: this script's own test_* methods (milestone 1) plus RefCounted
 	# suite objects that receive this harness in _init. Suite methods may be
 	# coroutines (await process_frame for real input delivery).
-	var suites: Array = [[self, "core"]]
+	# `-- --suite <tag>` runs one suite (development).
+	var only := ""
+	var ua := OS.get_cmdline_user_args()
+	var si := ua.find("--suite")
+	if si >= 0 and si + 1 < ua.size():
+		only = ua[si + 1]
+	var suites: Array = [] if not only.is_empty() and only != "core" else [[self, "core"]]
 	for entry in [
 		["res://tests/test_layout.gd", "layout"],
 		["res://tests/test_runtime.gd", "runtime"],
@@ -30,7 +36,10 @@ func _initialize() -> void:
 		["res://tests/test_controls.gd", "controls"],
 		["res://tests/test_inputs.gd", "inputs"],
 		["res://tests/test_containers.gd", "containers"],
+		["res://tests/test_editor.gd", "editor"],
 	]:
+		if not only.is_empty() and entry[1] != only:
+			continue
 		var cls = load(entry[0])
 		if cls == null:
 			_failures += 1
