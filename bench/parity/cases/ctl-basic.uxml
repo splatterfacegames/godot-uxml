@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="ve" style="height: 10px;" />
+  <ui:TemplateContainer name="tc" style="height: 10px;" />
+  <ui:Box name="box" style="height: 20px;" />
+  <ui:Label name="label" text="Label text" />
+  <ui:TextElement name="te" text="Text element" />
+  <ui:Label name="label-empty" />
+  <ui:Image name="image" style="width: 32px; height: 16px;" />
+</ui:UXML>

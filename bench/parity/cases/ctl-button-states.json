@@ -1,0 +1,5 @@
+{"actions": [
+  {"op": "focus", "target": "b-focus"},
+  {"op": "pointer-down", "target": "b-active"},
+  {"op": "pointer-move", "target": "b-hover"}
+]}

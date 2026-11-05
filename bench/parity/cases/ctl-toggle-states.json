@@ -1,0 +1,7 @@
+{"actions": [
+  {"op": "click", "target": "t-click"},
+  {"op": "key", "target": "t-key", "key": "Space"},
+  {"op": "focus", "target": "t-focus"},
+  {"op": "pointer-down", "path": "1/1/0"},
+  {"op": "pointer-move", "path": "0/1/0"}
+]}

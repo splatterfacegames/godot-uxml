@@ -1,0 +1,27 @@
+.accent {
+  --accent: rgb(10, 20, 30);
+}
+.unity-toggle__label {
+  color: var(--accent);
+}
+.unity-toggle:checked > .unity-toggle__input > .unity-toggle__checkmark {
+  width: 30px;
+}
+Toggle:checked #unity-checkmark {
+  background-color: rgb(1, 2, 3);
+}
+.unity-toggle__checkmark:checked {
+  height: 25px;
+}
+.unity-toggle__input:checked {
+  padding-left: 9px;
+}
+.unity-button:hover {
+  padding-top: 11px;
+}
+.unity-toggle:hover .unity-toggle__checkmark {
+  margin-top: 6px;
+}
+.unity-toggle__checkmark:hover {
+  margin-left: 6px;
+}

@@ -112,8 +112,8 @@ func test_load_builds_native_controls() -> void:
 	h.eq((doc.get_element("play") as Button).text, "Play", "play text wired")
 	h.check(doc.get_element("title") is Label, "title is a Label")
 	h.eq((doc.get_element("title") as Label).text, "Settings", "title text")
-	h.check(doc.get_element("mute") is CheckBox, "mute is a CheckBox")
-	h.eq((doc.get_element("mute") as CheckBox).button_pressed, true, "mute value=true")
+	h.check(doc.get_element("mute") is UxmlToggle, "mute is a UxmlToggle (Unity part tree)")
+	h.eq((doc.get_element("mute") as UxmlToggle).button_pressed, true, "mute value=true")
 
 	var vol := doc.get_native("vol")
 	h.check(vol is HSlider, "vol native is HSlider (got %s)" % vol)
@@ -363,7 +363,7 @@ func test_value_changed_semantics() -> void:
 	h.eq(int_events.size(), 1, "one SliderInt event")
 	h.eq(int_events[0][1], 4, "SliderInt rounds to int")
 
-	var mute: CheckBox = doc.get_native("mute")
+	var mute: UxmlToggle = doc.get_native("mute")
 	mute.button_pressed = false
 	await h.process_frame
 	var t_events: Array = events[0].filter(func(e): return e[0] == "mute")
@@ -429,7 +429,7 @@ func test_set_enabled_subtree() -> void:
 	h.check(dis_btn.disabled, "set_enabled(false) disables again")
 
 	# :checked resolves from the initial value and clears on toggle.
-	var mute: CheckBox = doc.get_native("mute")
+	var mute: UxmlToggle = doc.get_native("mute")
 	h.check(mute.button_pressed, "mute starts checked")
 	h.check(_style_has(doc, "mute", "border-top-width", "3px"),
 		":checked style applied from initial value")
@@ -811,21 +811,22 @@ func test_field_content_insets() -> void:
 func test_checked_skin_restores() -> void:
 	var doc := _load()
 	await h.process_frame
-	var mute: CheckBox = doc.get_native("mute")
-	h.check(mute.has_theme_stylebox_override("normal"),
-		"checked applies a real stylebox override")
+	var mute: UxmlToggle = doc.get_native("mute")
+	# The Toggle paints its own USS box (UxmlBox.box_style).
+	var sb0 := mute.box_style as StyleBoxFlat
+	h.check(sb0 != null and sb0.border_width_top >= 3,
+		"checked applies the :checked box")
 	mute.button_pressed = false
 	await h.process_frame
 	await h.process_frame
-	var still := false
-	if mute.has_theme_stylebox_override("normal"):
-		var sb: StyleBox = mute.get_theme_stylebox("normal")
-		still = sb.border_width_top >= 3
+	var sb1 := mute.box_style as StyleBoxFlat
+	var still := sb1 != null and sb1.border_width_top >= 3
 	h.check(not still, "unchecked removes the :checked border skin")
 	mute.button_pressed = true
 	await h.process_frame
 	await h.process_frame
-	h.check(mute.has_theme_stylebox_override("normal"),
+	var sb2 := mute.box_style as StyleBoxFlat
+	h.check(sb2 != null and sb2.border_width_top >= 3,
 		"re-checked restores the :checked skin")
 	_unload(doc)
 

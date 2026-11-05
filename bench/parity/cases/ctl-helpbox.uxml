@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:HelpBox name="hb-none" text="No icon" />
+  <ui:HelpBox name="hb-info" text="Info message" message-type="Info" />
+  <ui:HelpBox name="hb-warning" text="Warning message" message-type="Warning" />
+  <ui:HelpBox name="hb-error" text="Error message" message-type="Error" />
+  <ui:HelpBox name="hb-empty" message-type="Info" />
+</ui:UXML>

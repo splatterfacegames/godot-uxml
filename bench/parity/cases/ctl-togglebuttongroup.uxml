@@ -1,0 +1,14 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:ToggleButtonGroup name="tbg" label="Mode">
+    <ui:Button name="tbg-a" text="A" />
+    <ui:Button name="tbg-b" text="B" />
+    <ui:Button name="tbg-c" text="C" />
+  </ui:ToggleButtonGroup>
+  <ui:ToggleButtonGroup name="tbg-multi" is-multiple-selection="true" allow-empty-selection="true">
+    <ui:Button name="tbg-m1" text="One" />
+    <ui:Button name="tbg-m2" text="Two" />
+  </ui:ToggleButtonGroup>
+  <ui:ToggleButtonGroup name="tbg-single">
+    <ui:Button name="tbg-s1" text="Solo" />
+  </ui:ToggleButtonGroup>
+</ui:UXML>

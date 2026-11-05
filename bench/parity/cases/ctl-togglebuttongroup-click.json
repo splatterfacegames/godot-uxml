@@ -1,0 +1,5 @@
+{"actions": [
+  {"op": "click", "target": "tbg-b"},
+  {"op": "click", "target": "tbg-m1"},
+  {"op": "click", "target": "tbg-m2"}
+]}

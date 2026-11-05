@@ -1,0 +1,4 @@
+{"actions": [
+  {"op": "pointer-move", "target": "ss-hover"},
+  {"op": "pointer-move", "path": "0/3/1/0"}
+]}
