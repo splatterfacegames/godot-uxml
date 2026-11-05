@@ -56,7 +56,11 @@ static func _create(el: UxmlElement) -> Behavior:
 		"PopupWindow":
 			return OwnTextBehavior.new()
 	# Input controls: runtime/controls/uxml_input_behaviors.gd
-	return UxmlInputBehaviors.create(el)
+	var ib := UxmlInputBehaviors.create(el)
+	if ib != null:
+		return ib
+	# Editor controls: runtime/controls/uxml_editor_behaviors.gd
+	return UxmlEditorBehaviors.create(el)
 
 
 # ---------------------------------------------------------------------------

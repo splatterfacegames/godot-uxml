@@ -121,8 +121,11 @@ const NUMERIC_OR_TEXT := {
 # ---------------------------------------------------------------------------
 
 func _create(el: UxmlElement) -> Control:
-	if el.part_of != null and el.part_role == "editor":
-		return UxmlTextInput.create(el)
+	if el.part_of != null:
+		if el.part_role == "editor":
+			return UxmlTextInput.create(el)
+		if el.has_meta(UxmlEditorParts.META_WIDGET):
+			return UxmlEditorWidgets.part_control(el)
 	match el.local:
 		"Label":
 			var text := _text_attr(el)
@@ -169,6 +172,10 @@ func _create(el: UxmlElement) -> Control:
 		"VisualElement", "TemplateContainer":
 			return UxmlBox.new()
 		_:
+			# Editor controls (UnityEditor.UIElements): uxml_editor_widgets.gd.
+			var ec := UxmlEditorWidgets.create_control(el, self)
+			if ec != null:
+				return ec
 			# Every unmapped tag: a styled box. Children are preserved by
 			# the caller.
 			return UxmlBox.new()

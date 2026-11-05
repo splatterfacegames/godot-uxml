@@ -1,0 +1,1 @@
+{"width": 400, "height": 300, "actions": [{"op": "set-value", "target": "curve", "value": [[0, 0], [0.5, 1], [1, 0]]}, {"op": "set-value", "target": "gradient", "value": [[0, "#FF0000"], [1, "#0000FF"]]}], "editor": "dark"}

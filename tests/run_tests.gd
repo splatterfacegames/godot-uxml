@@ -18,7 +18,15 @@ func _initialize() -> void:
 	# Suites: this script's own test_* methods (milestone 1) plus RefCounted
 	# suite objects that receive this harness in _init. Suite methods may be
 	# coroutines (await process_frame for real input delivery).
-	var suites: Array = [[self, "core"]]
+	# `-- --suite <tag>` runs one suite (development).
+	var only := ""
+	var ua := OS.get_cmdline_user_args()
+	var si := ua.find("--suite")
+	if si >= 0 and si + 1 < ua.size():
+		only = ua[si + 1]
+	if not only.is_empty():
+		await process_frame  # the root enters the tree (timers, input)
+	var suites: Array = [] if not only.is_empty() and only != "core" else [[self, "core"]]
 	for entry in [
 		["res://tests/test_layout.gd", "layout"],
 		["res://tests/test_runtime.gd", "runtime"],
@@ -30,7 +38,10 @@ func _initialize() -> void:
 		["res://tests/test_controls.gd", "controls"],
 		["res://tests/test_inputs.gd", "inputs"],
 		["res://tests/test_containers.gd", "containers"],
+		["res://tests/test_editor.gd", "editor"],
 	]:
+		if not only.is_empty() and entry[1] != only:
+			continue
 		var cls = load(entry[0])
 		if cls == null:
 			_failures += 1
@@ -997,7 +1008,9 @@ func test_all_initial() -> void:
 func test_recognized_but_unmapped_controls_warn() -> void:
 	# IntegerField and FloatField left the recognized-but-unmapped list when
 	# they became Unity part trees (runtime/controls/uxml_input_parts.gd):
-	# they are known controls now. An editor-only control still warns.
+	# they are known controls now. The editor controls (uie:) are part
+	# trees too (runtime/controls/uxml_editor_parts.gd); an unknown tag
+	# still warns.
 	for tag in ["IntegerField", "FloatField"]:
 		var doc := UxmlLoader.load_source(
 			'<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:%s name="f"><ui:Label name="k" /></ui:%s></ui:UXML>' % [tag, tag],
@@ -1005,8 +1018,12 @@ func test_recognized_but_unmapped_controls_warn() -> void:
 		)
 		eq(_count_kind(doc.warnings, "unsupported-control"), 0, "%s is a mapped control" % tag)
 		check(doc.find_by_name("k") != null, "%s children preserved" % tag)
+	var known := UxmlLoader.load_source(
+		'<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements"><uie:ColorField name="c" /></ui:UXML>',
+		"inline/test.uxml", _resolver(FIXTURES + "/options"))
+	eq(_count_kind(known.warnings, "unsupported-control"), 0, "an editor control is a mapped control")
 	var ed := UxmlLoader.load_source(
-		'<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:ColorField name="f"><ui:Label name="k" /></ui:ColorField></ui:UXML>',
+		'<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:FancyField name="f"><ui:Label name="k" /></ui:FancyField></ui:UXML>',
 		"inline/test.uxml", _resolver(FIXTURES + "/options"))
 	eq(_count_kind(ed.warnings, "unsupported-control"), 1, "an unmapped control warns")
 	check(ed.find_by_name("k") != null, "unmapped control children preserved")

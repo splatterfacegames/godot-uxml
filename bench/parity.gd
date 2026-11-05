@@ -62,6 +62,7 @@ func _initialize() -> void:
 			"uxml": FileAccess.get_file_as_string(CASES_DIR + n + ".uxml"),
 			"uss": FileAccess.get_file_as_string(uss_path) if FileAccess.file_exists(uss_path) else "",
 			"files": {}})
+	_unity_project_data()
 	var unity_ok := _unity_section(unity_cases)
 	quit(0 if negatives_ok and unity_ok else 1)
 
@@ -84,7 +85,7 @@ func _corpus_names() -> Array:
 
 ## Write a case to user://, load it with the default theme and part trees.
 func _load_case(name: String, uxml: String, uss: String, files: Dictionary, values: Dictionary = {},
-		actions: Array = []) -> UxmlDocumentModel:
+		actions: Array = [], side: Dictionary = {}) -> UxmlDocumentModel:
 	var root := "user://godot_uxml_parity/%s" % name
 	var dir := root + "/Assets/GoldenCases/"
 	DirAccess.make_dir_recursive_absolute(dir)
@@ -105,10 +106,84 @@ func _load_case(name: String, uxml: String, uss: String, files: Dictionary, valu
 				var vs: Dictionary = values[String(n)]
 				for k in vs:
 					el.set_attribute(k, vs[k])
-	UxmlTheme.attach(doc, UxmlTheme.DEFAULT)
+	# Editor cases (sidecar "editor": "dark" | "light") ran in an editor
+	# panel: the editor theme of that skin.
+	var skin := String(side.get("editor", ""))
+	UxmlTheme.attach(doc, UxmlTheme.DEFAULT, "always" if not skin.is_empty() else "auto",
+		skin if not skin.is_empty() else "dark")
 	UxmlParts.expand(doc)
 	_model_actions(doc, actions)
+	if side.has("bind"):
+		_bind_editor(doc, String(side["bind"]), root)
 	return doc
+
+
+## Unity's project data in the dump project: the built-in layers and tags,
+## one rendering layer, and the DumpFlags enum of tools/unity-dump.
+func _unity_project_data() -> void:
+	var layers: Array = []
+	layers.resize(32)
+	layers.fill("")
+	layers[0] = "Default"
+	layers[1] = "TransparentFX"
+	layers[2] = "Ignore Raycast"
+	layers[4] = "Water"
+	layers[5] = "UI"
+	UxmlEditorParts.set_layer_names(layers)
+	UxmlEditorParts.set_rendering_layer_names(["Default"])
+	UxmlEditorParts.set_tags(UxmlEditorParts.UNITY_TAGS)
+	UxmlInputParts.register_enum("DumpFlags", {"None": 0, "Alpha": 1, "Beta": 2, "Gamma": 4, "AlphaBeta": 3})
+
+
+## The Godot stand-ins of the ScriptableObjects that the editor cases bind
+## (tools/unity-dump/Assets/Editor/DumpTarget.cs, DumpSmallTarget.cs).
+const BIND_SCRIPTS := {
+	"DumpTarget": """extends Resource
+enum DumpEnum { First, SecondValue, Third }
+@export var intValue: int = 42
+@export var floatValue: float = 1.5
+@export var stringValue: String = "hello"
+@export var boolValue: bool = true
+@export var colorValue: Color = Color(1, 0.5, 0, 1)
+@export var vector2Value: Vector2 = Vector2(1, 2)
+@export var vector3Value: Vector3 = Vector3(1, 2, 3)
+@export var enumValue: DumpEnum = DumpEnum.SecondValue
+@export_flags("Alpha", "Beta", "Gamma") var flagsValue: int = 5
+@export var curveValue: Curve = Curve.new()
+@export var gradientValue: Gradient = Gradient.new()
+@export var textureValue: Texture2D
+@export_flags_3d_physics var layerMaskValue: int = 1
+""",
+	"DumpSmallTarget": """extends Resource
+@export var count: int = 3
+@export var title: String = "Hi"
+@export var active: bool = false
+""",
+}
+
+
+## Bound editor cases: the fields that PropertyField and InspectorElement
+## build at bind time, from the Godot stand-in object.
+func _bind_editor(doc: UxmlDocumentModel, type_name: String, root: String) -> void:
+	var path := root + "/" + type_name + ".gd"
+	_write(path, BIND_SCRIPTS[type_name])
+	var script := GDScript.new()
+	script.source_code = BIND_SCRIPTS[type_name]
+	script.resource_path = path
+	script.reload()
+	var obj = script.new()
+	var props := {}
+	for p in obj.get_property_list():
+		props[String(p["name"])] = p
+	for el in doc.root.walk():
+		if el.part_of != null:
+			continue
+		if el.local == "PropertyField":
+			var bp := String(el.get_attribute("binding-path"))
+			if props.has(bp):
+				el.children.append(UxmlEditorParts.property_field_content(el, props[bp], obj.get(bp), false))
+		elif el.local == "InspectorElement":
+			UxmlEditorParts.inspector_content(el, obj)
 
 
 ## The sidecar actions that give a control data instead of input (Unity's
@@ -124,6 +199,9 @@ func _model_actions(doc: UxmlDocumentModel, actions: Array) -> void:
 		if el == null:
 			continue
 		match op:
+			"breadcrumbs":
+				for t in act.get("items", []):
+					el.children.append(UxmlEditorParts.breadcrumb_item(el, str(t)))
 			"items":
 				var texts: Array = []
 				if act.has("values"):
@@ -453,11 +531,38 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 			values[n] = {"min-value": str(props["minValue"]), "max-value": str(props["maxValue"])}
 	var actions: Array = []
 	var side := CASES_DIR + name + ".json"
+	var sidecar := {}
 	if FileAccess.file_exists(side):
 		var sj = JSON.parse_string(FileAccess.get_file_as_string(side))
 		if sj is Dictionary:
+			sidecar = sj
 			actions = sj.get("actions", [])
-	var doc := _load_case("unity-" + name, c["uxml"], c["uss"], c["files"], values, actions)
+	# C# properties that the case sets (Unity 6000.3 has no UXML attribute
+	# for them) become the attributes godot-uxml reads.
+	for act in actions:
+		var op := String(act.get("op", ""))
+		var tn := String(act.get("target", ""))
+		if tn.is_empty() or not (op == "set-prop" or op == "set-value"):
+			continue
+		var vs: Dictionary = values.get(tn, {})
+		var v = act.get("value")
+		if op == "set-prop":
+			var attr: String = {"flex": "flex", "choicesMasks": "choices-masks"}.get(String(act.get("prop", "")), "")
+			if attr.is_empty():
+				continue
+			if v is Array:
+				var parts := PackedStringArray()
+				for x in v:
+					parts.append(str(int(x)) if x is float else str(x))
+				vs[attr] = ",".join(parts)
+			else:
+				vs[attr] = str(v).to_lower() if v is bool else str(v)
+		elif v is float or v is int:
+			vs["value"] = str(int(v)) if float(v) == floorf(float(v)) else str(v)
+		else:
+			continue
+		values[tn] = vs
+	var doc := _load_case("unity-" + name, c["uxml"], c["uss"], c["files"], values, actions, sidecar)
 	var ours := _paths(doc.root)
 	# Classes the input controls toggle at run time (a focused slider's
 	# --movable dragger, the placeholder class), copied like pseudo-states.
@@ -517,6 +622,14 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	for el in doc.root.walk():
 		if UxmlInputParts.layout_styles(el, size_of, style_of):
 			relaid = true
+	# Editor controls: the ColorField alpha bar, the InspectorElement label
+	# alignment (BaseField.AlignLabel).
+	var abs0 := _abs_rects(doc.root, rects, styles)
+	var size_or_null := func(x: UxmlElement):
+		var r = rects.get(x)
+		return null if r == null else (r as Rect2).size
+	if UxmlEditorParts.layout_styles(doc.root, size_or_null, func(x): return abs0.get(x), style_of):
+		relaid = true
 	if relaid:
 		settled = _settle(doc, resolve_fn, layout_fn)
 		styles = settled[0]

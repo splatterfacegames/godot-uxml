@@ -39,6 +39,9 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
+using UnityEditor.UIElements;
+
+public class DumpPanelOwner : ScriptableObject { }
 
 public static class UxmlDump
 {
@@ -53,9 +56,22 @@ public static class UxmlDump
         return fallback;
     }
 
+    // The editor skin of the editor cases. Some editor controls (Toolbar)
+    // load their own sheet for EditorGUIUtility.isProSkin, so the dumper
+    // switches the editor skin, and restores the user's skin at the end.
+    static void EnsureSkin(bool dark)
+    {
+        if (EditorGUIUtility.isProSkin == dark) return;
+        // EditorGUIUtility.skinIndex (internal): 0 light, 1 dark, for this
+        // session only.
+        typeof(EditorGUIUtility).GetProperty("skinIndex", Any).SetValue(null, dark ? 1 : 0);
+        if (EditorGUIUtility.isProSkin != dark) throw new Exception("cannot switch the editor skin");
+    }
+
     public static void Run()
     {
         int exit = 0;
+        bool userSkin = EditorGUIUtility.isProSkin;
         try
         {
             string casesDir = Arg("-dumpCases", "Assets/Cases");
@@ -86,6 +102,7 @@ public static class UxmlDump
             exit = 2;
             Debug.LogError("[uxml-dump] " + e);
         }
+        try { EnsureSkin(userSkin); } catch { }
         EditorApplication.Exit(exit);
     }
 
@@ -95,6 +112,12 @@ public static class UxmlDump
     {
         public int width = 400;
         public int height = 300;
+        // "dark" or "light": an editor panel with Unity's editor skin
+        // (UIElementsEditorUtility common dark/light sheet) instead of the
+        // runtime panel. "bind": a ScriptableObject type bound to the case
+        // root (BindingExtensions.Bind with a SerializedObject).
+        public string editor = "";
+        public string bind = "";
         public List<Dictionary<string, object>> actions = new List<Dictionary<string, object>>();
     }
 
@@ -106,10 +129,22 @@ public static class UxmlDump
         if (obj == null) return sc;
         if (obj.TryGetValue("width", out var w)) sc.width = Convert.ToInt32(w, CultureInfo.InvariantCulture);
         if (obj.TryGetValue("height", out var h)) sc.height = Convert.ToInt32(h, CultureInfo.InvariantCulture);
+        if (obj.TryGetValue("editor", out var ed)) sc.editor = Convert.ToString(ed, CultureInfo.InvariantCulture);
+        if (obj.TryGetValue("bind", out var bd)) sc.bind = Convert.ToString(bd, CultureInfo.InvariantCulture);
         if (obj.TryGetValue("actions", out var a) && a is List<object> list)
             foreach (var x in list)
                 if (x is Dictionary<string, object> d) sc.actions.Add(d);
         return sc;
+    }
+
+    static Type EditorType(string full)
+    {
+        foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var t = a.GetType(full);
+            if (t != null) return t;
+        }
+        throw new Exception("no type " + full);
     }
 
     static string DumpCase(string dir, string name)
@@ -118,27 +153,61 @@ public static class UxmlDump
         var vta = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(dir + "/" + name + ".uxml");
         if (vta == null) throw new Exception("no VisualTreeAsset at " + dir + "/" + name + ".uxml");
         var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(dir + "/" + name + ".uss");
-        var theme = AssetDatabase.LoadAssetAtPath<ThemeStyleSheet>(ThemePath);
-        if (theme == null) throw new Exception("no default runtime theme at " + ThemePath);
-
-        var rt = new RenderTexture(sc.width, sc.height, 0);
-        var ps = ScriptableObject.CreateInstance<PanelSettings>();
-        ps.themeStyleSheet = theme;
-        ps.scaleMode = PanelScaleMode.ConstantPixelSize;
-        ps.scale = 1f;
-        ps.referenceDpi = 96f;
-        ps.fallbackDpi = 96f;
-        ps.targetTexture = rt;
-        ps.clearColor = false;
-
-        var go = new GameObject("uxml-dump");
+        var cleanup = new List<Action>();
         try
         {
-            var docu = go.AddComponent<UIDocument>();
-            docu.panelSettings = ps;
-            var docRoot = docu.rootVisualElement;
-            if (docRoot == null) throw new Exception("UIDocument has no rootVisualElement in edit mode");
-            var panel = docRoot.panel;
+            VisualElement docRoot;
+            IPanel panel;
+            string themeName;
+            if (sc.editor.Length > 0)
+            {
+                // An editor panel (EditorPanel.FindOrCreate, as a GUIView
+                // makes one) with the editor skin sheet on its root, as
+                // UIElementsEditorUtility.AddDefaultEditorStyleSheets adds it.
+                // pixelsPerPoint 1 as in the runtime cases (batch mode reports
+                // the screen scale, 1.5 on a 144 dpi display).
+                ForceEditorScale(null);
+                EnsureSkin(sc.editor != "light");
+                var owner = ScriptableObject.CreateInstance<DumpPanelOwner>();
+                cleanup.Add(() => UnityEngine.Object.DestroyImmediate(owner));
+                var ep = EditorType("UnityEditor.UIElements.EditorPanel");
+                panel = (IPanel)ep.GetMethod("FindOrCreate", Any).Invoke(null, new object[] { owner });
+                var disposePanel = panel;
+                cleanup.Insert(0, () => { try { ((IDisposable)disposePanel).Dispose(); } catch { } });
+                var util = EditorType("UnityEditor.UIElements.UIElementsEditorUtility");
+                bool light = sc.editor == "light";
+                var sheet = (StyleSheet)util.GetMethod(light ? "GetCommonLightStyleSheet" : "GetCommonDarkStyleSheet", Any).Invoke(null, null);
+                ForceEditorScale(panel);
+                docRoot = panel.visualTree;
+                docRoot.styleSheets.Add(sheet);
+                docRoot.style.width = sc.width;
+                docRoot.style.height = sc.height;
+                themeName = light ? "unity-editor (light)" : "unity-editor (dark)";
+            }
+            else
+            {
+                var theme = AssetDatabase.LoadAssetAtPath<ThemeStyleSheet>(ThemePath);
+                if (theme == null) throw new Exception("no default runtime theme at " + ThemePath);
+                var rt = new RenderTexture(sc.width, sc.height, 0);
+                var ps = ScriptableObject.CreateInstance<PanelSettings>();
+                ps.themeStyleSheet = theme;
+                ps.scaleMode = PanelScaleMode.ConstantPixelSize;
+                ps.scale = 1f;
+                ps.referenceDpi = 96f;
+                ps.fallbackDpi = 96f;
+                ps.targetTexture = rt;
+                ps.clearColor = false;
+                var go = new GameObject("uxml-dump");
+                cleanup.Add(() => UnityEngine.Object.DestroyImmediate(go));
+                cleanup.Add(() => UnityEngine.Object.DestroyImmediate(ps));
+                cleanup.Add(() => { rt.Release(); UnityEngine.Object.DestroyImmediate(rt); });
+                var docu = go.AddComponent<UIDocument>();
+                docu.panelSettings = ps;
+                docRoot = docu.rootVisualElement;
+                if (docRoot == null) throw new Exception("UIDocument has no rootVisualElement in edit mode");
+                panel = docRoot.panel;
+                themeName = "unity-theme://default (runtime)";
+            }
 
             // The case root: a fixed-size host at the panel origin, so geometry
             // does not depend on how the panel sizes its root in batch mode.
@@ -152,6 +221,13 @@ public static class UxmlDump
             docRoot.Add(host);
             vta.CloneTree(host);
             if (uss != null) host.styleSheets.Add(uss);
+            if (sc.bind.Length > 0)
+            {
+                var target = ScriptableObject.CreateInstance(sc.bind);
+                if (target == null) throw new Exception("no ScriptableObject type " + sc.bind);
+                cleanup.Add(() => UnityEngine.Object.DestroyImmediate(target));
+                host.Bind(new SerializedObject(target));
+            }
             Validate(panel);
 
             var log = new List<string>();
@@ -165,8 +241,9 @@ public static class UxmlDump
             var w = new JsonWriter();
             w.BeginObject();
             w.Key("case"); w.Value(name);
-            w.Key("metadata"); WriteMetadata(w, panel);
+            w.Key("metadata"); WriteMetadata(w, panel, themeName);
             w.Key("panel"); w.BeginObject(); w.Key("width"); w.Value(sc.width); w.Key("height"); w.Value(sc.height); w.EndObject();
+            if (sc.editor.Length > 0) { w.Key("editor"); w.Value(sc.editor); }
             w.Key("actions"); w.BeginArray(); foreach (var l in log) w.Value(l); w.EndArray();
             w.Key("focused");
             var focused = panel.focusController != null ? panel.focusController.focusedElement as VisualElement : null;
@@ -197,11 +274,17 @@ public static class UxmlDump
         }
         finally
         {
-            UnityEngine.Object.DestroyImmediate(go);
-            UnityEngine.Object.DestroyImmediate(ps);
-            rt.Release();
-            UnityEngine.Object.DestroyImmediate(rt);
+            foreach (var c in cleanup) { try { c(); } catch { } }
         }
+    }
+
+    static void ForceEditorScale(IPanel panel)
+    {
+        var gp = typeof(GUIUtility).GetProperty("pixelsPerPoint", Any);
+        if (gp != null && gp.GetSetMethod(true) != null) gp.GetSetMethod(true).Invoke(null, new object[] { 1f });
+        if (panel == null || panel.contextType != ContextType.Editor) return;
+        var pp = panel.GetType().GetProperty("pixelsPerPoint", Any);
+        if (pp != null && Math.Abs(Convert.ToSingle(pp.GetValue(panel)) - 1f) > 1e-4f) pp.SetValue(panel, 1f);
     }
 
     // Styles, layout and transforms, the way the panel does before a repaint.
@@ -209,19 +292,27 @@ public static class UxmlDump
     {
         for (int pass = 0; pass < 8; pass++)
         {
+            ForceEditorScale(panel);
             var m = panel.GetType().GetMethod("ValidateLayout", Any, null, Type.EmptyTypes, null);
             if (m == null) throw new Exception("panel has no ValidateLayout");
+            // Editor panels: SerializedObject bindings and scheduled items
+            // (PropertyField builds its field on the bind event).
+            foreach (var extra in new[] { "UpdateBindings", "TickSchedulingUpdaters" })
+            {
+                var em = panel.GetType().GetMethod(extra, Any, null, Type.EmptyTypes, null);
+                if (em != null) { try { em.Invoke(panel, null); } catch { } }
+            }
             m.Invoke(panel, null);
             var u = panel.GetType().GetMethod("UpdateForRepaint", Any, null, Type.EmptyTypes, null);
             if (u != null) { try { u.Invoke(panel, null); } catch { } }
         }
     }
 
-    static void WriteMetadata(JsonWriter w, IPanel panel)
+    static void WriteMetadata(JsonWriter w, IPanel panel, string theme)
     {
         w.BeginObject();
         w.Key("unityVersion"); w.Value(Application.unityVersion);
-        w.Key("theme"); w.Value("unity-theme://default (runtime)");
+        w.Key("theme"); w.Value(theme);
         w.Key("pixelsPerPoint");
         var ppp = panel.GetType().GetProperty("scaledPixelsPerPoint", Any);
         if (ppp != null) w.Value(Convert.ToDouble(ppp.GetValue(panel), CultureInfo.InvariantCulture)); else w.Null();
@@ -371,9 +462,62 @@ public static class UxmlDump
                 if (vp.PropertyType == typeof(bool)) v = Convert.ToBoolean(v, CultureInfo.InvariantCulture);
                 else if (vp.PropertyType == typeof(float)) v = Convert.ToSingle(v, CultureInfo.InvariantCulture);
                 else if (vp.PropertyType == typeof(int)) v = Convert.ToInt32(v, CultureInfo.InvariantCulture);
+                else if (vp.PropertyType == typeof(uint)) v = Convert.ToUInt32(v, CultureInfo.InvariantCulture);
                 else if (vp.PropertyType == typeof(string)) v = Convert.ToString(v, CultureInfo.InvariantCulture);
+                else if (vp.PropertyType == typeof(Color))
+                {
+                    ColorUtility.TryParseHtmlString(Convert.ToString(v, CultureInfo.InvariantCulture), out var col);
+                    v = col;
+                }
+                else if (vp.PropertyType == typeof(AnimationCurve))
+                {
+                    var keys = new List<Keyframe>();
+                    foreach (var k in (List<object>)v)
+                    {
+                        var kl = (List<object>)k;
+                        keys.Add(new Keyframe(Convert.ToSingle(kl[0], CultureInfo.InvariantCulture), Convert.ToSingle(kl[1], CultureInfo.InvariantCulture)));
+                    }
+                    v = new AnimationCurve(keys.ToArray());
+                }
+                else if (vp.PropertyType == typeof(Gradient))
+                {
+                    var g = new Gradient();
+                    var ck = new List<GradientColorKey>();
+                    foreach (var k in (List<object>)v)
+                    {
+                        var kl = (List<object>)k;
+                        ColorUtility.TryParseHtmlString(Convert.ToString(kl[1], CultureInfo.InvariantCulture), out var kc);
+                        ck.Add(new GradientColorKey(kc, Convert.ToSingle(kl[0], CultureInfo.InvariantCulture)));
+                    }
+                    g.SetKeys(ck.ToArray(), new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(1, 1) });
+                    v = g;
+                }
+                else if (vp.PropertyType.IsEnum) v = Enum.ToObject(vp.PropertyType, Convert.ToInt32(v, CultureInfo.InvariantCulture));
                 vp.SetValue(target, v);
                 return "set-value " + PathOf(target, host);
+            }
+            case "set-prop":
+            {
+                // A C# property without a UXML attribute in Unity 6000.3
+                // (ToolbarSpacer.flex, MaskField.choicesMasks).
+                if (target == null) return "set-prop: no target";
+                string pn = Convert.ToString(act["prop"], CultureInfo.InvariantCulture);
+                var pp = target.GetType().GetProperty(pn, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (pp == null) return "set-prop: no property " + pn;
+                object v = act["value"];
+                if (pp.PropertyType == typeof(bool)) v = Convert.ToBoolean(v, CultureInfo.InvariantCulture);
+                else if (pp.PropertyType == typeof(int)) v = Convert.ToInt32(v, CultureInfo.InvariantCulture);
+                else if (pp.PropertyType == typeof(float)) v = Convert.ToSingle(v, CultureInfo.InvariantCulture);
+                else if (pp.PropertyType == typeof(List<int>)) v = ((List<object>)v).Select(x => Convert.ToInt32(x, CultureInfo.InvariantCulture)).ToList();
+                else if (pp.PropertyType == typeof(List<string>)) v = ((List<object>)v).Select(x => Convert.ToString(x, CultureInfo.InvariantCulture)).ToList();
+                pp.SetValue(target, v);
+                return "set-prop " + PathOf(target, host) + " " + pn;
+            }
+            case "breadcrumbs":
+            {
+                if (!(target is ToolbarBreadcrumbs bc)) return "breadcrumbs: no ToolbarBreadcrumbs";
+                foreach (var x in (List<object>)act["items"]) bc.PushItem(Convert.ToString(x, CultureInfo.InvariantCulture));
+                return "breadcrumbs " + PathOf(target, host);
             }
             case "items":
             {
@@ -561,6 +705,11 @@ public static class UxmlDump
             {
                 w.Key(cn); WriteScalar(w, ccol);
             }
+        foreach (var cn in CustomFloats)
+            if (e.customStyle.TryGetValue(new CustomStyleProperty<float>(cn), out var cf))
+            {
+                w.Key(cn); w.Value(cf);
+            }
         w.EndObject();
 
         w.Key("style"); WriteResolved(w, e);
@@ -592,10 +741,18 @@ public static class UxmlDump
         "showFoldoutHeader", "headerTitle", "showAddRemoveFooter", "showBoundCollectionSize",
         "horizontalScrollingEnabled", "sortingMode", "orientation", "fixedPaneIndex",
         "fixedPaneInitialDimension", "selectedTabIndex", "closeable", "viewDataKey",
+        // Editor controls (UnityEditor.UIElements).
+        "showAlpha", "hdr", "showEyeDropper", "allowSceneObjects", "objectType", "choicesMasks",
+        "flex", "bindingPath", "colorSpace", "renderMode", "ranges", "isSearchFieldEnabled",
     };
 
     // Custom properties a control reads from its resolved custom style.
-    static readonly string[] CustomColors = { "--unity-cursor-color", "--unity-selection-color" };
+    static readonly string[] CustomColors = { "--unity-cursor-color", "--unity-selection-color", "--unity-curve-color" };
+    // Custom numbers the editor fields read (BaseField label alignment).
+    static readonly string[] CustomFloats = {
+        "--unity-property-field-label-width-ratio", "--unity-property-field-label-extra-padding",
+        "--unity-property-field-label-base-min-width", "--unity-base-field-extra-context-width",
+    };
 
     static void WriteValueProperty(JsonWriter w, VisualElement e)
     {
@@ -700,6 +857,23 @@ public static class UxmlDump
                     Num(c.r * 255.0), Num(c.g * 255.0), Num(c.b * 255.0), Num(c.a)));
                 return;
             case Enum en: w.Value(Kebab(en.ToString()).TrimStart('-')); return;
+            case Type ty: w.Value(ty.FullName); return;
+            case AnimationCurve ac:
+                w.BeginArray();
+                foreach (var k in ac.keys) w.Value(string.Format(CultureInfo.InvariantCulture, "{0},{1},{2},{3}", Num(k.time), Num(k.value), Num(k.inTangent), Num(k.outTangent)));
+                w.EndArray();
+                return;
+            case Gradient gr:
+                w.BeginObject();
+                w.Key("mode"); w.Value(gr.mode.ToString());
+                w.Key("colorKeys"); w.BeginArray();
+                foreach (var k in gr.colorKeys) w.Value(string.Format(CultureInfo.InvariantCulture, "{0},{1},{2},{3}", Num(k.time), Num(k.color.r), Num(k.color.g), Num(k.color.b)));
+                w.EndArray();
+                w.Key("alphaKeys"); w.BeginArray();
+                foreach (var k in gr.alphaKeys) w.Value(string.Format(CultureInfo.InvariantCulture, "{0},{1}", Num(k.time), Num(k.alpha)));
+                w.EndArray();
+                w.EndObject();
+                return;
             case StyleFloat sf: if (sf.keyword == StyleKeyword.Undefined) w.Value(sf.value); else w.Value(sf.keyword.ToString().ToLowerInvariant()); return;
             case StyleLength sl: w.Value(sl.keyword == StyleKeyword.Undefined ? sl.value.ToString() : sl.keyword.ToString().ToLowerInvariant()); return;
             case Background bg:

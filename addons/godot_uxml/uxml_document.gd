@@ -81,6 +81,15 @@ signal tab_reordered(element_name, from_index, to_index)
 ## load time.
 @export var theme_path: String = UxmlTheme.DEFAULT
 
+## Unity's editor look for documents with editor controls (UnityEditor.
+## UIElements, `uie:` tags): "auto" gives such a document the editor theme
+## in place of the runtime theme, "always" gives it to every document,
+## "never" to none. Only with the default theme. Read at load time.
+@export_enum("auto", "always", "never") var editor_theme: String = "auto"
+
+## The editor skin of the editor theme: "dark" (Unity's default) or "light".
+@export_enum("dark", "light") var editor_skin: String = "dark"
+
 ## Every diagnostic produced by the last load: parse/cascade warnings plus
 ## runtime `unsupported-value`/`duplicate-name`/`missing-file` entries.
 var diagnostics: Array = []
@@ -276,7 +285,7 @@ func load_document(path: String, root: String = "") -> int:
 		return ERR_FILE_CANT_OPEN
 
 	_effective_root = effective_root
-	UxmlTheme.attach(_doc, theme_path)
+	UxmlTheme.attach(_doc, theme_path, editor_theme, editor_skin)
 	_index()
 	_restyle_now()
 	_attrs.restore_view_data()
@@ -295,7 +304,7 @@ func load_source(uxml: String, virtual_path: String = "res://__uxml_source__.uxm
 	_resolver = UxmlResourceResolver.new(effective_root)
 	_doc = UxmlLoader.load_source(uxml, virtual_path, _resolver)
 	_effective_root = effective_root
-	UxmlTheme.attach(_doc, theme_path)
+	UxmlTheme.attach(_doc, theme_path, editor_theme, editor_skin)
 	_index()
 	_restyle_now()
 	_attrs.restore_view_data()
@@ -1617,3 +1626,68 @@ func set_view_data(data: Dictionary) -> void:
 ## The focus targets in Tab order, when the document uses tabindex.
 func get_focus_ring() -> Array:
 	return _attrs.focus_ring()
+
+
+# ---------------------------------------------------------------------------
+# Editor controls (UxmlEditorParts, UxmlEditorBehaviors)
+# ---------------------------------------------------------------------------
+
+## The entries of a ToolbarMenu or of the search menu of a
+## ToolbarPopupSearchField (Unity's `menu.AppendAction`). An entry is a
+## String or {text, checked, disabled}; "-" is a separator.
+## `on_chosen.call(index, text)` runs when the user chooses an entry.
+func set_menu_items(element_name: String, items: Array, on_chosen: Callable = Callable()) -> void:
+	var el: UxmlElement = _by_name.get(element_name)
+	var b = _behaviors.get(el) if el != null else null
+	if b == null or not "items" in b:
+		return
+	var out: Array = []
+	for it in items:
+		if it is Dictionary:
+			out.append([String(it.get("text", "")), bool(it.get("checked", false)), bool(it.get("disabled", false))])
+		else:
+			out.append([String(it), false, false])
+	b.items = out
+	b.on_chosen = on_chosen
+
+
+## ToolbarBreadcrumbs: add an item (Unity's PushItem). `clicked` runs when
+## the user clicks the item.
+func push_breadcrumb(element_name: String, text: String, clicked: Callable = Callable()) -> void:
+	var b = _behavior_of(element_name, "push_item")
+	if b != null:
+		b.push_item(text, clicked)
+
+
+## ToolbarBreadcrumbs: remove the last item (Unity's PopItem).
+func pop_breadcrumb(element_name: String) -> void:
+	var b = _behavior_of(element_name, "pop_item")
+	if b != null:
+		b.pop_item()
+
+
+## Replace the ObjectField picker for every document:
+## `picker.call({element, type, allow_scene_objects, value, set_value})`,
+## where `set_value.call(object)` sets the field. An invalid Callable
+## restores the built-in picker (res:// files of the field type).
+static func set_object_picker(picker: Callable) -> void:
+	UxmlEditorBehaviors.object_picker = picker
+
+
+## The layer names of LayerField and LayerMaskField (index = layer; ""
+## = no layer). An empty Array uses the project settings (3D physics layer
+## names, else 2D physics). Read at load.
+static func set_layer_names(names: Array) -> void:
+	UxmlEditorParts.set_layer_names(names)
+
+
+## The layer names of RenderingLayerMaskField. An empty Array uses the
+## project settings (3D render layer names, else 2D render).
+static func set_rendering_layer_names(names: Array) -> void:
+	UxmlEditorParts.set_rendering_layer_names(names)
+
+
+## The tags of TagField. An empty Array uses "Untagged" and the global
+## groups of the project settings.
+static func set_tags(tags: Array) -> void:
+	UxmlEditorParts.set_tags(tags)

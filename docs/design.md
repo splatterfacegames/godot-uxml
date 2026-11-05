@@ -70,7 +70,8 @@ UxmlResourceResolver ──────────────▶│ follows <S
   `ProgressBar`, `ScrollView`, `Scroller`, `ListView`, `TreeView`,
   `MultiColumnListView`, `MultiColumnTreeView`, `TabView`, `Tab`,
   `TwoPaneSplitView`, `IMGUIContainer` (Unity part trees, see "Control
-  parts" and "Container and collection parts"), and `Slider`,
+  parts" and "Container and collection parts"), the editor controls of
+  `UnityEditor.UIElements` (see "Editor controls"), and `Slider`,
   `SliderInt`, `TextField`, `DropdownField` (native Godot widgets until
   their part trees exist). `Columns`, `Column`, `SortColumnDescriptions`
   and `SortColumnDescription` are UxmlObjects of the multi-column views;
@@ -408,7 +409,9 @@ sees the result of the steps before it.
    `<Bindings>` extraction (`UxmlBindings.extract`), then the sheets.
    Template clones are ordinary elements from here on, and
    `UxmlDocumentModel.element_paths` records the source file of each clone.
-2. `UxmlTheme.attach`: the theme sheet goes first in cascade order.
+2. `UxmlTheme.attach`: the theme sheet goes first in cascade order. A
+   document with an editor control gets the editor sheets in place of
+   the default theme (see "Editor controls").
 3. `_prepare_collections`: the item and cell templates of the collection
    views, and the height that a row pool covers
    (`UxmlContainerParts.pool_height`).
@@ -452,9 +455,13 @@ sees the result of the steps before it.
 | `runtime/controls/uxml_container_parts.gd` | `UxmlContainerParts` | part trees of ScrollView, Scroller, the collection views, TabView, Tab, TwoPaneSplitView, IMGUIContainer; Unity's post-layout updates on the model (`after_layout`); row binding helpers |
 | `runtime/controls/uxml_container_behaviors.gd` | `UxmlContainerBehaviors` | behaviors of those controls: scrolling, Scroller input, virtualization, selection, keys, tabs, splitter |
 | `runtime/controls/uxml_imgui_box.gd` | `UxmlImguiBox` | the control of an IMGUIContainer: hosts a Godot draw and input callback |
+| `runtime/controls/uxml_editor_parts.gd` | `UxmlEditorParts` | part trees of the editor controls (`uie:`); layers, tags, mask values and texts; the PropertyField and InspectorElement content; the layout-dependent styles (`layout_styles`) |
+| `runtime/controls/uxml_editor_behaviors.gd` | `UxmlEditorBehaviors` | behaviors of the editor controls; `insert` and `remove` of subtrees after load |
+| `runtime/controls/uxml_editor_widgets.gd` | `UxmlEditorWidgets` | the Godot controls of the editor controls (CurveView, GradientView) and the popups (ColorPicker, eyedropper, curve and gradient editors, object picker, PopupMenu) |
 | `themes/unity-default.uss` | — | the default theme, written from Unity 6000.3 measurements |
 | `themes/unity-default-containers.uss` | — | the default theme's look of the container controls |
 | `themes/unity-structure.uss` | — | the geometry of the container parts; attached also without the theme |
+| `themes/unity-editor.uss`, `themes/unity-editor-dark.uss`, `themes/unity-editor-light.uss` | — | the editor theme: geometry, and the colours of the dark and the light editor skin |
 
 ### Control mapping
 
@@ -478,6 +485,10 @@ Every element gets one Godot control, part elements included (see
 | `DropdownField`, `EnumField` | `UxmlPopupField` | same |
 | `ScrollView`, `Scroller`, `ListView`, `TreeView`, `MultiColumnListView`, `MultiColumnTreeView`, `TabView`, `Tab`, `TwoPaneSplitView` | `UxmlBox`; the interactive parts are `UxmlRepeatButton` (Scroller buttons), `UxmlToggle` (TreeView item toggles), `Button` (ListView footer) | same |
 | `IMGUIContainer` | `UxmlImguiBox` | same |
+| `ColorField`, `CurveField`, `GradientField`, `ObjectField`, the mask, layer and tag fields, `ToolbarMenu` | `UxmlPopupField` (focusable box); the CurveField input is a `CurveView`, the GradientField content a `GradientView` | same |
+| `ToolbarButton`, `BreadcrumbItem` (part) | `Button` | same |
+| `ToolbarToggle` | `UxmlToggle` | same |
+| `Toolbar`, `ToolbarSpacer`, `ToolbarBreadcrumbs`, `ToolbarSearchField`, `ToolbarPopupSearchField`, `PropertyField`, `InspectorElement` | `UxmlBox` | search fields: the `LineEdit` of the TextField part; PropertyField: the native of the field |
 `get_element(name)` returns the element's outer control; `get_native(name)`
 returns the interactive control. Missing names return `null`; duplicate
 `name` attributes keep the first and emit a `duplicate-name` diagnostic.
@@ -1061,6 +1072,200 @@ Behavior (`UxmlContainerBehaviors`):
 | TwoPaneSplitView | a drag on the dragline sets the fixed pane size (`set_split_dimension`), between 0 and the view size |
 | IMGUIContainer | `set_imgui_handler(name, draw, input)`: `draw.call(box, rect)` runs in the control's `_draw`, `input.call(box, event)` in its `gui_input`. Unity's `onGUIHandler` is C# IMGUI code, which Godot cannot run |
 
+### Editor controls
+
+Unity provides the controls of `UnityEditor.UIElements` (usually the
+`uie:` prefix) in the Unity Editor only. godot-uxml builds the controls as
+Unity part trees in `UxmlEditorParts`, with the Godot controls of
+`UxmlEditorWidgets` and the behaviors of `UxmlEditorBehaviors`. The parts,
+names and classes were measured in Unity 6000.3 in an editor panel with
+the dark and the light editor skin (`bench/parity/unity/ed-*.json`, see
+docs/parity.md). `UxmlParts._builder` calls `UxmlEditorParts.builder` for a
+tag without a runtime builder. `UxmlBehaviors._create` calls
+`UxmlEditorBehaviors.create`. `UxmlControlFactory._create` calls
+`UxmlEditorWidgets.create_control` for a tag without a runtime control.
+
+Measured part trees (content container in **bold**):
+
+| control | parts |
+| --- | --- |
+| `ColorField` | [label] input > (`#unity-color-container` > (`#unity-internal-color-field`, `#unity-gradient-container` > (left, middle, right), `#unity-alpha-gradient-container` > (left, middle, right), `Label#unity-hdr-label` "HDR", `Label#unity-mixed-value-label`, `ProgressBar#unity-alpha-progress`), `#unity-eyedropper`) |
+| `CurveField` | [label] input (draws the curve) > `#unity-border` |
+| `GradientField` | [label] input > `.unity-gradient-field__background` > `.unity-gradient-field__content` (draws the gradient) |
+| `ObjectField` | [label] input > (`ObjectFieldDisplay` > (`Image.unity-object-field-display__icon`, `Label.unity-object-field-display__label`), `ObjectFieldSelector`) |
+| `EnumFlagsField`, `MaskField`, `LayerField`, `LayerMaskField`, `RenderingLayerMaskField`, `TagField` | [label] input > (`PopupTextElement.unity-base-popup-field__text`, `.unity-base-popup-field__arrow`); the RenderingLayerMaskField also has a hidden warning `HelpBox` |
+| `Toolbar`, `ToolbarButton`, `ToolbarSpacer` | no parts; **the control** |
+| `ToolbarToggle` | the Toggle parts (`unity-toggle__label`, `__input`, `__checkmark`, `__text`); the control has no `unity-toggle` class |
+| `ToolbarMenu` | `TextElement.unity-toolbar-menu__text`, `.unity-toolbar-menu__arrow` |
+| `ToolbarBreadcrumbs` | one `BreadcrumbItem` per pushed item (the first item has `__first-item`) |
+| `ToolbarSearchField`, `ToolbarPopupSearchField` | `Button#unity-search`, a `TextField` (input with `unity-search-field-base__text-field__input`), `Button#unity-cancel` (`--off` while the text is empty) |
+| `PropertyField` | after the bind: one field `#unity-input-<path>` with `unity-base-field__aligned` (see "PropertyField") |
+| `InspectorElement` | `#unity-prefab-override-bars-container`, `#unity-live-property-bars-container`, **a content element** with one PropertyField per property |
+
+Editor theme. A document with an editor control gets Unity's editor look
+in place of the runtime look, as Unity styles every control of an editor
+panel with the editor skin:
+
+- `UxmlDocument.editor_theme`: `"auto"` (default) attaches the editor
+  theme when the document has an editor control. `"always"` attaches the
+  editor theme to every document. `"never"` keeps the runtime theme. The
+  editor theme replaces only the default theme: a custom `theme_path`
+  stays, and an empty `theme_path` gives no theme.
+- `UxmlDocument.editor_skin`: `"dark"` (Unity's default skin) or
+  `"light"`.
+- `UxmlTheme.attach(doc, path, editor_theme, editor_skin)` attaches
+  `themes/unity-editor.uss` (geometry, both skins), then
+  `themes/unity-editor-dark.uss` or `themes/unity-editor-light.uss`
+  (colours and images), in place of `themes/unity-default.uss`. The
+  editor sheets also hold the editor look of the runtime controls (Label,
+  Button, Toggle, RadioButton, text, numeric, composite and popup fields,
+  Slider, MinMaxSlider, Foldout, HelpBox, ProgressBar, Box, GroupBox,
+  PopupWindow, button groups). The container controls keep the structure
+  sheet and the runtime container look.
+- The detection runs in the walk that finds the container controls. A
+  document without editor controls pays one dictionary lookup per element
+  and compiles no editor rules. `UxmlTheme.editor_skin_of(doc)` gives the
+  skin of a document, or `""`.
+- The images of the editor theme are godot-uxml's own SVGs
+  (`themes/editor-*.svg`).
+
+Unity data that Godot does not have:
+
+| Unity | godot-uxml |
+| --- | --- |
+| project layers (LayerField, LayerMaskField) | the 3D physics layer names of the project settings (`layer_names/3d_physics/layer_N`), else the 2D physics names, else "Layer 1" ... "Layer 32". `UxmlDocument.set_layer_names(names)` replaces the names (index = layer, "" = no layer). A LayerField value is the layer index. A LayerMaskField value is the bit mask |
+| rendering layers (RenderingLayerMaskField) | the 3D render layer names, else the 2D render names, else "Layer 1" ... "Layer 20". `UxmlDocument.set_rendering_layer_names(names)` replaces the names |
+| tags (TagField) | "Untagged" and the global groups of the project settings (`global_group/<name>`). `UxmlDocument.set_tags(tags)` replaces the tags |
+| AnimationCurve (CurveField) | Godot's `Curve` resource |
+| Gradient (GradientField) | Godot's `Gradient` resource |
+| UnityEngine.Object and the object picker (ObjectField) | a Godot `Object`: a `Resource`, or a `Node` with `allow-scene-objects`. `type` is a C# type name or a Godot class name. The last segment of a C# name counts: `UnityEngine.Texture2D, UnityEngine.CoreModule` gives `Texture2D`, `Object` gives `Resource`, `GameObject` gives `Node`, `Sprite` gives `Texture2D`, `AudioClip` gives `AudioStream`, `MonoScript` gives `Script`. The selector opens a picker popup with "None", the `res://` files of the type, and with `allow-scene-objects` the nodes of the type in the current scene. `UxmlDocument.set_object_picker(callable)` replaces the popup: `callable.call({element, type, allow_scene_objects, value, set_value})`. A drop of a matching Resource (or of editor file drag data) sets the value |
+| the colour picker (ColorField) | a Godot `ColorPicker` in a `PopupPanel` (`edit_alpha` follows `show-alpha`; `hdr` uses the raw mode). The eyedropper samples the viewport under the next left press |
+| the curve and gradient editor windows | small Godot editors in a `PopupPanel`: drag a point or a stop, double-click to add, right-click to remove. The gradient editor has a ColorPicker for the selected stop. The edit goes to a copy, and the copy becomes the value |
+| editor menus (GenericOSMenu: mask fields, ToolbarMenu) | a Godot `PopupMenu`. A mask menu has Nothing, Everything and one checkable item per entry. `UxmlDocument.set_menu_items(name, items, on_chosen)` gives the entries of a ToolbarMenu or of the search menu of a ToolbarPopupSearchField (Unity's `menu.AppendAction`): a String or `{text, checked, disabled}`, and `"-"` for a separator. `on_chosen.call(index, text)` runs for a choice |
+| SerializedObject (PropertyField, InspectorElement) | a Godot Object through the data binding (see "PropertyField") |
+
+Values (`value_changed` and `bind_read`):
+
+| control | type |
+| --- | --- |
+| ColorField | `Color` (clamped to 0..1 without `hdr`) |
+| CurveField | `Curve` |
+| GradientField | `Gradient` |
+| ObjectField | `Object` or `null` |
+| EnumFlagsField, MaskField, LayerMaskField, RenderingLayerMaskField | `int` mask. A MaskField or LayerMaskField stores a full mask as -1 ("Everything"), as Unity does |
+| LayerField | `int` layer index |
+| TagField | `String` |
+| ToolbarToggle | `bool` |
+| ToolbarSearchField, ToolbarPopupSearchField | `String` |
+| PropertyField | the property value (the enum PopupField gives the enum value) |
+
+Behavior rules:
+
+- A left press or `ui_accept` opens the popup of a field. The field is
+  `:active` while the popup is open. The input part has `:focus` while
+  the field has the focus.
+- Mask text: "Nothing" for 0, "Everything" for -1 or a full mask, the
+  name of an entry with exactly the value (EnumFlagsField composites:
+  "Alpha Beta"), else the names of the set single-bit entries joined
+  with ", " (measured: `ed-masks`). EnumFlagsField entries come from
+  `UxmlDocument.register_enum(type, values)` (as for EnumField), or from
+  `choices` and `choices-masks`.
+- ToolbarButton and BreadcrumbItem send `button_pressed`.
+  `UxmlDocument.push_breadcrumb(name, text, clicked)` and
+  `pop_breadcrumb(name)` add and remove items (Unity's PushItem and
+  PopItem). The item Button calls `clicked`.
+- ToolbarSpacer: `flex` (attribute, binding or `set_attribute`) toggles
+  `unity-toolbar-spacer--flexible`.
+- Search fields: the cancel button clears the text. Typing sends
+  `value_changed`.
+- `UxmlEditorParts.layout_styles` holds the styles that Unity computes
+  from the layout, for the runtime (layout hooks) and for
+  `bench/parity.gd`:
+  - the ColorField alpha bar (Unity's `CalculateOppositeProgressWidth`):
+    `right = w - max(w x alpha, 1)` px, with `w = floor(bar width - 2)`;
+  - the InspectorElement label alignment (Unity's `BaseField.AlignLabel`):
+    label `min-width = 123 - spacing - field padding` and
+    `width = (inspector width + 1) x 0.45 - (37 + spacing + field padding)`,
+    where spacing is the x offset of the field in the content box of the
+    inspector.
+- `UxmlEditorBehaviors.insert(doc, parent, subtree)` adds a model subtree
+  after load: controls, signals and behaviors, then
+  `UxmlDocument._structure_changed()` (the cascade and the layout caches
+  rebuild on the next restyle). PropertyField, InspectorElement and
+  ToolbarBreadcrumbs use the function, as Unity adds these elements at
+  run time. `UxmlEditorBehaviors.remove` takes a subtree out again.
+
+#### PropertyField
+
+Unity builds the field of a PropertyField from a SerializedProperty at
+bind time. godot-uxml builds the field from the Godot property at the
+first value of the binding:
+
+- `binding-path="p"` binds the PropertyField `value` TwoWay to `p` of the
+  data source context (see "Data binding (runtime)"). A DataBinding of
+  `value` also works. Before a data source exists, the PropertyField has
+  no children, as in Unity.
+- The property list entry of the holder Object (type, hint, hint string,
+  class name) chooses the field (`UxmlEditorParts.field_for`):
+
+| Godot property | field |
+| --- | --- |
+| `bool` | Toggle |
+| `int` | IntegerField. `@export_range` gives a SliderInt with `show-input-field`. An enum hint gives ``PopupField`1`` (the enum field of a Unity PropertyField; the choices are the nicified names). `@export_flags` gives an EnumFlagsField. A layer hint gives a LayerMaskField (render layers: RenderingLayerMaskField) |
+| `float` | FloatField. `@export_range` gives a Slider with `show-input-field` |
+| `String`, `StringName`, `NodePath` | TextField (`@export_multiline`: `multiline`). An enum hint gives ``PopupField`1`` |
+| `Color` | ColorField (`@export_color_no_alpha`: `show-alpha="false"`) |
+| `Vector2`, `Vector2i`, `Vector3`, `Vector3i`, `Vector4`, `Rect2`, `Rect2i`, `AABB` | the matching composite field |
+| `Curve`, `Gradient` | CurveField, GradientField |
+| other Object | ObjectField of the class (a Node class adds `allow-scene-objects`) |
+| other types | a Label "No GUI implemented for <type>" |
+
+- The field is a part (role `field`) named `unity-input-<path>`. The
+  label is the `label` attribute of the PropertyField, else the property
+  name in the form of Unity's NicifyVariableName (`intValue` gives
+  "Int Value", `Texture2D` gives "Texture 2D"). A snake_case name gets
+  capital words as in the Godot inspector (`move_speed` gives
+  "Move Speed"). The field gets `unity-base-field__aligned`, the label
+  `unity-property-field__label`, the input `unity-property-field__input`.
+- An edit in the field writes the source and sends `value_changed` with
+  the PropertyField name.
+
+#### InspectorElement
+
+- The data source context of the InspectorElement (`data-source`,
+  `set_data_source(obj, name)` or the source of an ancestor) is the
+  inspected Object. A new source replaces the fields.
+- One PropertyField per property with `PROPERTY_USAGE_EDITOR`
+  (categories, groups and `metadata/` entries excluded; a scripted Object
+  lists the script variables only), named `PropertyField:<name>`, with
+  `unity-property-field__inspector-property`. The fields also get
+  `unity-base-field__inspector-field`. Each PropertyField binds TwoWay to
+  the property of the Object.
+- A scripted Object shows the script first, disabled, named
+  `PropertyField:m_Script` (Unity's script property), with an ObjectField
+  "Script" that shows the script file name.
+- The labels align as Unity's AlignLabel aligns them (see the behavior
+  rules).
+
+Deviations from Unity:
+
+- Unity 6000.3 reads no UXML `flex` on ToolbarSpacer and no UXML
+  `choices-masks` on MaskField: only the C# properties (measured:
+  `ed-toolbar`, `ed-masks`). godot-uxml also reads both attributes.
+- Unity 6000.3 reads no UXML `value` on the search fields and no UXML
+  `hdr` on GradientField (measured: `ed-toolbar-states`,
+  `ed-curve-gradient`). godot-uxml follows Unity for the search field
+  `value`. GradientField `hdr` gives the gradient editor a raw-mode
+  ColorPicker, and `color-space="Linear"` shows the gradient preview in
+  sRGB.
+- The RenderingLayerMaskField warning HelpBox stays hidden.
+- Editor menus are Godot PopupMenus, not UXML documents, so author sheets
+  do not style the menus.
+- The CurveField draws the curve over the bounds of the curve (Unity's
+  `ranges` is not read).
+- The editor theme gives the container controls (ScrollView, ListView,
+  TabView, ...) the runtime look.
+
 ### Default theme
 
 `themes/unity-default.uss` holds Unity 6000.3's default runtime theme as
@@ -1086,7 +1291,9 @@ beats the theme's `.unity-button { margin: 2px 4px }` (measured in
 specificity and order apply.
 
 `UxmlDocument.theme_path` selects the theme: the default path, another
-USS file (replaces the theme), or `""` (no theme). The theme folder is in
+USS file (replaces the theme), or `""` (no theme). With the default path,
+`UxmlDocument.editor_theme` and `editor_skin` select the editor theme for
+a document with editor controls (see "Editor controls"). The theme folder is in
 `UxmlResourceResolver.TRUSTED_DIRS`: url()s in a theme file resolve
 inside that folder even outside the project root. Parsed themes are
 cached per path (`UxmlTheme.clear_cache()` drops the cache).

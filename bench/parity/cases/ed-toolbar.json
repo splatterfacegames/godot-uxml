@@ -1,0 +1,1 @@
+{"width": 700, "height": 200, "actions": [{"op": "breadcrumbs", "target": "crumbs", "items": ["Root", "Child", "Leaf"]}, {"op": "set-prop", "target": "flex", "prop": "flex", "value": true}, {"op": "set-prop", "target": "flex2", "prop": "flex", "value": true}], "editor": "dark"}

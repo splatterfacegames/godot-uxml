@@ -95,6 +95,11 @@ const PROPERTIES := {
 	"hidePlaceholderOnFocus": "hide-placeholder-on-focus",
 	"textEdition.hidePlaceholderOnFocus": "hide-placeholder-on-focus",
 	"hide-placeholder-on-focus": "hide-placeholder-on-focus",
+	# Editor controls (runtime/controls/uxml_editor_behaviors.gd)
+	"showAlpha": "show-alpha", "show-alpha": "show-alpha", "hdr": "hdr",
+	"showEyeDropper": "show-eye-dropper", "show-eye-dropper": "show-eye-dropper",
+	"allowSceneObjects": "allow-scene-objects", "allow-scene-objects": "allow-scene-objects",
+	"choicesMasks": "choices-masks", "choices-masks": "choices-masks", "flex": "flex",
 }
 
 ## Style properties that take a plain number (all other numbers get px).

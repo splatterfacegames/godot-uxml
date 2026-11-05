@@ -1,0 +1,37 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <Style src="editor.uss" />
+    <uie:Toolbar name="toolbar">
+        <uie:ToolbarButton name="tb" text="Button" />
+        <uie:ToolbarToggle name="tt" text="Toggle" value="true" />
+        <uie:ToolbarMenu name="tm" text="Menu" />
+        <uie:ToolbarSpacer name="sp" flex="true" />
+        <uie:ToolbarSearchField name="search" />
+    </uie:Toolbar>
+    <uie:Toolbar name="toolbar2">
+        <uie:ToolbarBreadcrumbs name="crumbs" />
+        <uie:ToolbarPopupSearchField name="psearch" />
+    </uie:Toolbar>
+    <ui:VisualElement name="fields" class="panel">
+        <uie:ColorField name="color" label="Color" value="#FF000080" />
+        <uie:ColorField name="hdr" label="HDR" hdr="true" show-alpha="false" value="#3366CC" />
+        <uie:CurveField name="curve" label="Curve" />
+        <uie:GradientField name="gradient" label="Gradient" />
+        <uie:ObjectField name="object" label="Texture" type="UnityEngine.Texture2D, UnityEngine.CoreModule" />
+        <uie:EnumFlagsField name="flags" label="Flags" choices="Alpha,Beta,Gamma" value="5" />
+        <uie:MaskField name="mask" label="Mask" choices="One,Two,Three" value="3" />
+        <uie:LayerField name="layer" label="Layer" />
+        <uie:LayerMaskField name="layermask" label="Layer Mask" value="1" />
+        <uie:RenderingLayerMaskField name="rlayer" label="Rendering" />
+        <uie:TagField name="tag" label="Tag" />
+        <ui:TextField name="text" label="Text" value="abc" />
+        <ui:Toggle name="toggle" label="Toggle" />
+        <ui:IntegerField name="int" label="Integer" value="3" />
+        <ui:Slider name="slider" label="Slider" high-value="10" value="4" />
+        <ui:Foldout name="foldout" text="Foldout">
+            <ui:Button name="button" text="Button" />
+        </ui:Foldout>
+        <uie:PropertyField name="prop" binding-path="speed" />
+        <uie:ColorField name="disabled" label="Disabled" enabled="false" />
+    </ui:VisualElement>
+    <uie:InspectorElement name="insp" />
+</ui:UXML>

@@ -53,6 +53,7 @@ func _initialize() -> void:
 		["user://godot_uxml_bench", "Assets/UI/hud.uxml", 80],
 		["user://godot_uxml_bench", "Assets/UI/big.uxml", 12],
 		["res://tests/fixtures/controls", "Assets/UI/controls.uxml", 120],
+		["res://tests/fixtures/editor", "Assets/UI/editor.uxml", 120],
 	]:
 		var only := ""
 		for arg in OS.get_cmdline_user_args():

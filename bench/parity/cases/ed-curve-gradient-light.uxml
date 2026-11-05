@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <uie:CurveField name="curve" label="Curve" />
+  <uie:CurveField name="curve-nolabel" />
+  <uie:GradientField name="gradient" label="Gradient" />
+  <uie:GradientField name="gradient-hdr" label="HDR" hdr="true" />
+  <uie:CurveField name="curve-disabled" label="Disabled" enabled="false" />
+  <uie:GradientField name="gradient-disabled" label="Disabled" enabled="false" />
+</ui:UXML>

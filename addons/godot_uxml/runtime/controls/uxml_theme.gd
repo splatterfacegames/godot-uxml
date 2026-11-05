@@ -34,16 +34,77 @@ const CONTAINER_TAGS := {"ScrollView": true, "Scroller": true, "ListView": true,
 const META_CONTAINERS := &"uxml_container_sheets"
 
 
+## The editor theme (UnityEditor.UIElements controls, Unity's editor skin):
+## the geometry sheet and one colour sheet per skin. With the default theme
+## they replace unity-default.uss (see `attach`).
+const EDITOR := "res://addons/godot_uxml/themes/unity-editor.uss"
+const EDITOR_DARK := "res://addons/godot_uxml/themes/unity-editor-dark.uss"
+const EDITOR_LIGHT := "res://addons/godot_uxml/themes/unity-editor-light.uss"
+const META_EDITOR := &"uxml_editor_skin"
+
+
 ## Splice the theme sheet at `path` ahead of `doc`'s sheets. An empty path
 ## attaches no theme. A missing theme is a diagnostic. A document with a
 ## container control also gets the container sheets (attach_containers).
-static func attach(doc: UxmlDocumentModel, path: String) -> void:
+##
+## Editor theme: with the default theme, `editor_theme` "auto" gives a
+## document with an editor control (UxmlEditorParts.TAGS) Unity's editor
+## look in place of the runtime look, as Unity styles every control of an
+## editor panel with the editor skin; "always" does so for every document,
+## "never" for none. `editor_skin` is "dark" or "light". Other documents
+## pay one dictionary lookup per element in the walk that finds container
+## controls, and compile no editor rules.
+static func attach(doc: UxmlDocumentModel, path: String, editor_theme: String = "auto",
+		editor_skin: String = "dark") -> void:
 	if doc == null:
 		return
-	if not path.is_empty():
+	var want_editor := path == DEFAULT and editor_theme == "auto"
+	var scan := _scan(doc, want_editor)
+	var editor: bool = path == DEFAULT and (editor_theme == "always" or (want_editor and bool(scan[1])))
+	if editor:
+		# Cascade order: editor geometry, then the skin colours. The editor
+		# sheets replace the runtime theme.
+		_attach_sheet(doc, EDITOR, 0)
+		_attach_sheet(doc, EDITOR_LIGHT if editor_skin == "light" else EDITOR_DARK, 1)
+		doc.set_meta(META_EDITOR, "light" if editor_skin == "light" else "dark")
+	elif not path.is_empty():
 		_attach_sheet(doc, path)
 	doc.set_meta(&"uxml_theme_path", path)
-	attach_containers(doc)
+	if bool(scan[0]):
+		_attach_container_sheets(doc)
+
+
+## The editor skin of a document with the editor theme ("dark", "light"),
+## or "" for the runtime look.
+static func editor_skin_of(doc: UxmlDocumentModel) -> String:
+	return "" if doc == null else String(doc.get_meta(META_EDITOR, ""))
+
+
+## [has a container control, has an editor control] in one walk.
+static func _scan(doc: UxmlDocumentModel, editor: bool) -> Array:
+	var containers := false
+	var editors := false
+	if doc.root == null or doc.has_meta(META_CONTAINERS):
+		return [false, false] if not editor else [false, _has_editor(doc)]
+	for el in doc.root.walk():
+		if not containers and CONTAINER_TAGS.has(el.local):
+			containers = true
+			if not editor or editors:
+				break
+		if editor and not editors and UxmlEditorParts.TAGS.has(el.local):
+			editors = true
+			if containers:
+				break
+	return [containers, editors]
+
+
+static func _has_editor(doc: UxmlDocumentModel) -> bool:
+	if doc.root == null:
+		return false
+	for el in doc.root.walk():
+		if UxmlEditorParts.TAGS.has(el.local):
+			return true
+	return false
 
 
 ## The structure sheet (and, with the default theme, the container look)
@@ -60,6 +121,10 @@ static func attach_containers(doc: UxmlDocumentModel) -> void:
 			break
 	if not found:
 		return
+	_attach_container_sheets(doc)
+
+
+static func _attach_container_sheets(doc: UxmlDocumentModel) -> void:
 	doc.set_meta(META_CONTAINERS, true)
 	var path: String = doc.get_meta(&"uxml_theme_path", "")
 	# Cascade order: structure, theme, container look (each insert goes

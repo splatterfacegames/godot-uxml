@@ -20,6 +20,7 @@ func _initialize() -> void:
 		["res://tests/fixtures/menu", "Assets/UI/Menu.uxml"],
 		["res://tests/fixtures/origin", "Assets/UI/panel.uxml"],
 		["res://tests/fixtures/templates", "Assets/UI/Main.uxml"],
+		["res://tests/fixtures/editor", "Assets/UI/editor.uxml"],
 		["user://godot_uxml_bench", "Assets/UI/big.uxml"],
 		["user://godot_uxml_bench", "Assets/UI/hud.uxml"],
 	]:

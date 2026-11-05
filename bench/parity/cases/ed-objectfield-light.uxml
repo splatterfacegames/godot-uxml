@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <uie:ObjectField name="o-tex" label="Texture" type="UnityEngine.Texture2D, UnityEngine.CoreModule" allow-scene-objects="false" />
+  <uie:ObjectField name="o-any" label="Any" />
+  <uie:ObjectField name="o-nolabel" />
+  <uie:ObjectField name="o-mat" label="Material" type="UnityEngine.Material, UnityEngine.CoreModule" />
+  <uie:ObjectField name="o-disabled" label="Disabled" enabled="false" />
+</ui:UXML>
