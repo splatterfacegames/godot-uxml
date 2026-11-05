@@ -56,7 +56,7 @@ Status values:
 | Feature | Status |
 | --- | --- |
 | `<Style src>` | done |
-| `Template`, `Instance`, `AttributeOverrides`, `content-container` | in progress (`unity/templates`) |
+| `Template`, `Instance`, `AttributeOverrides`, `content-container`, slots | done |
 | Data binding (`data-source`, `data-source-path`, `<Bindings>`, `binding-path`) | planned |
 | `Columns` / `Column` UxmlObjects | planned |
 | `tabindex`, `picking-mode`, `view-data-key`, `usage-hints`, `language-direction` | planned |

@@ -13,7 +13,7 @@ extends RefCounted
 ## Kinds emitted by milestone 1:
 ##   malformed             - broken UXML/USS syntax that was recovered from
 ##   unsupported-control   - element tag with no Godot mapping (children kept)
-##   unsupported-feature   - known UXML machinery out of scope (templates, ...)
+##   unsupported-feature   - known USS/UXML machinery out of scope (@media, ...)
 ##   unsupported-selector  - a selector form the cascade cannot honor; the whole
 ##                           rule is ignored rather than treated as universal
 ##   unsupported-property  - a declaration property outside the supported subset
@@ -25,6 +25,12 @@ extends RefCounted
 ##   path-outside-root     - a reference that escapes the project root
 ##   malformed-reference   - a reference that is not a usable path at all
 ##   version-dependent     - behavior Unity defines but versions may shift (:root)
+##   template-not-declared - <Instance template="X"> with no <Template name="X">
+##   template-cycle        - an <Instance> that refers back to a template on
+##                           the current expansion path (left empty)
+##   template-depth-exceeded - <Instance> nesting deeper than 32 (left empty)
+##   override-ignored      - AttributeOverrides class/name/style (Unity ignores)
+##   override-target-missing - AttributeOverrides element-name matched nothing
 
 static func make(
 	kind: String,

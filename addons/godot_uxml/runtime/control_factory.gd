@@ -4,7 +4,8 @@ extends RefCounted
 ##
 ## The mapping (also documented in docs/design.md):
 ##
-##   VisualElement / unknown tag -> UxmlBox (styled rectangle, real Control)
+##   VisualElement / TemplateContainer / unknown tag
+##                -> UxmlBox (styled rectangle, real Control)
 ##   Label        -> Label
 ##   Button       -> Button
 ##   Image        -> UxmlBox host wrapping a full-rect TextureRect, so
@@ -40,6 +41,10 @@ var controls: Dictionary = {}
 var natives: Dictionary = {}
 ## ScrollView element -> its scroll content Control (children's parent)
 var scroll_contents: Dictionary = {}
+## Element cloned from a template file -> that file's path
+## (UxmlDocumentModel.element_paths); relative image references in such an
+## element resolve against its own file.
+var element_paths: Dictionary = {}
 
 
 func _init(
@@ -112,9 +117,11 @@ func _create(el: UxmlElement) -> Control:
 			return _create_text_field(el)
 		"DropdownField":
 			return _create_dropdown(el)
+		"VisualElement", "TemplateContainer":
+			return UxmlBox.new()
 		_:
-			# VisualElement and every unmapped tag: a styled box. Children
-			# are preserved by the caller.
+			# Every unmapped tag: a styled box. Children are preserved by
+			# the caller.
 			return UxmlBox.new()
 
 
@@ -303,7 +310,7 @@ func _num_attr(el: UxmlElement, name: String, default: float) -> float:
 ## resolves but cannot be decoded still reports missing-file: the resource
 ## is explicitly absent, not silently skipped.
 func _load_texture(ref: String, el: UxmlElement) -> Texture2D:
-	var r := _resolver.resolve(ref, _uxml_path)
+	var r := _resolver.resolve(ref, element_paths.get(el, _uxml_path))
 	if not r["ok"]:
 		_report_resolver(r, el, 'image reference "%s"' % ref)
 		return null

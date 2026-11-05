@@ -39,6 +39,7 @@ func _initialize() -> void:
 		["res://tests/fixtures/traversal", "Assets/UI/main.uxml"],
 		["res://tests/fixtures/cycle", "Assets/UI/cycle.uxml"],
 		["res://tests/fixtures/origin", "Assets/UI/panel.uxml"],
+		["res://tests/fixtures/templates", "Assets/UI/Main.uxml"],
 		["user://godot_uxml_bench", "Assets/UI/big.uxml"],
 		["user://godot_uxml_bench", "Assets/UI/hud.uxml"],
 	]:

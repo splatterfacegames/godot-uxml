@@ -25,20 +25,23 @@ const IMPLICIT_CLASSES := {
 	"Slider": ["unity-slider", "unity-base-slider", "unity-base-slider--horizontal", "unity-base-field"],
 	"SliderInt": ["unity-slider-int", "unity-base-slider", "unity-base-slider--horizontal", "unity-base-field"],
 	"Foldout": ["unity-foldout"],
+	# What an expanded <ui:Instance> becomes: a plain box, no implicit class.
+	"TemplateContainer": [],
 }
 
 ## Tags that carry no pixels but are part of the document model, not
 ## unsupported controls: the root container and stylesheet references.
 const NON_VISUAL_TAGS := ["UXML", "Style"]
 
-## UXML machinery that parses fine but is out of scope for godot-uxml:
-## templates/instances and slots are diagnosed rather than silently ignored.
-const UNSUPPORTED_FEATURE_TAGS := {
-	"Template": "UXML templates are not supported",
-	"Instance": "UXML template instances are not supported",
-	"AttributeOverride": "UXML template attribute overrides are not supported",
-	"Slot": "UXML template slots are not supported",
-}
+## Template syntax. UxmlTemplates expands it at load time: <Instance>
+## becomes a TemplateContainer, <Template> and <AttributeOverrides> leave the
+## tree. The names count as known so the authored file does not warn.
+const TEMPLATE_TAGS := ["Template", "Instance", "AttributeOverrides"]
+
+## UXML machinery that parses fine but is out of scope for godot-uxml; such
+## a tag is diagnosed `unsupported-feature` rather than silently ignored.
+## Empty: every UXML structure tag Unity 6 defines is supported.
+const UNSUPPORTED_FEATURE_TAGS := {}
 
 ## Controls Unity UXML offers that godot-uxml recognizes — they keep their
 ## implicit classes so author styles like `.unity-foldout` still match — but
@@ -67,6 +70,9 @@ const KNOWN_ATTRIBUTES := {
 	"fixed-item-height": true, "item-template": true,
 	"show-alternating-row-backgrounds": true, "virtualization-method": true,
 	"selection-type": true,
+	# Templates (<Template>, <Instance>, <AttributeOverrides>, slots)
+	"template": true, "path": true, "element-name": true,
+	"content-container": true, "slot": true, "slot-name": true,
 }
 
 
@@ -84,6 +90,6 @@ static func is_non_visual(local_name: String) -> bool:
 ## Recognized-but-unmapped controls (RECOGNIZED_UNMAPPED) do NOT count:
 ## until a milestone maps them they warn like any unknown control.
 static func is_known_control(local_name: String) -> bool:
-	if NON_VISUAL_TAGS.has(local_name):
+	if NON_VISUAL_TAGS.has(local_name) or TEMPLATE_TAGS.has(local_name):
 		return true
 	return IMPLICIT_CLASSES.has(local_name) and not RECOGNIZED_UNMAPPED.has(local_name)

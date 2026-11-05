@@ -286,6 +286,7 @@ func _index() -> void:
 		_el_names[el] = ns
 
 	var factory := UxmlControlFactory.new(_resolver, _doc.path, _doc.source, _rt_warnings)
+	factory.element_paths = _doc.element_paths
 	for child in _doc.root.children:
 		if UssControls.is_non_visual(child.local):
 			continue
@@ -929,7 +930,7 @@ func _load_item_template(el: UxmlElement) -> Array:
 			"<ListView> has no item-template; it shows no rows",
 			_doc.source, el.open_tag_start, _doc.path))
 		return []
-	var res := _resolver.resolve_text(String(src), _doc.path)
+	var res := _resolver.resolve_text(String(src), _doc.path_of(el))
 	if not res["ok"]:
 		var d: Dictionary = res["diagnostic"].duplicate()
 		d["message"] = 'item-template "%s" could not be loaded: %s' % [src, d["message"]]

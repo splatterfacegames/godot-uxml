@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Template name="Self" src="Self.uxml" />
+  <ui:Instance template="Self" name="self-again" />
+</ui:UXML>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="row.uss" />
+  <ui:VisualElement name="row" class="row">
+    <ui:Label name="title" text="Default" />
+  </ui:VisualElement>
+</ui:UXML>

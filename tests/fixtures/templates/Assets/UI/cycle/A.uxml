@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Template name="B" src="B.uxml" />
+  <ui:VisualElement name="in-a" />
+  <ui:Instance template="B" name="a-to-b" />
+</ui:UXML>

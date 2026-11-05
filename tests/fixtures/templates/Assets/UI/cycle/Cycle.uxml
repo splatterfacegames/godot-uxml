@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Template name="A" src="A.uxml" />
+  <ui:Template name="Self" src="Self.uxml" />
+  <ui:Instance template="A" name="cycle-a" />
+  <ui:Instance template="Self" name="cycle-self" />
+</ui:UXML>

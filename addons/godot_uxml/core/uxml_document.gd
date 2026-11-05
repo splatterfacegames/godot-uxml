@@ -21,6 +21,15 @@ var sheets: Array = []
 var style_roots: Array = []
 ## Array of diagnostic Dictionaries (see UxmlDiagnostic).
 var warnings: Array = []
+## Elements cloned from a template file -> that file's path. Relative
+## references in their attributes (image, item-template) resolve against it.
+## Empty for a document without templates.
+var element_paths: Dictionary = {}
+
+
+## The file `element`'s attributes were authored in.
+func path_of(element: UxmlElement) -> String:
+	return element_paths.get(element, path)
 
 
 func find_by_name(element_name: String) -> UxmlElement:

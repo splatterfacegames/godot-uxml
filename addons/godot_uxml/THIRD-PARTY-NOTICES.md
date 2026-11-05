@@ -20,11 +20,14 @@ at commit `819d9c8d11bd6c50e326797055b80fd8b0cf250d`.
 | `core/style_resolver.gd` | `src/style/resolve.ts` (element path only) |
 | `core/resource_resolver.gd` | `src/core/project/PathResolver.ts` (uxml-editor, same license) |
 | `core/uxml_loader.gd` | `src/index.ts` `parse()` (sheet/import assembly) |
+| `core/uxml_templates.gd` | `src/template/expand.ts` (template expansion semantics) |
 
 Deliberate deltas are documented per file: attribute entity decoding at parse
 time, mismatched-close-tag and duplicate-attribute diagnostics, unsupported
 pseudo names reported rather than silently never matching, and no Unity theme
-sheet or control parts (native Godot controls replace both).
+sheet or control parts (native Godot controls replace both). Template
+expansion follows Unity 6 where the reference differs: `content-container`
+and slot placement, `path=` declarations, ignored `class`/`name` overrides.
 
 The Apache-2.0 license text is in `licenses/uxml-preview.LICENSE`.
 

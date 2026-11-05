@@ -48,19 +48,45 @@ static func load_source(
 	doc.root = parsed["root"]
 	doc.warnings.append_array(parsed["warnings"])
 
+	# Templates expand before any sheet loads, so template <Style> elements
+	# scope to their clones. A document without template syntax skips this
+	# step and loads exactly as before.
+	var style_from := {}
+	var templated := UxmlTemplates.has_template_syntax(doc.root)
+	if templated:
+		# Entry-file checks run on the authored tree; each template file
+		# reports its own content once.
+		_report_unsupported_tags(doc)
+		var expander := UxmlTemplates.new(resolver)
+		doc.warnings.append_array(expander.expand(doc.root, source, uxml_path))
+		style_from = expander.style_from
+		doc.element_paths = expander.element_paths
+
 	var loaded := {} ## resolved path -> sheet index
 	var chain: Array = [] ## paths currently being loaded (cycle detection)
+	var style_reported := {} ## template <Style> failures, once per location
 
 	for ref in _collect_style_refs(doc.root):
+		var from = style_from.get(ref["element"])
 		if ref.has("problem"):
-			doc.warnings.append(UxmlDiagnostic.make(
-				"malformed", ref["problem"],
-				doc.source, ref["element"].open_tag_start, doc.path
-			))
+			if from == null: # a template file reported its own
+				doc.warnings.append(UxmlDiagnostic.make(
+					"malformed", ref["problem"],
+					doc.source, ref["element"].open_tag_start, doc.path
+				))
 			continue
-		var res := resolver.resolve_text(ref["url"], uxml_path)
+		var base: String = uxml_path if from == null else from["path"]
+		var res := resolver.resolve_text(ref["url"], base)
 		if not res["ok"]:
-			var diag := _rebase(res["diagnostic"], uxml_path)
+			var diag: Dictionary
+			if from == null:
+				diag = _rebase(res["diagnostic"], uxml_path)
+			else:
+				var key := "%s:%d" % [from["path"], from["offset"]]
+				if style_reported.has(key):
+					continue
+				style_reported[key] = true
+				diag = _rebase(res["diagnostic"], from["path"], from["source"], from["offset"])
 			diag["message"] = '<Style src="%s"> could not be resolved: %s' % [ref["url"], diag["message"]]
 			doc.warnings.append(diag)
 			continue
@@ -75,7 +101,8 @@ static func load_source(
 		var sheet_index := _load_sheet(uss, "", doc.root, doc, resolver, loaded, chain)
 		doc.style_roots.append({"sheet": sheet_index, "scope": doc.root})
 
-	_report_unsupported_tags(doc)
+	if not templated:
+		_report_unsupported_tags(doc)
 	return doc
 
 
@@ -123,7 +150,7 @@ static func _collect_style_refs(element: UxmlElement, out: Array = []) -> Array:
 					"element": child,
 				})
 			else:
-				out.append({"url": String(src), "scope": element})
+				out.append({"url": String(src), "scope": element, "element": child})
 		_collect_style_refs(child, out)
 	return out
 
