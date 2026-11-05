@@ -66,7 +66,6 @@ var _disabled_rt: Dictionary = {}   # UxmlElement -> bool (runtime override via 
 # Effective flags per cascade preorder index (attr + runtime + ancestry):
 var _dis: PackedByteArray = PackedByteArray()   # disabled
 var _gone: PackedByteArray = PackedByteArray()  # display:none on self or an ancestor
-var _own_none: PackedByteArray = PackedByteArray()  # display:none on self
 var _rt_warnings: Array = []
 var _applier: UxmlStyleApplier = null  # one per load: its dedupe set and
                                       # resource caches span all restyles
@@ -223,7 +222,6 @@ func _clear() -> void:
 	_disabled_rt.clear()
 	_dis = PackedByteArray()
 	_gone = PackedByteArray()
-	_own_none = PackedByteArray()
 	_styles = {}
 	_rt_warnings = []
 	# The applier holds the old _rt_warnings array by reference — it must be
@@ -443,35 +441,16 @@ func _restyle_now() -> void:
 	}, false, dirty)
 	_styles = _cascade.styles
 	var cels: Array = _cascade.els
-	var n := cels.size()
-	if _own_none.size() != n:
-		_own_none.resize(n)
-		_own_none.fill(0)
-		_dis.resize(n)
-		_dis.fill(0)
-		_gone.resize(n)
-		_gone.fill(0)
-	# display:none on the element itself can only change where the computed
-	# style did.
-	for k in changed.size():
-		var ci := changed[k]
-		var disp = _styles[cels[ci]].get("display")
-		_own_none[ci] = 1 if disp != null and String(disp["value"]) == "none" else 0
-	# Effective flags, preorder (parent first). Disabled comes straight from
-	# the cascade's state bits: the document's runtime overrides are passed
-	# to it as disabled/enabled_elements, so the descent rule is identical.
-	# An element whose effective flags flipped is re-applied.
+	# Effective disabled (attribute/runtime, descending — the document's
+	# overrides reach the cascade as disabled/enabled_elements, so the rule
+	# is identical) and display:none (self or ancestor), kept by the cascade
+	# (natively when available). An element whose flags flipped re-applies.
+	var ef: Array = _cascade.effective_flags()
+	_dis = ef[1]
+	_gone = ef[2]
 	var flipped: Array = []
-	var parent: PackedInt32Array = _cascade._parent
-	var dflags := _cascade.disabled_flags()
-	for i in n:
-		var d := dflags[i]
-		var p := parent[i]
-		var g := 1 if _own_none[i] == 1 or (p >= 0 and _gone[p] == 1) else 0
-		if d != _dis[i] or g != _gone[i]:
-			_dis[i] = d
-			_gone[i] = g
-			flipped.append(cels[i])
+	for fi in (ef[0] as PackedInt32Array):
+		flipped.append(cels[fi])
 	# One applier per load: its warning dedupe and resource caches must
 	# survive restyles or every hover would re-report and re-load misses.
 	if _applier == null:

@@ -178,7 +178,13 @@ pub struct Cascade {
     sig_name: Vec<Variant>,
     sig_style: Vec<Variant>,
     sig_en: Vec<Variant>,
+    sig_en_false: Vec<bool>,
     sig_bits: Vec<i32>,
+    own_none: Vec<u8>,
+    eff_dis: Vec<u8>,
+    eff_gone: Vec<u8>,
+    display_key: Variant,
+    none_val: Variant,
     sig_valid: Vec<bool>,
     anc_key: Vec<AncKey>,
     bloom: Vec<u64>,
@@ -436,7 +442,13 @@ impl Cascade {
             sig_name: vec![],
             sig_style: vec![],
             sig_en: vec![],
+            sig_en_false: vec![],
             sig_bits: vec![],
+            own_none: vec![],
+            eff_dis: vec![],
+            eff_gone: vec![],
+            display_key: "display".to_variant(),
+            none_val: "none".to_variant(),
             sig_valid: vec![],
             anc_key: vec![],
             bloom: vec![],
@@ -514,6 +526,10 @@ impl Cascade {
         c.sig_name = vec![Variant::nil(); n];
         c.sig_style = vec![Variant::nil(); n];
         c.sig_en = vec![Variant::nil(); n];
+        c.sig_en_false = vec![false; n];
+        c.own_none = vec![0; n];
+        c.eff_dis = vec![0; n];
+        c.eff_gone = vec![0; n];
         c.sig_bits = vec![0; n];
         c.sig_valid = vec![false; n];
         c.anc_key = vec![AncKey::default(); n];
@@ -762,11 +778,8 @@ impl Cascade {
             let attrs = if scan_all || reread[i] {
                 self.els[i].obj.get(&self.sn_attributes).to::<VarArray>()
             } else {
-                c = self.sig_cls[i].clone();
-                nm = self.sig_name[i].clone();
-                st = self.sig_style[i].clone();
-                en = self.sig_en[i].clone();
-                he = !en.is_nil();
+                // Only the enabled attribute is needed for state bits.
+                he = self.sig_en_false[i];
                 VarArray::new()
             };
             for a in attrs.iter_shared() {
@@ -786,10 +799,15 @@ impl Cascade {
                     he = true;
                 }
             }
-            if scan_all || reread[i] {
+            let en_false = if scan_all || reread[i] {
+                let f = he && gs(&en).to_string() == "false";
                 self.sig_en[i] = en.clone();
-            }
-            let mut own_d: u8 = if he && gs(&en).to_string() == "false" { 1 } else { 0 };
+                self.sig_en_false[i] = f;
+                f
+            } else {
+                he
+            };
+            let mut own_d: u8 = if en_false { 1 } else { 0 };
             if let Some(&ov) = dis_ov.get(&i) {
                 own_d = ov;
             }
@@ -806,13 +824,23 @@ impl Cascade {
             if has_keys {
                 b |= kb[i];
             }
+            // A clean (not re-read) element can only change through its
+            // state bits: skip the Variant compares entirely.
+            let reread_i = scan_all || reread[i];
             let own = full
                 || !self.sig_valid[i]
                 || b != self.sig_bits[i]
-                || c != self.sig_cls[i]
-                || nm != self.sig_name[i]
-                || st != self.sig_style[i];
-            if own {
+                || (reread_i && (c != self.sig_cls[i] || nm != self.sig_name[i] || st != self.sig_style[i]));
+            if own && !reread_i {
+                // State-bit change only: attributes (and everything derived
+                // from them) are unchanged.
+                self.sig_bits[i] = b;
+                let ak = self.anc_key_of(i);
+                if !full && ak != self.anc_key[i] && self.end[i] > anc_until {
+                    anc_until = self.end[i];
+                }
+                self.anc_key[i] = ak;
+            } else if own {
                 if full || !self.sig_valid[i] || c != self.sig_cls[i] {
                     let local = self.els[i].local_var.clone();
                     self.cls_set[i] = self.class_set(&c, &local);
@@ -1172,6 +1200,14 @@ impl Cascade {
         }
 
         self.warn[i] = warns;
+        // display:none on the element itself (for effective_flags).
+        self.own_none[i] = match computed.get(&self.display_key) {
+            Some(e) => {
+                let v = e.try_to::<VarDictionary>().ok().and_then(|d| d.get(&self.k_value)).unwrap_or_default();
+                if v == self.none_val { 1 } else { 0 }
+            }
+            None => 0,
+        };
         if self.els[i].leaf {
             self.fc[i] = self.empty_fc.clone();
             self.fc_dict[i] = VarDictionary::new();
@@ -1222,6 +1258,24 @@ impl Cascade {
             }
         }
         out
+    }
+
+    /// Effective disabled / display:none (self or ancestor) per element;
+    /// returns the indices whose flags flipped since the last call.
+    pub fn effective_flags(&mut self) -> (PackedInt32Array, PackedByteArray, PackedByteArray) {
+        let n = self.els.len();
+        let mut flipped = PackedInt32Array::new();
+        for i in 0..n {
+            let d = if self.sig_bits[i] & BIT_DISABLED != 0 { 1 } else { 0 };
+            let p = self.parent[i];
+            let g = if self.own_none[i] == 1 || (p >= 0 && self.eff_gone[p as usize] == 1) { 1 } else { 0 };
+            if d != self.eff_dis[i] || g != self.eff_gone[i] {
+                self.eff_dis[i] = d;
+                self.eff_gone[i] = g;
+                flipped.push(i as i32);
+            }
+        }
+        (flipped, PackedByteArray::from(self.eff_dis.as_slice()), PackedByteArray::from(self.eff_gone.as_slice()))
     }
 
     pub fn disabled_flags(&self) -> PackedByteArray {
@@ -1285,6 +1339,18 @@ impl UxmlNativeCascade {
     #[func]
     fn element_warnings(&self) -> VarArray {
         self.inner.as_ref().map(|c| c.element_warnings()).unwrap_or_default()
+    }
+
+    /// [flipped indices, disabled flags, gone flags] — see Cascade::effective_flags.
+    #[func]
+    fn effective_flags(&mut self) -> VarArray {
+        match self.inner.as_mut() {
+            Some(c) => {
+                let (f, d, g) = c.effective_flags();
+                args(&[f.to_variant(), d.to_variant(), g.to_variant()])
+            }
+            None => VarArray::new(),
+        }
     }
 
     #[func]

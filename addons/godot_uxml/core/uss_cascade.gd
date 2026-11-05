@@ -93,6 +93,10 @@ static var _empty_fc := {}
 var _warn: Array = []                  # per element warnings
 var _arefs: Array = []                 # per element attribute refs (see _attr_refs)
 var _sig_en: Array = []                # per element `enabled` attribute value (or null)
+var _last_changed := PackedInt32Array()
+var _own_none := PackedByteArray()
+var _eff_dis := PackedByteArray()
+var _eff_gone := PackedByteArray()
 var _computed_once := false
 ## Previous computed Dictionary for each index update() returned (aligned).
 var last_old: Array = []
@@ -683,7 +687,36 @@ func update(options: Dictionary = {}, force: bool = false, dirty = null) -> Pack
 				inh_dirty[ch] = 1
 				ch = _end[ch]
 	_computed_once = true
+	_last_changed = changed
 	return changed
+
+
+## Effective disabled (attribute/runtime, descending) and display:none
+## (self or an ancestor) per preorder index, and the indices whose flags
+## flipped since the last call: [flipped PackedInt32Array, disabled
+## PackedByteArray, gone PackedByteArray].
+func effective_flags() -> Array:
+	if _native != null:
+		return _native.call("effective_flags")
+	var n := els.size()
+	if _own_none.size() != n:
+		_own_none.resize(n)
+		_eff_dis.resize(n)
+		_eff_gone.resize(n)
+	for ci in _last_changed:
+		var disp = styles[els[ci]].get("display")
+		_own_none[ci] = 1 if disp != null and String(disp["value"]) == "none" else 0
+	_last_changed = PackedInt32Array()
+	var flipped := PackedInt32Array()
+	for i in n:
+		var d := 1 if (_sig_bits[i] & BIT_DISABLED) != 0 else 0
+		var p := _parent[i]
+		var g := 1 if _own_none[i] == 1 or (p >= 0 and _eff_gone[p] == 1) else 0
+		if d != _eff_dis[i] or g != _eff_gone[i]:
+			_eff_dis[i] = d
+			_eff_gone[i] = g
+			flipped.append(i)
+	return [flipped, _eff_dis, _eff_gone]
 
 
 ## True when the element is effectively disabled after the last update
