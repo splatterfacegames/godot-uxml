@@ -97,6 +97,7 @@ var _el_of: Dictionary = {}           # outer Control -> UxmlElement
 var _layout_records: Dictionary = {}  # flex layout's parsed-style cache
 var _layout_xcache: Dictionary = {}   # flex layout's validated cross-pass cache
 var _attr_dirty: Dictionary = {}      # UxmlElement -> true (set_attribute since last restyle)
+var _placed_force: Array = []         # elements re-applied this restyle (inset hooks must run)
 var _scan_all := true                 # next restyle re-reads every element's attributes
 
 ## Computed-style properties that can change neither the flex geometry nor
@@ -429,12 +430,14 @@ func _restyle_now() -> void:
 		if _cascade._native != null and use_native_layout:
 			# Native flex pass: hand it the controls per preorder index.
 			var ctl: Array = []
-			var boxed := PackedByteArray()
+			var kinds := PackedByteArray()
+			var nats: Array = []
 			for cel in _cascade.els:
 				var cc = _controls.get(cel)
 				ctl.append(cc)
-				boxed.append(1 if cc is UxmlBox else 0)
-			_cascade._native.call("set_controls", ctl, boxed)
+				kinds.append((1 if cc is UxmlBox else 0) | (2 if cc is UxmlField else 0))
+				nats.append(_natives.get(cel))
+			_cascade._native.call("set_controls", ctl, kinds, nats)
 	var dirty = null
 	if not _scan_all:
 		var dl := PackedInt32Array()
@@ -524,12 +527,20 @@ func _restyle_now() -> void:
 	_force_layout = false
 	if need_layout:
 		_pending_fresh = measure_fresh
+		_placed_force = applied
 		_do_layout()
+		_placed_force = []
 	else:
 		# Re-applied themed controls got fresh styleboxes: hand them the
 		# resolved insets of the (unchanged) last layout.
-		for el in applied:
-			_place_control(el)
+		if _native_layout():
+			var idx := PackedInt32Array()
+			for el in applied:
+				idx.append(cindex[el])
+			_cascade._native.call("place_only", _applier, idx)
+		else:
+			for el in applied:
+				_place_control(el)
 	# Runtime warnings accumulate during apply/layout — surface last so they
 	# are all included.
 	diagnostics = _doc.warnings + _cascade.collect_warnings() + _rt_warnings
@@ -638,8 +649,27 @@ func _compute_layout(host: Vector2) -> Dictionary:
 	)
 
 
+func _native_layout() -> bool:
+	return _cascade != null and _cascade._native != null and use_native_layout
+
+
 func _do_layout() -> void:
 	if _doc == null:
+		return
+	if _native_layout():
+		# Native layout + placement; results stay native.
+		var force := PackedInt32Array()
+		var cidx: Dictionary = _cascade.index
+		for el in _placed_force:
+			force.append(cidx[el])
+		var r: Array = _cascade._native.call(
+			"layout_place", size, _scroll_bar_width(), _layout_warned, _rt_warnings,
+			_applier, force, _placed_force.size() == _controls.size())
+		var sizes: Dictionary = r[1]
+		for el in _scroll:
+			(_scroll[el] as Control).custom_minimum_size = sizes.get(el, Vector2.ZERO)
+		_unsettled = _pending_fresh or bool(r[0])
+		_pending_fresh = false
 		return
 	var prev := _rects
 	var res := _compute_layout(size)

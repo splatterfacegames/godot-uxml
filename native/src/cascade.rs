@@ -1370,6 +1370,7 @@ pub struct UxmlNativeCascade {
     inner: Option<Cascade>,
     layout_in: Option<crate::layout::LayoutIn>,
     recs: crate::layout::RecCache,
+    placement: crate::layout::Placement,
 }
 
 #[godot_api]
@@ -1403,20 +1404,89 @@ impl UxmlNativeCascade {
 
     /// The runtime controls per preorder index (null for non-visual), and
     /// whether each is a UxmlBox (measured by natural_size). Once per load.
+    /// `kinds`: bit 1 UxmlBox (natural_size measure), bit 2 UxmlField;
+    /// `natives`: the interactive inner control per index (or null).
     #[func]
-    fn set_controls(&mut self, controls: VarArray, boxed: PackedByteArray) {
+    fn set_controls(&mut self, controls: VarArray, kinds: PackedByteArray, natives: VarArray) {
         let mut ctl = vec![];
         let mut labels = vec![];
-        for v in controls.iter_shared() {
+        let mut texrects = vec![];
+        for (k, v) in controls.iter_shared().enumerate() {
             let c = v.try_to::<Gd<godot::classes::Control>>().ok();
             labels.push(c.as_ref().and_then(|c| c.clone().try_cast::<godot::classes::Label>().ok()));
             ctl.push(c);
+            let nat = natives.get(k).and_then(|n| n.try_to::<Gd<godot::classes::TextureRect>>().ok());
+            texrects.push(nat.map(|t| t.upcast::<godot::classes::Control>()));
         }
+        let ks = kinds.as_slice();
         self.layout_in = Some(crate::layout::LayoutIn {
             controls: ctl,
-            boxed: boxed.as_slice().iter().map(|&b| b != 0).collect(),
+            boxed: ks.iter().map(|&b| b & 1 != 0).collect(),
             labels,
+            fields: ks.iter().map(|&b| b & 2 != 0).collect(),
+            texrects,
         });
+        self.placement = crate::layout::Placement::default();
+    }
+
+    /// Layout + native placement in one call (UxmlDocument._do_layout).
+    /// `force`: indices re-applied since the last placement (their inset
+    /// hooks must run); `force_all` for a full apply. Returns [rects
+    /// changed vs the previous layout, {element: content size} for
+    /// ScrollView elements].
+    #[func]
+    fn layout_place(
+        &mut self,
+        host: Vector2,
+        scroll_bar_width: f64,
+        warned: VarDictionary,
+        warnings: VarArray,
+        applier: Variant,
+        force: PackedInt32Array,
+        force_all: bool,
+    ) -> VarArray {
+        let (Some(c), Some(io)) = (self.inner.as_ref(), self.layout_in.as_ref()) else {
+            return VarArray::new();
+        };
+        self.recs.refresh(c);
+        let out = crate::layout::Pass::new(c, io, &self.recs.recs, scroll_bar_width, warned, warnings).run(host);
+        let changed = match &self.placement.last {
+            Some(prev) => prev.rects != out.rects,
+            None => true,
+        };
+        let mut scroll = VarDictionary::new();
+        for i in 0..c.len() {
+            if c.is_scroll_view(i) {
+                scroll.set(&c.element_var(i), out.content[i].unwrap_or(Vector2::ZERO));
+            }
+        }
+        self.placement.last = Some(out);
+        let applier = applier.try_to::<Gd<Object>>().ok();
+        let n = c.len();
+        let mut forced = vec![force_all; n];
+        for &k in force.as_slice() {
+            if k >= 0 && (k as usize) < n {
+                forced[k as usize] = true;
+            }
+        }
+        for i in 0..n {
+            self.placement.place(io, i, &applier, forced[i]);
+        }
+        args(&[changed.to_variant(), scroll.to_variant()])
+    }
+
+    /// Re-place (with inset hooks) the given elements from the last layout —
+    /// the paint-only restyle path, where re-applied controls got fresh
+    /// styleboxes but no layout ran.
+    #[func]
+    fn place_only(&mut self, applier: Variant, indices: PackedInt32Array) {
+        let Some(io) = self.layout_in.as_ref() else { return };
+        let applier = applier.try_to::<Gd<Object>>().ok();
+        for &k in indices.as_slice() {
+            if k >= 0 {
+                self.placement.place(io, k as usize, &applier, true);
+            }
+        }
     }
 
     /// Native flex pass: [rects, content_sizes, insets] Dictionaries keyed
@@ -1430,7 +1500,8 @@ impl UxmlNativeCascade {
         };
         self.recs.refresh(c);
         let out = crate::layout::Pass::new(c, io, &self.recs.recs, scroll_bar_width, warned, warnings).run(host);
-        args(&[out.rects.to_variant(), out.content.to_variant(), out.insets.to_variant()])
+        let (r, cs, ins) = out.to_dicts(c);
+        args(&[r.to_variant(), cs.to_variant(), ins.to_variant()])
     }
 
     #[func]

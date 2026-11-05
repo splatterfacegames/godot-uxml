@@ -238,12 +238,90 @@ pub struct LayoutIn {
     pub controls: Vec<Option<Gd<Control>>>,
     pub boxed: Vec<bool>,
     pub labels: Vec<Option<Gd<Label>>>,
+    /// UxmlField wrappers (insets via set_content_insets).
+    pub fields: Vec<bool>,
+    /// TextureRect natives (Image elements: anchor offsets follow insets).
+    pub texrects: Vec<Option<Gd<Control>>>,
 }
 
+/// Native placement state: the last layout and the insets last handed to
+/// each control's inset hooks.
+#[derive(Default)]
+pub struct Placement {
+    pub last: Option<Out>,
+    hooked: Vec<Option<(Vector2, Vector2)>>,
+}
+
+impl Placement {
+    /// UxmlDocument._place_control for element i. Inset hooks (UxmlField.
+    /// set_content_insets / applier.apply_resolved_insets) are idempotent
+    /// for unchanged insets on unchanged styleboxes, so they only run when
+    /// the insets changed or the element was just re-applied (`force`).
+    pub fn place(&mut self, io: &LayoutIn, i: usize, applier: &Option<Gd<Object>>, force: bool) {
+        if i == 0 {
+            return; // document root: the host box, never positioned
+        }
+        let Some(out) = &self.last else { return };
+        let Some(mut c) = io.controls[i].clone() else { return };
+        let Some(r) = out.rects[i] else { return };
+        c.set_position(r.position);
+        c.set_size(r.size);
+        let Some((start, end)) = out.insets[i] else { return };
+        if self.hooked.len() != io.controls.len() {
+            self.hooked = vec![None; io.controls.len()];
+        }
+        let changed = force || self.hooked[i] != Some((start, end));
+        if io.fields[i] {
+            if changed {
+                c.upcast::<Object>().call("set_content_insets", &[start.to_variant(), end.to_variant()]);
+            }
+        } else {
+            if let Some(mut tr) = io.texrects[i].clone() {
+                tr.set_offset(godot::builtin::Side::LEFT, start.x);
+                tr.set_offset(godot::builtin::Side::TOP, start.y);
+                tr.set_offset(godot::builtin::Side::RIGHT, -end.x);
+                tr.set_offset(godot::builtin::Side::BOTTOM, -end.y);
+            }
+            if changed {
+                if let Some(a) = applier {
+                    let mut a = a.clone();
+                    a.call("apply_resolved_insets", &[c.to_variant(), start.to_variant(), end.to_variant()]);
+                }
+            }
+        }
+        self.hooked[i] = Some((start, end));
+    }
+}
+
+/// Layout results per preorder index (None: not laid out — display:none
+/// or non-visual).
 pub struct Out {
-    pub rects: VarDictionary,
-    pub content: VarDictionary,
-    pub insets: VarDictionary,
+    pub rects: Vec<Option<Rect2>>,
+    pub content: Vec<Option<Vector2>>,
+    pub insets: Vec<Option<(Vector2, Vector2)>>,
+}
+
+impl Out {
+    /// The Dictionaries UxmlFlexLayout.compute returns (equivalence/debug).
+    pub fn to_dicts(&self, c: &Cascade) -> (VarDictionary, VarDictionary, VarDictionary) {
+        let (mut r, mut cs, mut ins) = (VarDictionary::new(), VarDictionary::new(), VarDictionary::new());
+        for i in 0..self.rects.len() {
+            let el = c.element_var(i);
+            if let Some(v) = self.rects[i] {
+                r.set(&el, v);
+            }
+            if let Some(v) = self.content[i] {
+                cs.set(&el, v);
+            }
+            if let Some((s, e)) = self.insets[i] {
+                let mut pair = VarArray::new();
+                pair.push(&s.to_variant());
+                pair.push(&e.to_variant());
+                ins.set(&el, &pair);
+            }
+        }
+        (r, cs, ins)
+    }
 }
 
 struct MemoE {
@@ -307,7 +385,7 @@ impl<'a> Pass<'a> {
             sbw,
             warned,
             warnings,
-            out: Out { rects: VarDictionary::new(), content: VarDictionary::new(), insets: VarDictionary::new() },
+            out: Out { rects: vec![None; n], content: vec![None; n], insets: vec![None; n] },
             pad_m: vec![None; n],
             mar_m: vec![None; n],
             bor_m: vec![None; n],
@@ -751,16 +829,12 @@ impl<'a> Pass<'a> {
     // ------------------------------------------------------------- arrange
 
     fn layout(&mut self, i: usize, rect: Rect2, cb: f64) {
-        let el = self.c.element_var(i);
-        self.out.rects.set(&el, rect);
+        self.out.rects[i] = Some(rect);
         let pad = self.padding(i, cb);
         let bor = self.borders(i);
         let start = Vector2::new(f(bor[L] + pad[L]), f(bor[T] + pad[T]));
         let end = Vector2::new(f(bor[R] + pad[R]), f(bor[B] + pad[B]));
-        let mut pair = VarArray::new();
-        pair.push(&start.to_variant());
-        pair.push(&end.to_variant());
-        self.out.insets.set(&el, &pair);
+        self.out.insets[i] = Some((start, end));
         let inner = Vector2::new(f(bor[L] + pad[L]), f(bor[T] + pad[T]));
         let content = Rect2::new(
             inner,
@@ -771,7 +845,7 @@ impl<'a> Pass<'a> {
         );
         let kids = self.flex_children(i);
         if kids.is_empty() {
-            self.out.content.set(&el, Vector2::ZERO);
+            self.out.content[i] = Some(Vector2::ZERO);
             return;
         }
         if self.c.is_scroll_view(i) {
@@ -779,7 +853,7 @@ impl<'a> Pass<'a> {
             return;
         }
         let ext = self.place(i, content, &kids);
-        self.out.content.set(&el, ext);
+        self.out.content[i] = Some(ext);
     }
 
     fn layout_scroll(&mut self, i: usize, content: Rect2, pad: Edges, bor: Edges, kids: &[usize]) {
@@ -793,8 +867,7 @@ impl<'a> Pass<'a> {
         let content_h = gmax(d(nat.y), d(content.size.y));
         let area = Rect2::new(pad_bor, Vector2::new(f(avail_w), f(content_h)));
         self.place(i, area, kids);
-        let el = self.c.element_var(i);
-        self.out.content.set(&el, Vector2::new(f(avail_w), nat.y) + pad_bor);
+        self.out.content[i] = Some(Vector2::new(f(avail_w), nat.y) + pad_bor);
     }
 
     fn place(&mut self, i: usize, area: Rect2, kids: &[usize]) -> Vector2 {
