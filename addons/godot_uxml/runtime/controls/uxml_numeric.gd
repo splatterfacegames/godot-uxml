@@ -128,6 +128,34 @@ static func to_f32(v: float) -> float:
 	return a[0]
 
 
+## A C# float as GDScript shows it: the 32-bit value read back through
+## its shortest decimal form, so 5.1f is 5.1 and not 5.099999904632568.
+static func f32_clean(v: float) -> float:
+	var f := to_f32(v)
+	if is_nan(f) or is_inf(f) or f == 0.0:
+		return f
+	for p in [6, 7, 8, 9]:
+		var t := format_g(f, p, true).to_float()
+		if to_f32(t) == f:
+			return t
+	return f
+
+
+## Math.Round(v, decimals, MidpointRounding.AwayFromZero).
+static func round_away(v: float, decimals: int) -> float:
+	var m := pow(10.0, decimals)
+	var a := floorf(absf(v) * m + 0.5) / m
+	return -a if v < 0.0 else a
+
+
+## Unity's Mathf.RoundBasedOnMinimumDifference.
+static func round_min_diff(v: float, min_diff: float) -> float:
+	if min_diff == 0.0:
+		return v
+	var d := clampi(-floori(log(absf(min_diff)) / log(10.0)), 0, 15)
+	return round_away(v, d)
+
+
 ## Mathf.ClampToFloat: finite values outside float's range clamp.
 static func clamp_to_float(v: float) -> float:
 	if is_nan(v) or is_inf(v):

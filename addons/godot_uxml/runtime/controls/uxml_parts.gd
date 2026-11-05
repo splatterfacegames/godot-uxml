@@ -291,7 +291,8 @@ static func _builder(local: String) -> Callable:
 			return _build_foldout
 		"ProgressBar":
 			return _build_progress_bar
-	return Callable()
+	# Input controls (Slider, TextField, numeric/composite/popup fields).
+	return UxmlInputParts.builder(local)
 
 
 # ---------------------------------------------------------------------------

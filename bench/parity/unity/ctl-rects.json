@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:56:34.7775375Z"
+  "dumpedAtUtc": "2026-11-05T19:52:49.8794942Z"
  },
  "panel": {
   "width": 600,
@@ -229,6 +229,10 @@
    "visible": true,
    "text": "Rect",
    "textMeasure": {
+    "width": 30,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 30,
     "height": 17
    },
@@ -915,6 +919,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -1256,6 +1264,10 @@
    "visible": true,
    "text": "1",
    "textMeasure": {
+    "width": 7,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 7,
     "height": 17
    },
@@ -1617,6 +1629,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -1958,6 +1974,10 @@
    "visible": true,
    "text": "2",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -2641,6 +2661,10 @@
     "width": 14,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 14,
+    "height": 17
+   },
    "props": {
     "text": "W"
    },
@@ -2982,6 +3006,10 @@
    "visible": true,
    "text": "3",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -3343,6 +3371,10 @@
     "width": 11,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 11,
+    "height": 17
+   },
    "props": {
     "text": "H"
    },
@@ -3684,6 +3716,10 @@
    "visible": true,
    "text": "4",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -4177,6 +4213,10 @@
    "visible": true,
    "text": "RectInt",
    "textMeasure": {
+    "width": 48,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 48,
     "height": 17
    },
@@ -4863,6 +4903,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -5204,6 +5248,10 @@
    "visible": true,
    "text": "1",
    "textMeasure": {
+    "width": 7,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 7,
     "height": 17
    },
@@ -5565,6 +5613,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -5906,6 +5958,10 @@
    "visible": true,
    "text": "2",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -6589,6 +6645,10 @@
     "width": 14,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 14,
+    "height": 17
+   },
    "props": {
     "text": "W"
    },
@@ -6930,6 +6990,10 @@
    "visible": true,
    "text": "3",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -7291,6 +7355,10 @@
     "width": 11,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 11,
+    "height": 17
+   },
    "props": {
     "text": "H"
    },
@@ -7632,6 +7700,10 @@
    "visible": true,
    "text": "4",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -8120,6 +8192,10 @@
    "visible": true,
    "text": "Bounds",
    "textMeasure": {
+    "width": 50,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 50,
     "height": 17
    },
@@ -8619,6 +8695,10 @@
    "visible": true,
    "text": "Center",
    "textMeasure": {
+    "width": 45,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 45,
     "height": 17
    },
@@ -9148,6 +9228,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -9491,6 +9575,10 @@
    "visible": true,
    "text": "1",
    "textMeasure": {
+    "width": 7,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 7,
     "height": 17
    },
@@ -9854,6 +9942,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -10197,6 +10289,10 @@
    "visible": true,
    "text": "2",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -10560,6 +10656,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "Z"
    },
@@ -10906,6 +11006,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "3"
    },
@@ -11241,6 +11345,10 @@
    "visible": true,
    "text": "Extents",
    "textMeasure": {
+    "width": 50,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 50,
     "height": 17
    },
@@ -11770,6 +11878,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -12113,6 +12225,10 @@
    "visible": true,
    "text": "2",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -12476,6 +12592,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -12819,6 +12939,10 @@
    "visible": true,
    "text": "2.5",
    "textMeasure": {
+    "width": 21,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 21,
     "height": 17
    },
@@ -13182,6 +13306,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "Z"
    },
@@ -13528,6 +13656,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "3"
    },
@@ -13854,6 +13986,10 @@
    "visible": true,
    "text": "BoundsInt",
    "textMeasure": {
+    "width": 67,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 67,
     "height": 17
    },
@@ -14353,6 +14489,10 @@
    "visible": true,
    "text": "Position",
    "textMeasure": {
+    "width": 53,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 53,
     "height": 17
    },
@@ -14882,6 +15022,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -15225,6 +15369,10 @@
    "visible": true,
    "text": "1",
    "textMeasure": {
+    "width": 7,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 7,
     "height": 17
    },
@@ -15588,6 +15736,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -15931,6 +16083,10 @@
    "visible": true,
    "text": "2",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -16294,6 +16450,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "Z"
    },
@@ -16640,6 +16800,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "3"
    },
@@ -16975,6 +17139,10 @@
    "visible": true,
    "text": "Size",
    "textMeasure": {
+    "width": 28,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 28,
     "height": 17
    },
@@ -17504,6 +17672,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -17847,6 +18019,10 @@
    "visible": true,
    "text": "4",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -18210,6 +18386,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -18553,6 +18733,10 @@
    "visible": true,
    "text": "5",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -18916,6 +19100,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "Z"
    },
@@ -19259,6 +19447,10 @@
    "visible": true,
    "text": "6",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },

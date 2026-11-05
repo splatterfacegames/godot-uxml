@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:56:34.9453160Z"
+  "dumpedAtUtc": "2026-11-05T19:52:50.1694240Z"
  },
  "panel": {
   "width": 400,
@@ -1376,6 +1376,10 @@
    "visible": true,
    "text": "V",
    "textMeasure": {
+    "width": 10,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 10,
     "height": 17
    },
@@ -4832,6 +4836,10 @@
    "visible": true,
    "text": "5",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },

@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T14:44:50.9792747Z"
+  "dumpedAtUtc": "2026-11-05T19:52:50.7614376Z"
  },
  "panel": {
   "width": 400,
@@ -57,7 +57,10 @@
    "enabledSelf": true,
    "enabledInHierarchy": true,
    "visible": true,
-   "props": {},
+   "props": {
+    "verticalScrollerVisibility": "auto"
+   },
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -150,7 +153,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 200,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "200px",
+     "height": "120px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/0",
@@ -201,6 +220,7 @@
    "enabledInHierarchy": true,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -293,7 +313,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 200,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "auto",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/0/0",
@@ -346,6 +382,7 @@
    "enabledInHierarchy": true,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -438,7 +475,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 200,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "hidden",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "auto",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/0/0/0"
@@ -491,6 +544,7 @@
    "enabledInHierarchy": true,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -583,7 +637,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 200,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "scroll",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "auto",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/0/0/0/0"
@@ -634,6 +704,7 @@
    "enabledInHierarchy": true,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -726,7 +797,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 60,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "60px",
+     "height": "40px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -782,8 +869,10 @@
    "props": {
     "value": 0,
     "lowValue": 0,
-    "highValue": -80
+    "highValue": -80,
+    "direction": "vertical"
    },
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -876,7 +965,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "24px",
+     "height": "auto",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/0/1/0",
@@ -938,9 +1043,14 @@
     "width": 0,
     "height": 0
    },
+   "layoutMeasure": {
+    "width": 0,
+    "height": 0
+   },
    "props": {
     "text": ""
    },
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -1033,7 +1143,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "24px",
+     "height": "24px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "0",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -1091,9 +1217,14 @@
     "width": 0,
     "height": 0
    },
+   "layoutMeasure": {
+    "width": 0,
+    "height": 0
+   },
    "props": {
     "text": ""
    },
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -1186,7 +1317,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "24px",
+     "height": "24px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "0",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -1246,8 +1393,15 @@
     "value": 0,
     "lowValue": 0,
     "highValue": -80,
-    "label": ""
+    "label": "",
+    "direction": "vertical",
+    "inverted": true,
+    "pageSize": 20,
+    "showInputField": false,
+    "fill": false,
+    "range": 80
    },
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -1340,7 +1494,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "hidden",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "24px",
+     "height": "auto",
+     "min-width": "24px",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "0%",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/0/1/2/0"
@@ -1397,6 +1567,7 @@
    "enabledInHierarchy": false,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -1489,7 +1660,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "100%",
+     "height": "auto",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/0/1/2/0/0"
@@ -1545,6 +1732,7 @@
    "enabledInHierarchy": false,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -1637,7 +1825,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "auto",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/0/1/2/0/0/0",
@@ -1696,6 +1900,7 @@
    "enabledInHierarchy": false,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -1788,7 +1993,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "100%",
+     "height": "100%",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "0",
+     "top": "0",
+     "right": "0",
+     "bottom": "0",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -1843,6 +2064,7 @@
    "enabledInHierarchy": false,
    "visible": false,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -1935,7 +2157,23 @@
     "visibility": "hidden",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "auto",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -1990,6 +2228,7 @@
    "enabledInHierarchy": false,
    "visible": false,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -2082,7 +2321,23 @@
     "visibility": "hidden",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "18px",
+     "height": "8px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "3px",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -2137,8 +2392,10 @@
    "props": {
     "value": 0,
     "lowValue": 0,
-    "highValue": 0
+    "highValue": 0,
+    "direction": "horizontal"
    },
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -2231,7 +2488,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "24px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/1/0",
@@ -2292,9 +2565,14 @@
     "width": 0,
     "height": 0
    },
+   "layoutMeasure": {
+    "width": 0,
+    "height": 0
+   },
    "props": {
     "text": ""
    },
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -2387,7 +2665,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "24px",
+     "height": "24px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "0",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -2444,9 +2738,14 @@
     "width": 0,
     "height": 0
    },
+   "layoutMeasure": {
+    "width": 0,
+    "height": 0
+   },
    "props": {
     "text": ""
    },
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -2539,7 +2838,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "24px",
+     "height": "24px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "0",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -2598,8 +2913,15 @@
     "value": 0,
     "lowValue": 0,
     "highValue": 0,
-    "label": ""
+    "label": "",
+    "direction": "horizontal",
+    "inverted": false,
+    "pageSize": 20,
+    "showInputField": false,
+    "fill": false,
+    "range": 0
    },
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -2692,7 +3014,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "hidden",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "24px",
+     "min-width": "auto",
+     "min-height": "24px",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "0%",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/1/2/0"
@@ -2748,6 +3086,7 @@
    "enabledInHierarchy": false,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -2840,7 +3179,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "100%",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/1/2/0/0"
@@ -2895,6 +3250,7 @@
    "enabledInHierarchy": false,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -2987,7 +3343,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "auto",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": [
     "0/1/2/0/0/0",
@@ -3045,6 +3417,7 @@
    "enabledInHierarchy": false,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -3137,7 +3510,23 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "100%",
+     "height": "100%",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "0",
+     "top": "0",
+     "right": "0",
+     "bottom": "0",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -3191,6 +3580,7 @@
    "enabledInHierarchy": false,
    "visible": false,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -3283,7 +3673,23 @@
     "visibility": "hidden",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "auto",
+     "height": "auto",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   },
@@ -3337,6 +3743,7 @@
    "enabledInHierarchy": false,
    "visible": false,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -3429,9 +3836,26 @@
     "visibility": "hidden",
     "white-space": "normal",
     "width": 0,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "8px",
+     "height": "18px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "3px",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   }
- ]
+ ],
+ "overlay": []
 }

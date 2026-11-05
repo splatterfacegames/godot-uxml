@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:56:34.4938896Z"
+  "dumpedAtUtc": "2026-11-05T19:52:48.9194211Z"
  },
  "panel": {
   "width": 400,
@@ -393,6 +393,10 @@
    "visible": true,
    "text": "Medium",
    "textMeasure": {
+    "width": 53,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 53,
     "height": 17
    },
@@ -892,6 +896,10 @@
     "width": 47,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 47,
+    "height": 17
+   },
    "props": {
     "text": "Quality"
    },
@@ -1217,6 +1225,10 @@
    "visible": true,
    "text": "",
    "textMeasure": {
+    "width": 0,
+    "height": 0
+   },
+   "layoutMeasure": {
     "width": 0,
     "height": 0
    },
@@ -1712,6 +1724,10 @@
     "width": 42,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 42,
+    "height": 17
+   },
    "props": {
     "text": "Empty"
    },
@@ -2037,6 +2053,10 @@
    "visible": true,
    "text": "",
    "textMeasure": {
+    "width": 0,
+    "height": 0
+   },
+   "layoutMeasure": {
     "width": 0,
     "height": 0
    },
@@ -2528,6 +2548,10 @@
     "width": 33,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 33,
+    "height": 17
+   },
    "props": {
     "text": "Align"
    },
@@ -2852,6 +2876,10 @@
    "visible": true,
    "text": "Center",
    "textMeasure": {
+    "width": 45,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 45,
     "height": 17
    },
@@ -3500,6 +3528,10 @@
    "visible": true,
    "text": "",
    "textMeasure": {
+    "width": 0,
+    "height": 0
+   },
+   "layoutMeasure": {
     "width": 0,
     "height": 0
    },

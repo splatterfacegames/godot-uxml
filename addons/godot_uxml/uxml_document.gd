@@ -119,6 +119,10 @@ var _placed_force: Array = []         # elements re-applied this restyle (inset 
 var _lists: Dictionary = {}
 var _pooled: Dictionary = {}          # UxmlElement -> true (inside a pooled row)
 var _behaviors: Dictionary = {}       # control UxmlElement -> UxmlBehaviors.Behavior
+# Callables run after every layout pass (both layout paths): controls whose
+# parts Unity places from the layout (a slider's dragger). Empty for a
+# document without such controls.
+var _layout_hooks: Array = []
 
 ## Unity's default ListView fixed-item-height.
 const LIST_DEFAULT_ITEM_HEIGHT := 22.0
@@ -249,6 +253,25 @@ func load_document(path: String, root: String = "") -> int:
 	return OK
 
 
+## Load a document from UXML text instead of a file. `virtual_path` names
+## the document for diagnostics and for relative references (it need not
+## exist). Used for generated documents such as a dropdown menu.
+func load_source(uxml: String, virtual_path: String = "res://__uxml_source__.uxml", root: String = "") -> int:
+	if _doc != null:
+		_attrs.capture_view_data()
+	_clear()
+	var effective_root := root if not root.is_empty() else project_root
+	_resolver = UxmlResourceResolver.new(effective_root)
+	_doc = UxmlLoader.load_source(uxml, virtual_path, _resolver)
+	_effective_root = effective_root
+	UxmlTheme.attach(_doc, theme_path)
+	_index()
+	_restyle_now()
+	_attrs.restore_view_data()
+	loaded.emit(true)
+	return OK
+
+
 ## Alias for load_document when a `load` verb reads better.
 func load_uxml(path: String, root: String = "") -> int:
 	return load_document(path, root)
@@ -311,6 +334,7 @@ func _clear() -> void:
 	_binding.clear()
 	_attrs.clear()
 	_behaviors = {}
+	_layout_hooks = []
 	_doc = null
 	diagnostics = []
 
@@ -387,17 +411,20 @@ func _wire(el: UxmlElement, c: Control) -> void:
 	if c != native:
 		# The wrapper reports hover for the whole field; the inner native
 		# reports it too, so both nested areas drive :hover.
-		native.mouse_entered.connect(_set_state.bind(el, "hover", true))
-		native.mouse_exited.connect(_set_state.bind(el, "hover", false))
+		# Lambdas, not bound callables: the native may be the control of a
+		# part too (a text field's editor), and Godot treats two binds of
+		# one method as the same connection.
+		native.mouse_entered.connect(func(): _set_state(el, "hover", true))
+		native.mouse_exited.connect(func(): _set_state(el, "hover", false))
 	c.focus_entered.connect(_set_state.bind(el, "focus", true))
 	c.focus_exited.connect(_set_state.bind(el, "focus", false))
 	c.gui_input.connect(_on_gui_input.bind(el))
 	if native != c:
 		# The wrapper never takes focus or key input — the focused inner
 		# native reports :focus, :active and scroll keys for the element.
-		native.focus_entered.connect(_set_state.bind(el, "focus", true))
-		native.focus_exited.connect(_set_state.bind(el, "focus", false))
-		native.gui_input.connect(_on_gui_input.bind(el))
+		native.focus_entered.connect(func(): _set_state(el, "focus", true))
+		native.focus_exited.connect(func(): _set_state(el, "focus", false))
+		native.gui_input.connect(func(ev): _on_gui_input(ev, el))
 
 	var el_name := _el_names.get(el, "")
 	if native is Button and (el.local == "Button" or el.local == "RepeatButton"):
@@ -406,24 +433,6 @@ func _wire(el: UxmlElement, c: Control) -> void:
 		native.button_up.connect(_set_state.bind(el, "active", false))
 	elif native is UxmlToggle:
 		pass  # value, :checked and value_changed: UxmlBehaviors.ToggleBehavior
-	elif native is HSlider:
-		native.value_changed.connect(func(v: float):
-			if el.local == "SliderInt":
-				value_changed.emit(el_name, int(v))
-			else:
-				value_changed.emit(el_name, v))
-		native.drag_started.connect(_set_state.bind(el, "active", true))
-		native.drag_ended.connect(func(_changed: bool):
-			_set_state(el, "active", false))
-	elif native is LineEdit:
-		native.text_changed.connect(func(t: String):
-			value_changed.emit(el_name, t))
-	elif native is TextEdit:
-		native.text_changed.connect(func():
-			value_changed.emit(el_name, native.text))
-	elif native is OptionButton:
-		native.item_selected.connect(func(i: int):
-			value_changed.emit(el_name, native.get_item_text(i)))
 	elif native is RichTextLabel:
 		native.meta_clicked.connect(func(meta):
 			link_clicked.emit(el_name, str(meta)))
@@ -900,6 +909,7 @@ func _do_layout() -> void:
 		_pending_fresh = false
 		_lists_after_layout()
 		_update_elision()
+		_run_layout_hooks()
 		return
 	var prev := _rects
 	var res := _compute_layout(size)
@@ -919,6 +929,14 @@ func _do_layout() -> void:
 	_pending_fresh = false
 	_lists_after_layout()
 	_update_elision()
+	_run_layout_hooks()
+
+
+## Controls that place parts from the layout (UxmlInputBehaviors) update
+## their inline styles; a change restyles on the next pass.
+func _run_layout_hooks() -> void:
+	for h in _layout_hooks:
+		(h as Callable).call()
 
 
 ## text-overflow: ellipsis needs the laid-out width: elide after placement
@@ -1415,6 +1433,18 @@ static func unregister_converter_group(group_id: String) -> void:
 
 static func register_global_converter(converter: Callable, source_type: int = -1) -> void:
 	UxmlBinding.register_global_converter(converter, source_type)
+
+
+## Register an enum for EnumField `type` attributes (Unity names a C#
+## enum, which Godot cannot load). `values`: a GDScript enum Dictionary
+## (name -> int) or an Array of names. `obsolete`: names shown only with
+## `include-obsolete-values="true"`. Global; register before the load.
+static func register_enum(type_name: String, values: Variant, obsolete: Array = []) -> void:
+	UxmlInputParts.register_enum(type_name, values, obsolete)
+
+
+static func unregister_enum(type_name: String) -> void:
+	UxmlInputParts.unregister_enum(type_name)
 
 
 ## Give a `data-source` attribute value (Unity asset reference) a Godot

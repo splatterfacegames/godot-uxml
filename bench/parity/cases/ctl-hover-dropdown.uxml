@@ -1,0 +1,3 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:DropdownField name="h" label="Hover" choices="A,B" index="0" />
+</ui:UXML>

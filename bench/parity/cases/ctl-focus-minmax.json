@@ -1,0 +1,7 @@
+{"actions": [
+  {"op": "navigate", "target": "k", "direction": "Right"},
+  {"op": "submit", "target": "m"},
+  {"op": "submit", "target": "m"},
+  {"op": "navigate", "target": "m", "direction": "Left"},
+  {"op": "focus", "target": "f"}
+]}

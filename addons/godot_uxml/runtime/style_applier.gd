@@ -290,6 +290,9 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 		elif c.has_theme_color_override(name):
 			c.remove_theme_color_override(name)
 
+	if c is LineEdit or c is TextEdit:
+		_apply_edit_colors(c, style, el)
+
 	var size_name := _font_size_name(c)
 	var font_size := _int(style, "font-size", el)
 	if font_size > 0:
@@ -316,6 +319,23 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 			_apply_paragraph_spacing(c, style, el)
 	if c is RichTextLabel:
 		_render_rich(c)
+
+
+## The caret and selection colours of a text field editor: Unity's custom
+## properties --unity-cursor-color and --unity-selection-color (inherited
+## from the field, measured: ctl-textfield). Without them the editor keeps
+## its fallback theme (UxmlTextInput).
+const _EDIT_COLORS := {"--unity-cursor-color": "caret_color", "--unity-selection-color": "selection_color"}
+
+
+func _apply_edit_colors(c: Control, style: Dictionary, el: UxmlElement) -> void:
+	for prop in _EDIT_COLORS:
+		var item: String = _EDIT_COLORS[prop]
+		var col = _color(style, prop, el) if style.has(prop) else null
+		if col != null:
+			c.add_theme_color_override(item, col)
+		elif c.has_theme_color_override(item):
+			c.remove_theme_color_override(item)
 
 
 ## -unity-text-auto-size: best-fit <min> <max> (Unity 6.3). Unity applies it

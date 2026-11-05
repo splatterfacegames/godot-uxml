@@ -18,25 +18,27 @@ extends RefCounted
 ##   container part -> UxmlBox
 ##   Image        -> UxmlBox host wrapping a full-rect TextureRect, so
 ##                   background-color/borders still paint behind the image
-##   Slider       -> UxmlField(Label caption + HSlider)
-##   SliderInt    -> UxmlField(Label caption + HSlider, step/rounded 1)
 ##   ScrollView   -> UxmlBox host wrapping ScrollContainer + content Control
-##   TextField    -> UxmlField(Label caption + LineEdit, or TextEdit when
-##                   multiline="true")
-##   DropdownField-> UxmlField(Label caption + OptionButton)
+##   Slider, SliderInt, MinMaxSlider -> UxmlSlider (focusable box; its parts
+##                   are boxes, runtime/controls/uxml_input_parts.gd)
+##   DropdownField, EnumField -> UxmlPopupField (focusable box, opens
+##                   UxmlPopupMenu)
+##   TextField, the numeric and composite fields -> UxmlBox; the text
+##                   element part of a text field is the Godot LineEdit
+##                   (TextEdit when multiline="true"), see UxmlTextInput
 ##
 ## Control parts (UxmlParts) are ordinary elements here: each gets its own
 ## control. Parts never take focus; parts Unity does not pick (checkmarks,
 ## text labels) ignore the mouse, the others pass it to their control.
 ##
-## "Wrapper" elements (UxmlField, Image/ScrollView hosts) are what
+## "Wrapper" elements (Image/ScrollView hosts, text fields) are what
 ## UxmlDocument.get_element(name) returns; the interactive native inside is
 ## registered in `natives` and returned by get_native(name).
 ##
-## Attributes consumed here: name, tooltip, focusable, text, label, value,
-## low-value, high-value, choices, index, src, image, placeholder-text,
-## max-length, readonly, multiline, mask-char, enable-rich-text,
-## parse-escape-sequences, display-tooltip-when-elided. enabled is a runtime state
+## Attributes consumed here: name, tooltip, focusable, text, src, image,
+## enable-rich-text, parse-escape-sequences, display-tooltip-when-elided;
+## the input controls read theirs in UxmlInputParts, UxmlTextInput and
+## UxmlInputBehaviors. enabled is a runtime state
 ## (handled by the document/applier), style/class belong to the cascade.
 ## Invalid attribute values produce an `unsupported-value` diagnostic and a
 ## fallback, never a crash.
@@ -81,6 +83,18 @@ func build(el: UxmlElement) -> Control:
 	controls[el] = c
 	if not natives.has(el):
 		natives[el] = c
+
+	var host: Control = scroll_contents.get(el, c)
+	for child in el.children:
+		if UssControls.is_non_visual(child.local):
+			continue
+		host.add_child(build(child))
+	# A text field's interactive control is the editor of its text element
+	# part (get_native, focus and hover wiring).
+	if NUMERIC_OR_TEXT.has(el.local):
+		var ed := UxmlParts.find_part(el, "editor")
+		if ed != null and controls.has(ed):
+			natives[el] = controls[ed]
 	_apply_common_attributes(el, c)
 	# The applier restores these when visibility/disabled states clear.
 	for cc in [c, natives[el]]:
@@ -90,13 +104,15 @@ func build(el: UxmlElement) -> Control:
 			# Authored editable state — readonly must survive disable/
 			# re-enable and every restyle.
 			cc.set_meta("uxml_editable", cc.editable)
-
-	var host: Control = scroll_contents.get(el, c)
-	for child in el.children:
-		if UssControls.is_non_visual(child.local):
-			continue
-		host.add_child(build(child))
 	return c
+
+
+## Fields whose native is the editor of their text element part.
+const NUMERIC_OR_TEXT := {
+	"TextField": true, "IntegerField": true, "LongField": true, "FloatField": true,
+	"DoubleField": true, "UnsignedIntegerField": true, "UnsignedLongField": true,
+	"Hash128Field": true,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +120,8 @@ func build(el: UxmlElement) -> Control:
 # ---------------------------------------------------------------------------
 
 func _create(el: UxmlElement) -> Control:
+	if el.part_of != null and el.part_role == "editor":
+		return UxmlTextInput.create(el)
 	match el.local:
 		"Label":
 			var text := _text_attr(el)
@@ -123,8 +141,10 @@ func _create(el: UxmlElement) -> Control:
 			return b
 		"Image":
 			return _create_image(el)
-		"Slider", "SliderInt":
-			return _create_slider(el, el.local == "SliderInt")
+		"Slider", "SliderInt", "MinMaxSlider":
+			return UxmlSlider.new()
+		"DropdownField", "EnumField":
+			return UxmlPopupField.new()
 		"ScrollView", "ListView":
 			return _create_scroll(el)
 		"Toggle", "RadioButton":
@@ -138,17 +158,13 @@ func _create(el: UxmlElement) -> Control:
 			_text_element_attrs(el, rb)
 			rb.configure(_num_attr(el, "delay", 0.0), _num_attr(el, "interval", 0.0))
 			return rb
-		"TextElement", "PopupWindow":
+		"TextElement", "PopupWindow", "PopupTextElement":
 			# PopupWindow is a TextElement: it draws its own title text in
 			# its content box; its content container part is a child.
 			var te := Label.new()
 			te.text = _plain_text_attr(el)
 			_text_element_attrs(el, te)
 			return te
-		"TextField":
-			return _create_text_field(el)
-		"DropdownField":
-			return _create_dropdown(el)
 		"VisualElement", "TemplateContainer":
 			return UxmlBox.new()
 		_:
@@ -238,22 +254,6 @@ func _create_image(el: UxmlElement) -> Control:
 	return box
 
 
-func _create_slider(el: UxmlElement, integer: bool) -> Control:
-	var s := HSlider.new()
-	s.min_value = _num_attr(el, "low-value", 0.0)
-	s.max_value = _num_attr(el, "high-value", 100.0)
-	if integer:
-		s.step = 1.0
-		s.rounded = true
-	s.value = clampf(
-		_num_attr(el, "value", s.min_value), s.min_value, s.max_value
-	)
-	s.focus_mode = Control.FOCUS_ALL
-	var f := UxmlField.new(s, _first_attr(el, ["label"]))
-	natives[el] = s
-	return f
-
-
 func _create_scroll(el: UxmlElement) -> Control:
 	var box := UxmlBox.new()
 	var sc := ScrollContainer.new()
@@ -268,67 +268,6 @@ func _create_scroll(el: UxmlElement) -> Control:
 	scroll_contents[el] = content
 	natives[el] = sc
 	return box
-
-
-func _create_text_field(el: UxmlElement) -> Control:
-	var field: Control
-	var multiline := _attr(el, "multiline") == "true"
-	if el.has_attribute("multiline") and not multiline and _attr(el, "multiline") != "false":
-		_warn(el, "multiline", 'multiline="%s" is not a valid bool; treated as false' % _attr(el, "multiline"))
-	if multiline:
-		var te := TextEdit.new()
-		te.text = _attr(el, "value")
-		te.placeholder_text = _attr(el, "placeholder-text")
-		te.editable = not _bool_attr(el, "readonly", false)
-		te.focus_mode = Control.FOCUS_ALL
-		field = te
-	else:
-		var le := LineEdit.new()
-		le.text = _attr(el, "value")
-		le.placeholder_text = _attr(el, "placeholder-text")
-		if el.has_attribute("max-length"):
-			le.max_length = int(_num_attr(el, "max-length", 0.0))
-		le.editable = not _bool_attr(el, "readonly", false)
-		if el.has_attribute("mask-char"):
-			var mask := _attr(el, "mask-char")
-			le.secret = true
-			le.secret_character = mask if not mask.is_empty() else "*"
-		le.focus_mode = Control.FOCUS_ALL
-		field = le
-	var f := UxmlField.new(field, _first_attr(el, ["label"]))
-	natives[el] = field
-	return f
-
-
-func _create_dropdown(el: UxmlElement) -> Control:
-	var ob := OptionButton.new()
-	var raw := _attr(el, "choices")
-	var choices: Array = []
-	if not raw.is_empty():
-		for part in raw.split(","):
-			choices.append(String(part).strip_edges())
-	for item in choices:
-		ob.add_item(String(item))
-	# `value` selects by choice text (Unity DropdownField.value is a string —
-	# "1080" means the item whose text is 1080, not item index 1080).
-	# `index` selects by position and wins when both are present.
-	var selected := -1
-	if el.has_attribute("index"):
-		selected = int(_num_attr(el, "index", -1.0))
-		if selected < 0 or selected >= choices.size():
-			_warn(el, "index", 'index="%d" is out of range; first item selected' % selected)
-			selected = 0 if choices.size() > 0 else -1
-	elif el.has_attribute("value"):
-		selected = choices.find(_attr(el, "value"))
-		if selected < 0:
-			_warn(el, "value", 'value="%s" matches no choice; first item selected' % _attr(el, "value"))
-			selected = 0 if choices.size() > 0 else -1
-	if selected >= 0:
-		ob.selected = selected
-	ob.focus_mode = Control.FOCUS_ALL
-	var f := UxmlField.new(ob, _first_attr(el, ["label"]))
-	natives[el] = ob
-	return f
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +289,7 @@ func _apply_common_attributes(el: UxmlElement, c: Control) -> void:
 			Control.FOCUS_ALL if _attr(el, "focusable") == "true"
 			else Control.FOCUS_NONE
 		)
-	elif (c is UxmlBox and not c is UxmlToggle) or c is Label or c is RichTextLabel:
+	elif (c is UxmlBox and not (c is UxmlToggle or c is UxmlSlider or c is UxmlPopupField)) 			or c is Label or c is RichTextLabel:
 		c.focus_mode = Control.FOCUS_NONE
 	if target != c:
 		c.focus_mode = Control.FOCUS_NONE
@@ -361,11 +300,11 @@ func _apply_common_attributes(el: UxmlElement, c: Control) -> void:
 ## Unity does not pick a Toggle's checkmark or text label; those ignore the
 ## mouse so the control under them receives it.
 func _part_input(el: UxmlElement, c: Control) -> void:
-	if c is UxmlToggle or c is BaseButton:
+	if c is UxmlToggle or c is BaseButton or c is LineEdit or c is TextEdit 			or c is UxmlSlider or c is UxmlPopupField:
 		return
 	c.focus_mode = Control.FOCUS_NONE
 	match el.part_role:
-		"checkmark", "text", "checkmark-background", "title", "title-container", "progress", "icon":
+		"checkmark", "text", "checkmark-background", "title", "title-container", "progress", "icon", "arrow":
 			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_:
 			c.mouse_filter = Control.MOUSE_FILTER_PASS

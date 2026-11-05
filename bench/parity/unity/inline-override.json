@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T14:44:50.8569333Z"
+  "dumpedAtUtc": "2026-11-05T19:52:50.6183994Z"
  },
  "panel": {
   "width": 400,
@@ -54,6 +54,7 @@
    "enabledInHierarchy": true,
    "visible": true,
    "props": {},
+   "custom": {},
    "style": {
     "align-content": "flex-start",
     "align-items": "stretch",
@@ -146,9 +147,26 @@
     "visibility": "visible",
     "white-space": "normal",
     "width": 150,
-    "word-spacing": 0
+    "word-spacing": 0,
+    "overflow": "visible",
+    "cursor": "texture=, hotspot=(0.00, 0.00)",
+    "computed": {
+     "width": "150px",
+     "height": "40px",
+     "min-width": "auto",
+     "min-height": "auto",
+     "max-width": "none",
+     "max-height": "none",
+     "flex-basis": "auto",
+     "left": "auto",
+     "top": "auto",
+     "right": "auto",
+     "bottom": "auto",
+     "translate": "0 0 0"
+    }
    },
    "children": []
   }
- ]
+ ],
+ "overlay": []
 }

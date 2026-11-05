@@ -104,6 +104,352 @@ UXML {
   color: rgb(0, 82, 106);
 }
 
+/* ==== Input controls ==================================================
+ * Slider, SliderInt, MinMaxSlider, TextField, the numeric, composite,
+ * popup and enum fields (runtime/controls/uxml_input_parts.gd).
+ * Measured: bench/parity/unity/ctl-slider*, ctl-minmaxslider,
+ * ctl-textfield*, ctl-numeric*, ctl-vectors, ctl-rects, ctl-dropdown*,
+ * ctl-enum*, ctl-hover-*, ctl-focus-minmax.
+ */
+
+/* ---- Slider, SliderInt ------------------------------------------------ */
+
+.unity-base-slider--horizontal {
+  min-height: 24px;
+}
+
+.unity-base-slider--vertical {
+  margin: 2px 1px;
+  flex-direction: column;
+  width: 40px;
+  min-width: 24px;
+}
+
+.unity-base-slider--horizontal > .unity-base-slider__input {
+  flex-direction: row;
+  height: 100%;
+}
+
+.unity-base-slider--vertical > .unity-base-slider__input {
+  width: 100%;
+}
+
+.unity-base-slider__drag-container {
+  flex-grow: 1;
+}
+
+.unity-base-slider__tracker {
+  position: absolute;
+  border-width: 1px;
+  border-color: rgb(100, 100, 100);
+  background-color: rgb(126, 126, 126);
+}
+
+.unity-base-slider--horizontal .unity-base-slider__tracker {
+  height: 6px;
+  top: 50%;
+  left: 0;
+  right: 0;
+  margin-top: -3px;
+}
+
+.unity-base-slider--vertical .unity-base-slider__tracker {
+  width: 6px;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  margin-left: -3px;
+}
+
+.unity-base-slider__fill {
+  position: absolute;
+  background-color: rgb(240, 240, 240);
+}
+
+.unity-base-slider__dragger-border {
+  display: none;
+}
+
+.unity-base-slider__dragger {
+  position: absolute;
+  border-width: 1px;
+  border-color: rgb(100, 100, 100);
+  background-color: rgb(240, 240, 240);
+}
+
+.unity-base-slider--horizontal .unity-base-slider__dragger {
+  width: 8px;
+  height: 24px;
+  top: 50%;
+  margin-top: -12px;
+}
+
+.unity-base-slider--vertical .unity-base-slider__dragger {
+  width: 24px;
+  height: 8px;
+  left: 50%;
+  margin-left: -12px;
+}
+
+.unity-base-slider__dragger:hover {
+  border-color: rgb(50, 50, 50);
+}
+
+/* The dragger of a focused slider (Unity's --movable class). */
+.unity-base-slider__dragger.unity-base-slider--movable {
+  border-width: 2px;
+  border-color: rgb(0, 106, 166);
+}
+
+.unity-base-slider:disabled .unity-base-slider__dragger {
+  border-color: rgb(126, 126, 126);
+  background-color: rgb(128, 128, 128);
+}
+
+.unity-base-slider:disabled .unity-base-slider__fill {
+  background-color: rgb(50, 50, 50);
+}
+
+.unity-base-slider--horizontal .unity-base-slider__text-field {
+  width: 55px;
+  margin: 0 0 0 4px;
+}
+
+.unity-base-slider--vertical .unity-base-slider__text-field {
+  height: 18px;
+  min-width: 20px;
+  margin: 4px 0 0 0;
+}
+
+/* ---- MinMaxSlider ----------------------------------------------------- */
+
+.unity-min-max-slider {
+  margin: 1px 4px;
+  min-height: 24px;
+}
+
+.unity-min-max-slider__input {
+  min-height: 16px;
+  flex-basis: 0%;
+}
+
+.unity-min-max-slider__tracker {
+  position: absolute;
+  height: 6px;
+  top: 50%;
+  left: 0;
+  right: 0;
+  margin-top: -3px;
+  border-width: 1px;
+  border-color: rgb(100, 100, 100);
+  background-color: rgb(126, 126, 126);
+}
+
+.unity-min-max-slider__dragger {
+  position: absolute;
+  height: 6px;
+  top: 50%;
+  margin-top: -3px;
+  border-top-width: 1px;
+  border-bottom-width: 1px;
+  border-color: rgb(100, 100, 100);
+  background-color: rgb(188, 188, 188);
+}
+
+.unity-min-max-slider__dragger:hover {
+  border-color: rgb(50, 50, 50);
+}
+
+.unity-min-max-slider__min-thumb,
+.unity-min-max-slider__max-thumb {
+  position: absolute;
+  min-width: 8px;
+  min-height: 24px;
+  margin-top: -10px;
+  border-width: 1px;
+  border-color: rgb(100, 100, 100);
+  background-color: rgb(240, 240, 240);
+}
+
+/* The focused thumb (Unity's --movable class). */
+.unity-min-max-slider__min-thumb.unity-min-max-slider--movable,
+.unity-min-max-slider__max-thumb.unity-min-max-slider--movable {
+  border-width: 2px;
+  border-color: rgb(0, 106, 166);
+}
+
+/* ---- TextField and the numeric fields --------------------------------- */
+
+.unity-base-text-field {
+  white-space: nowrap;
+  --unity-cursor-color: rgb(0, 0, 0);
+  --unity-selection-color: rgba(61, 128, 223, 0.65);
+}
+
+.unity-base-text-field__input {
+  flex-direction: row;
+  flex-grow: 1;
+  flex-basis: 0%;
+  padding: 10px;
+  border-width: 1px;
+  border-color: rgb(100, 100, 100);
+  background-color: rgb(240, 240, 240);
+}
+
+.unity-base-text-field__input--single-line {
+  -unity-text-align: middle-left;
+}
+
+.unity-base-text-field__input--placeholder {
+  color: rgb(88, 88, 88);
+}
+
+.unity-base-text-field:hover > .unity-base-text-field__input {
+  border-color: rgb(50, 50, 50);
+}
+
+.unity-base-text-field:focus > .unity-base-text-field__input {
+  border-color: rgb(0, 106, 166);
+}
+
+.unity-base-text-field:disabled > .unity-base-text-field__input {
+  background-color: rgb(209, 209, 209);
+}
+
+.unity-base-text-field__multiline-container {
+  flex-grow: 1;
+  flex-shrink: 0;
+}
+
+.unity-text-element--inner-input-field-component {
+  flex-grow: 1;
+  flex-shrink: 0;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+/* ---- Composite fields (vectors, rects, bounds) ------------------------ */
+
+/* The runtime theme stacks the sub-fields: each sub-field is a whole field
+   with a 150px label (measured: ctl-vectors, ctl-rects). */
+.unity-composite-field__field-spacer {
+  flex-grow: 1;
+}
+
+/* ---- DropdownField, EnumField ----------------------------------------- */
+
+.unity-base-popup-field__input,
+.unity-enum-field__input {
+  flex-direction: row;
+  flex-grow: 1;
+  flex-shrink: 0;
+  flex-basis: 0%;
+  margin-left: 4px;
+  padding: 10px 12px;
+  border-width: 1px;
+  border-color: rgb(149, 149, 149);
+  background-color: rgb(188, 188, 188);
+  -unity-text-align: middle-left;
+}
+
+.unity-base-popup-field__input {
+  min-width: 55px;
+}
+
+.unity-base-popup-field:hover > .unity-base-popup-field__input,
+.unity-enum-field:hover > .unity-enum-field__input {
+  border-color: rgb(128, 128, 128);
+  background-color: rgb(209, 209, 209);
+}
+
+/* The field is :active while its menu is open (an EnumField keeps its
+   look: ctl-enum-open). */
+.unity-base-popup-field:active > .unity-base-popup-field__input {
+  border-color: rgb(100, 100, 100);
+  background-color: rgb(149, 149, 149);
+}
+
+.unity-base-popup-field:focus > .unity-base-popup-field__input,
+.unity-enum-field:focus > .unity-enum-field__input {
+  border-color: rgb(0, 106, 166);
+}
+
+.unity-base-popup-field:disabled > .unity-base-popup-field__input,
+.unity-enum-field:disabled > .unity-enum-field__input {
+  border-color: rgb(126, 126, 126);
+  background-color: rgb(149, 149, 149);
+}
+
+.unity-base-popup-field__text,
+.unity-enum-field__text {
+  flex-grow: 1;
+  margin-right: 40px;
+}
+
+.unity-base-popup-field__arrow,
+.unity-enum-field__arrow {
+  width: 10px;
+  height: 10px;
+  align-self: center;
+  background-image: url("arrow-down.svg");
+  -unity-background-image-tint-color: rgb(50, 50, 50);
+}
+
+/* The popup menu (GenericDropdownMenu; runtime/controls/uxml_popup_menu.gd). */
+.unity-base-dropdown__container-outer {
+  border-width: 1px;
+  border-color: rgb(50, 50, 50);
+  margin-top: 4px;
+}
+
+.unity-base-dropdown__container-inner {
+  padding: 4px 0;
+  background-color: rgb(240, 240, 240);
+}
+
+.unity-base-dropdown__item {
+  flex-direction: row;
+  min-width: 20px;
+  min-height: 20px;
+  padding-right: 20px;
+  -unity-text-align: middle-left;
+}
+
+.unity-base-dropdown__item:hover {
+  background-color: rgb(0, 106, 166);
+}
+
+.unity-base-dropdown__item-content {
+  flex-direction: row;
+}
+
+.unity-base-dropdown__checkmark {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  margin: 5px;
+  background-image: url("check.svg");
+  -unity-background-image-tint-color: rgb(27, 27, 27);
+  visibility: hidden;
+}
+
+.unity-base-dropdown__item:checked .unity-base-dropdown__checkmark {
+  visibility: visible;
+}
+
+.unity-base-dropdown__item:hover .unity-base-dropdown__checkmark {
+  -unity-background-image-tint-color: rgb(255, 255, 255);
+}
+
+.unity-base-dropdown__label {
+  -unity-text-align: middle-left;
+}
+
+.unity-base-dropdown__item:hover .unity-base-dropdown__label {
+  color: rgb(255, 255, 255);
+}
+
 /* ---- Toggle ---------------------------------------------------------- */
 
 .unity-toggle__input {

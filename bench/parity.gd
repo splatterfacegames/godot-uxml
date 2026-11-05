@@ -102,7 +102,9 @@ func _load_case(name: String, uxml: String, uss: String, files: Dictionary, valu
 		for el in doc.root.walk():
 			var n = el.get_attribute("name")
 			if n != null and values.has(String(n)):
-				el.set_attribute("value", values[String(n)])
+				var vs: Dictionary = values[String(n)]
+				for k in vs:
+					el.set_attribute(k, vs[k])
 	UxmlTheme.attach(doc, UxmlTheme.DEFAULT)
 	UxmlParts.expand(doc)
 	return doc
@@ -335,12 +337,27 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	for u in uels:
 		var n := String(u["name"])
 		var props: Dictionary = u.get("props", {})
-		if n.is_empty() or values.has(n) or not props.has("value") or not props["value"] is bool:
+		if n.is_empty() or values.has(n) or not props.has("value"):
 			continue
-		if String(u["type"]) in ["Toggle", "Foldout", "RadioButton"]:
-			values[n] = "true" if props["value"] else "false"
+		var ut := String(u["type"])
+		if ut in ["Toggle", "Foldout", "RadioButton"] and props["value"] is bool:
+			values[n] = {"value": "true" if props["value"] else "false"}
+		elif ut in ["Slider", "SliderInt"] and (props["value"] is float or props["value"] is int):
+			values[n] = {"value": str(props["value"])}
+		elif ut == "MinMaxSlider" and props.has("minValue"):
+			values[n] = {"min-value": str(props["minValue"]), "max-value": str(props["maxValue"])}
 	var doc := _load_case("unity-" + name, c["uxml"], c["uss"], c["files"], values)
 	var ours := _paths(doc.root)
+	# Classes the input controls toggle at run time (a focused slider's
+	# --movable dragger, the placeholder class), copied like pseudo-states.
+	for u in uels:
+		var sel = ours.get(String(u["path"]))
+		if sel == null:
+			continue
+		for cls in UxmlInputParts.STATE_CLASSES:
+			var want: bool = (u["classes"] as Array).has(cls)
+			if (sel as UxmlElement).class_list().has(cls) != want:
+				UxmlParts.toggle_control_class(sel, cls, want)
 	# Unity's pseudo-states, applied to the elements at the same paths.
 	var es := {}
 	for u in uels:
@@ -357,8 +374,11 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	var measures := {}
 	for u in uels:
 		var el = ours.get(String(u["path"]))
-		if el != null and u.has("textMeasure"):
-			measures[el] = Vector2(float(u["textMeasure"]["width"]), float(u["textMeasure"]["height"]))
+		# The layout measure (DoMeasure) when the dump has it: a password
+		# mask, a placeholder or one empty line of an input field.
+		var key := "layoutMeasure" if u.has("layoutMeasure") else "textMeasure"
+		if el != null and u.has(key):
+			measures[el] = Vector2(float(u[key]["width"]), float(u[key]["height"]))
 	# Unity measures text only on elements without children (Yoga leaves).
 	var measurer := func(el: UxmlElement, style: Dictionary, hint: float) -> Vector2:
 		if not el.children.is_empty():
@@ -369,7 +389,24 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	var panel := Vector2(dump["panel"]["width"], dump["panel"]["height"])
 	var res := UxmlFlexLayout.compute(doc.root, styles, panel, measurer, [],
 		{"scroll_bar_width": SCROLLBAR})
-	var abs := _abs_rects(doc.root, res["rects"])
+	# Styles Unity's controls compute from the layout (a slider's dragger
+	# translate, a MinMaxSlider's dragger box): the same functions as the
+	# runtime behaviors, then the cascade and the layout again.
+	var rects: Dictionary = res["rects"]
+	var size_of := func(x: UxmlElement) -> Vector2:
+		var r = rects.get(x)
+		return Vector2.ZERO if r == null else (r as Rect2).size
+	var style_of := func(x: UxmlElement) -> Dictionary:
+		return styles.get(x, {})
+	var relaid := false
+	for el in doc.root.walk():
+		if UxmlInputParts.layout_styles(el, size_of, style_of):
+			relaid = true
+	if relaid:
+		styles = UssStyleResolver.resolve(doc, {"element_states": es})["styles"]
+		res = UxmlFlexLayout.compute(doc.root, styles, panel, measurer, [],
+			{"scroll_bar_width": SCROLLBAR})
+	var abs := _abs_rects(doc.root, res["rects"], styles)
 	var out := {"name": name, "status": "match", "notes": [], "elements": 0, "struct_ok": 0, "geo_half": 0,
 		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0, "pairs": []}
 	var seen := {}
@@ -444,7 +481,9 @@ func _ulabel(u: Dictionary) -> String:
 	return "%s[%s]" % [u["type"], u["path"]] + ("#" + n if not n.is_empty() else "")
 
 
-func _abs_rects(root: UxmlElement, rects: Dictionary) -> Dictionary:
+## Panel-space rects, as Unity's worldBound: a px `translate` moves the
+## element and its subtree (rotate and scale are not applied).
+func _abs_rects(root: UxmlElement, rects: Dictionary, styles: Dictionary = {}) -> Dictionary:
 	var out := {}
 	var stack: Array = [[root, Vector2.ZERO]]
 	while not stack.is_empty():
@@ -454,11 +493,24 @@ func _abs_rects(root: UxmlElement, rects: Dictionary) -> Dictionary:
 		var r = rects.get(el)
 		var p := origin
 		if r != null:
-			p = origin + (r as Rect2).position
+			p = origin + (r as Rect2).position + _translate_px(styles.get(el, {}))
 			if el != root:
 				out[el] = Rect2(p, (r as Rect2).size)
 		for ch in el.children:
 			stack.append([ch, p])
+	return out
+
+
+func _translate_px(st: Dictionary) -> Vector2:
+	var e = st.get("translate")
+	if e == null:
+		return Vector2.ZERO
+	var parts := String(e["value"]).split(" ", false)
+	var out := Vector2.ZERO
+	for k in mini(2, parts.size()):
+		var pl := UssValues.parse_length(parts[k])
+		if pl["kind"] == "px":
+			out[k] = pl["value"]
 	return out
 
 

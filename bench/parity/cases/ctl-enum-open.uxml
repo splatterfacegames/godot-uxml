@@ -1,0 +1,3 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:EnumField name="e" label="Align" type="UnityEngine.UIElements.Align, UnityEngine.UIElementsModule" value="Center" />
+</ui:UXML>

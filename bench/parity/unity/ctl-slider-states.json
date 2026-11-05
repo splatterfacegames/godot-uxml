@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:59:24.0297175Z"
+  "dumpedAtUtc": "2026-11-05T19:52:50.1245381Z"
  },
  "panel": {
   "width": 400,
@@ -240,6 +240,10 @@
    "visible": true,
    "text": "Focus",
    "textMeasure": {
+    "width": 40,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 40,
     "height": 17
    },
@@ -1384,6 +1388,10 @@
     "width": 40,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 40,
+    "height": 17
+   },
    "props": {
     "text": "Hover"
    },
@@ -2525,6 +2533,10 @@
    "visible": true,
    "text": "Press",
    "textMeasure": {
+    "width": 37,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 37,
     "height": 17
    },
@@ -3678,6 +3690,10 @@
    "visible": true,
    "text": "Disabled",
    "textMeasure": {
+    "width": 58,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 58,
     "height": 17
    },
@@ -4993,6 +5009,10 @@
    "visible": true,
    "text": "Input",
    "textMeasure": {
+    "width": 34,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 34,
     "height": 17
    },
@@ -6320,6 +6340,10 @@
    "visible": true,
    "text": "5",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },

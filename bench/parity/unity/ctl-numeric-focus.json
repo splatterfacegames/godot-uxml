@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:59:23.8757245Z"
+  "dumpedAtUtc": "2026-11-05T19:52:49.6313970Z"
  },
  "panel": {
   "width": 400,
@@ -249,6 +249,10 @@
    "visible": true,
    "text": "Float",
    "textMeasure": {
+    "width": 33,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 33,
     "height": 17
    },
@@ -592,6 +596,10 @@
     "width": 21,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 21,
+    "height": 17
+   },
    "props": {
     "text": "2.5"
    },
@@ -921,6 +929,10 @@
    "visible": true,
    "text": "V3",
    "textMeasure": {
+    "width": 19,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 19,
     "height": 17
    },
@@ -1444,6 +1456,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -1783,6 +1799,10 @@
    "visible": true,
    "text": "0",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -2142,6 +2162,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -2481,6 +2505,10 @@
    "visible": true,
    "text": "0",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -2840,6 +2868,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "Z"
    },
@@ -3179,6 +3211,10 @@
    "visible": true,
    "text": "0",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },

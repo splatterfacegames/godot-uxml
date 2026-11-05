@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:56:34.6960815Z"
+  "dumpedAtUtc": "2026-11-05T19:52:49.5589597Z"
  },
  "panel": {
   "width": 400,
@@ -245,6 +245,10 @@
    "visible": true,
    "text": "Integer",
    "textMeasure": {
+    "width": 47,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 47,
     "height": 17
    },
@@ -583,6 +587,10 @@
    "visible": true,
    "text": "42",
    "textMeasure": {
+    "width": 18,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 18,
     "height": 17
    },
@@ -936,6 +944,10 @@
     "width": 33,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 33,
+    "height": 17
+   },
    "props": {
     "text": "Long"
    },
@@ -1271,6 +1283,10 @@
    "visible": true,
    "text": "-9000000000",
    "textMeasure": {
+    "width": 94,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 94,
     "height": 17
    },
@@ -1624,6 +1640,10 @@
     "width": 33,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 33,
+    "height": 17
+   },
    "props": {
     "text": "Float"
    },
@@ -1959,6 +1979,10 @@
    "visible": true,
    "text": "1.5",
    "textMeasure": {
+    "width": 19,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 19,
     "height": 17
    },
@@ -2312,6 +2336,10 @@
     "width": 47,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 47,
+    "height": 17
+   },
    "props": {
     "text": "Double"
    },
@@ -2647,6 +2675,10 @@
    "visible": true,
    "text": "0.125",
    "textMeasure": {
+    "width": 35,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 35,
     "height": 17
    },
@@ -3000,6 +3032,10 @@
     "width": 28,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 28,
+    "height": 17
+   },
    "props": {
     "text": "UInt"
    },
@@ -3335,6 +3371,10 @@
    "visible": true,
    "text": "7",
    "textMeasure": {
+    "width": 8,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 8,
     "height": 17
    },
@@ -3688,6 +3728,10 @@
     "width": 44,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 44,
+    "height": 17
+   },
    "props": {
     "text": "ULong"
    },
@@ -4023,6 +4067,10 @@
    "visible": true,
    "text": "18000000000000000000",
    "textMeasure": {
+    "width": 173,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 173,
     "height": 17
    },
@@ -4374,6 +4422,10 @@
     "width": 34,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 34,
+    "height": 17
+   },
    "props": {
     "text": "Hash"
    },
@@ -4709,6 +4761,10 @@
    "visible": true,
    "text": "0123456789abcdef0123456789abcdef",
    "textMeasure": {
+    "width": 261,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 261,
     "height": 17
    },
@@ -5228,6 +5284,10 @@
    "visible": true,
    "text": "3",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },

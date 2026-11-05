@@ -25,6 +25,9 @@ static func attach_all(doc) -> Dictionary:
 		b.doc = doc
 		b.el = el
 		out[el] = b
+	# Setup can find the behaviors of nested controls (a slider's input
+	# field, a vector field's components).
+	doc._behaviors = out
 	for el in out:
 		out[el].setup()
 	return out
@@ -48,7 +51,8 @@ static func _create(el: UxmlElement) -> Behavior:
 			return TextPartBehavior.new()
 		"PopupWindow":
 			return OwnTextBehavior.new()
-	return null
+	# Input controls: runtime/controls/uxml_input_behaviors.gd
+	return UxmlInputBehaviors.create(el)
 
 
 # ---------------------------------------------------------------------------

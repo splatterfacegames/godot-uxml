@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:56:34.8753325Z"
+  "dumpedAtUtc": "2026-11-05T19:52:49.9792100Z"
  },
  "panel": {
   "width": 400,
@@ -1211,6 +1211,10 @@
     "width": 38,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 38,
+    "height": 17
+   },
    "props": {
     "text": "Slider"
    },
@@ -2352,6 +2356,10 @@
     "width": 17,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 17,
+    "height": 17
+   },
    "props": {
     "text": "Int"
    },
@@ -3490,6 +3498,10 @@
    "visible": true,
    "text": "Fill",
    "textMeasure": {
+    "width": 19,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 19,
     "height": 17
    },
@@ -4793,6 +4805,10 @@
    "visible": true,
    "text": "Inverted",
    "textMeasure": {
+    "width": 55,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 55,
     "height": 17
    },

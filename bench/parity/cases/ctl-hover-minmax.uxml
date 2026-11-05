@@ -1,0 +1,3 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:MinMaxSlider name="h" label="Hover" min-value="2" max-value="6" low-limit="0" high-limit="10" />
+</ui:UXML>

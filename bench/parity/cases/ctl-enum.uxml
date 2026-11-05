@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:EnumField name="e1" label="Align" type="UnityEngine.UIElements.Align, UnityEngine.UIElementsModule" value="FlexStart" />
+  <ui:EnumField name="e2" label="Justify" type="UnityEngine.UIElements.Justify, UnityEngine.UIElementsModule" />
+  <ui:EnumField name="e3" label="Space" type="UnityEngine.UIElements.Justify, UnityEngine.UIElementsModule" value="SpaceBetween" />
+</ui:UXML>

@@ -75,6 +75,21 @@ const PROPERTIES := {
 	"maxLength": "max-length", "max-length": "max-length",
 	"itemsSource": "items-source",
 	"title": "title", "messageType": "message-type", "message-type": "message-type",
+	# Input controls (runtime/controls/uxml_input_behaviors.gd)
+	"pageSize": "page-size", "page-size": "page-size",
+	"direction": "direction", "inverted": "inverted", "fill": "fill",
+	"showInputField": "show-input-field", "show-input-field": "show-input-field",
+	"minValue": "min-value", "min-value": "min-value",
+	"maxValue": "max-value", "max-value": "max-value",
+	"lowLimit": "low-limit", "low-limit": "low-limit",
+	"highLimit": "high-limit", "high-limit": "high-limit",
+	"isDelayed": "is-delayed", "is-delayed": "is-delayed",
+	"isPasswordField": "password", "password": "password",
+	"maskChar": "mask-character", "mask-character": "mask-character",
+	"multiline": "multiline",
+	"hidePlaceholderOnFocus": "hide-placeholder-on-focus",
+	"textEdition.hidePlaceholderOnFocus": "hide-placeholder-on-focus",
+	"hide-placeholder-on-focus": "hide-placeholder-on-focus",
 }
 
 ## Style properties that take a plain number (all other numbers get px).
@@ -782,6 +797,9 @@ func _update_ui(rec: Dictionary) -> bool:
 	# Unity DataBinding.UpdateUI: a focused text input is not overwritten.
 	if (rec["prop"] == "value" or rec["prop"] == "text") and (native is LineEdit or native is TextEdit) and native.has_focus():
 		return false
+	var beh0 = _doc._behaviors.get(el)
+	if beh0 != null and beh0.has_method("bind_source_info"):
+		beh0.bind_source_info(src, ctx[1])  # EnumField: the property's enum hint
 	var res := _write(rec, v)
 	if res > 0:
 		rec["last"] = v.duplicate() if (v is Array or v is Dictionary) else v
@@ -851,10 +869,6 @@ func _write(rec: Dictionary, v: Variant) -> int:
 	match prop:
 		"text":
 			var s := _str(v)
-			if native is LineEdit or native is TextEdit:
-				_set_edit_text(native, s)
-				el.set_attribute("value", s)
-				return 1
 			if native is Label or native is Button or native is RichTextLabel:
 				if _shown_text(native) == s:
 					return 0
@@ -870,58 +884,7 @@ func _write(rec: Dictionary, v: Variant) -> int:
 		"value":
 			return _write_value(el, c, native, v)
 		"label":
-			var s := _str(v)
-			if c is UxmlField:
-				var cap: Label = (c as UxmlField).caption
-				if cap.text == s:
-					return 0
-				cap.text = s
-				cap.visible = not s.is_empty()
-				(c as UxmlField)._update_min_size()
-				(c as UxmlField)._relayout()
-			else:
-				return -1
-			el.set_attribute("label", s)
-			return 2
-		"low-value", "high-value":
-			if not native is Range:
-				return -1
-			var f := _num(v)
-			if prop == "low-value":
-				native.min_value = f
-			else:
-				native.max_value = f
-			el.set_attribute(prop, _str(v))
-			return 1
-		"choices":
-			if not native is OptionButton:
-				return -1
-			var ob: OptionButton = native
-			var items: Array = []
-			if v is String:
-				for part in (v as String).split(","):
-					items.append(String(part).strip_edges())
-			elif v is Array or v is PackedStringArray:
-				for it in v:
-					items.append(_str(it))
-			else:
-				return -1
-			var keep := ob.get_item_text(ob.selected) if ob.selected >= 0 else ""
-			ob.clear()
-			for it in items:
-				ob.add_item(it)
-			var at := items.find(keep)
-			if at >= 0:
-				ob.select(at)
-			el.set_attribute("choices", ",".join(PackedStringArray(items)))
-			return 2
-		"index":
-			if not native is OptionButton:
-				return -1
-			var i := int(_num(v))
-			(native as OptionButton).select(i if i >= 0 and i < native.item_count else -1)
-			el.set_attribute("index", str(i))
-			return 1
+			return -1  # controls with a label take it through their behavior
 		"tooltip":
 			c.tooltip_text = _str(v)
 			el.set_attribute("tooltip", _str(v))
@@ -980,57 +943,14 @@ func _write(rec: Dictionary, v: Variant) -> int:
 				return -1
 			native.self_modulate = v if v is Color else Color.from_string(_str(v), Color.WHITE)
 			return 1
-		"placeholder-text":
-			if native is LineEdit or native is TextEdit:
-				native.placeholder_text = _str(v)
-				el.set_attribute("placeholder-text", _str(v))
-				return 1
-			return -1
-		"readonly":
-			if native is LineEdit or native is TextEdit:
-				native.set_meta("uxml_editable", not _bool(v))
-				native.editable = not _bool(v)
-				el.set_attribute("readonly", "true" if _bool(v) else "false")
-				return 1
-			return -1
-		"max-length":
-			if native is LineEdit:
-				native.max_length = int(_num(v))
-				el.set_attribute("max-length", str(int(_num(v))))
-				return 1
-			return -1
 		"items-source":
 			return _write_items(el, v)
 	return -1
 
 
-func _write_value(el: UxmlElement, _c: Control, native: Control, v: Variant) -> int:
-	if native is Range and not native is ScrollBar:
-		var f := _num(v)
-		if el.local == "SliderInt":
-			f = roundf(f)
-		if is_equal_approx(native.value, f):
-			return 0
-		native.value = f
-		el.set_attribute("value", str(int(f)) if el.local == "SliderInt" else str(f))
-		return 1
-	if native is LineEdit or native is TextEdit:
-		_set_edit_text(native, _str(v))
-		el.set_attribute("value", _str(v))
-		return 1
-	if native is OptionButton:
-		var ob: OptionButton = native
-		var s := _str(v)
-		var at := -1
-		for i in ob.item_count:
-			if ob.get_item_text(i) == s:
-				at = i
-				break
-		ob.select(at)
-		if at < 0:
-			ob.text = s  # Unity shows a value that is not in choices
-		el.set_attribute("value", s)
-		return 1
+func _write_value(_el: UxmlElement, _c: Control, _native: Control, _v: Variant) -> int:
+	# Every control with a value takes it through its behavior
+	# (runtime/controls/); other elements have no value.
 	return -1
 
 
@@ -1046,17 +966,6 @@ static func _shown_text(c: Control) -> String:
 static func _rich_enabled(el: UxmlElement) -> bool:
 	var v = el.get_attribute("enable-rich-text")
 	return v == null or String(v).to_lower() in ["true", "1"]
-
-
-func _set_edit_text(native: Control, s: String) -> void:
-	if native.text == s:
-		return
-	if native is LineEdit:
-		var caret: int = (native as LineEdit).caret_column
-		native.text = s
-		(native as LineEdit).caret_column = mini(caret, s.length())
-	else:
-		native.text = s
 
 
 ## ListView itemsSource: the item count follows the bound collection; with
@@ -1218,14 +1127,6 @@ func _wire_write_back(el: UxmlElement) -> void:
 	var beh = _doc._behaviors.get(el)
 	if beh != null:
 		beh.ui_changed.connect(func(): _on_ui_changed(el))
-	elif native is Range:
-		native.value_changed.connect(func(_v): _on_ui_changed(el))
-	elif native is LineEdit:
-		native.text_changed.connect(func(_t): _on_ui_changed(el))
-	elif native is TextEdit:
-		native.text_changed.connect(func(): _on_ui_changed(el))
-	elif native is OptionButton:
-		native.item_selected.connect(func(_i): _on_ui_changed(el))
 
 
 ## The current UI value of a binding target, [ok, value].
@@ -1237,22 +1138,6 @@ func _read_ui(rec: Dictionary) -> Array:
 	var beh = _doc._behaviors.get(el)
 	if beh != null:
 		return beh.bind_read(rec["prop"])
-	var native: Control = _doc._natives.get(el, c)
-	match rec["prop"]:
-		"value":
-			if native is Range:
-				return [true, int(native.value) if el.local == "SliderInt" else float(native.value)]
-			if native is LineEdit or native is TextEdit:
-				return [true, native.text]
-			if native is OptionButton:
-				var ob: OptionButton = native
-				return [true, ob.get_item_text(ob.selected) if ob.selected >= 0 else ""]
-		"text":
-			if native is LineEdit or native is TextEdit:
-				return [true, native.text]
-		"index":
-			if native is OptionButton:
-				return [true, (native as OptionButton).selected]
 	return [false, null]
 
 

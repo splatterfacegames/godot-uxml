@@ -19,7 +19,7 @@ extends RefCounted
 ##     thumb offsets;
 ##   * `fill_style`: the fill part (`left`/`right` or `top`/`bottom` in %).
 
-const P := UxmlParts
+
 
 ## Numeric field tag -> [class stem, input part type, label dragger].
 const NUMERIC := {
@@ -94,11 +94,11 @@ static func num(el: UxmlElement, n: String, d: float) -> float:
 
 
 static func flag(el: UxmlElement, n: String, d: bool) -> bool:
-	return P._bool(el, n, d)
+	return UxmlParts._bool(el, n, d)
 
 
 static func vertical(el: UxmlElement) -> bool:
-	return P._attr(el, "direction", "Horizontal").to_lower() == "vertical"
+	return UxmlParts._attr(el, "direction", "Horizontal").to_lower() == "vertical"
 
 
 ## The `--no-label` class, the label part (`unity-<kind>__label` per kind,
@@ -106,12 +106,13 @@ static func vertical(el: UxmlElement) -> bool:
 ## part of type `input_type`.
 static func field_parts(el: UxmlElement, kinds: Array, input_type: String, input_name: String,
 		input_classes: Array, dragger := false) -> UxmlElement:
-	var label := P.field_label(el, kinds)
+	var label := UxmlParts.field_label(el, kinds)
 	if label != null:
 		if dragger:
-			P._append_class(label, "unity-base-field__label--with-dragger")
+			# A control class: a readonly numeric field removes it.
+			UxmlParts._add_control_classes(label, ["unity-base-field__label--with-dragger"])
 		el.children.append(label)
-	var input := P.part(el, input_type, "input", input_name, input_classes)
+	var input := UxmlParts.part(el, input_type, "input", input_name, input_classes)
 	el.children.append(input)
 	return input
 
@@ -146,25 +147,25 @@ static func slider_normalized(v: float, lo: float, hi: float) -> float:
 ## #unity-text-field]). Content container: itself.
 static func _build_slider(el: UxmlElement) -> UxmlElement:
 	var stem := "slider-int" if el.local == "SliderInt" else "slider"
-	P._add_control_classes(el, ["unity-base-slider--vertical" if vertical(el) else "unity-base-slider--horizontal"])
+	UxmlParts._add_control_classes(el, ["unity-base-slider--vertical" if vertical(el) else "unity-base-slider--horizontal"])
 	var input := field_parts(el, ["base-slider", stem], "VisualElement", "",
 		["unity-base-field__input", "unity-base-slider__input", "unity-%s__input" % stem], true)
-	var drag := P.part(el, "VisualElement", "drag-container", "unity-drag-container",
+	var drag := UxmlParts.part(el, "VisualElement", "drag-container", "unity-drag-container",
 		["unity-base-slider__drag-container"])
-	var tracker := P.part(el, "VisualElement", "tracker", "unity-tracker", ["unity-base-slider__tracker"])
+	var tracker := UxmlParts.part(el, "VisualElement", "tracker", "unity-tracker", ["unity-base-slider__tracker"])
 	drag.children.append(tracker)
 	if flag(el, "fill", false):
-		var fill := P.part(el, "VisualElement", "fill", "unity-fill", ["unity-base-slider__fill"])
+		var fill := UxmlParts.part(el, "VisualElement", "fill", "unity-fill", ["unity-base-slider__fill"])
 		fill.attributes.append({"name": "style", "value": fill_style(el), "offset": 0})
 		tracker.children.append(fill)
-	drag.children.append(P.part(el, "VisualElement", "dragger-border", "unity-dragger-border",
+	drag.children.append(UxmlParts.part(el, "VisualElement", "dragger-border", "unity-dragger-border",
 		["unity-base-slider__dragger-border"]))
-	drag.children.append(P.part(el, "VisualElement", "dragger", "unity-dragger", ["unity-base-slider__dragger"]))
+	drag.children.append(UxmlParts.part(el, "VisualElement", "dragger", "unity-dragger", ["unity-base-slider__dragger"]))
 	input.children.append(drag)
 	if flag(el, "show-input-field", false):
-		var tf := P.part(el, "TextField", "text-field", "unity-text-field", ["unity-base-slider__text-field"])
+		var tf := UxmlParts.part(el, "TextField", "text-field", "unity-text-field", ["unity-base-slider__text-field"])
 		tf.attributes.append({"name": "value", "value": slider_text(el), "offset": 0})
-		P._build_nested(tf)
+		UxmlParts._build_nested(tf)
 		input.children.append(tf)
 	return el
 
@@ -224,7 +225,7 @@ static func slider_layout(el: UxmlElement, container: Vector2, dragger: Vector2,
 		return false
 	var changed := false
 	for role in ["dragger", "dragger-border"]:
-		var p := P.find_part(el, role)
+		var p := UxmlParts.find_part(el, role)
 		if p == null:
 			continue
 		var want := "translate: %s;" % tr
@@ -277,10 +278,10 @@ static func min_max_values(el: UxmlElement) -> Array:
 static func _build_min_max_slider(el: UxmlElement) -> UxmlElement:
 	var input := field_parts(el, ["min-max-slider"], "VisualElement", "",
 		["unity-base-field__input", "unity-min-max-slider__input"])
-	input.children.append(P.part(el, "VisualElement", "tracker", "unity-tracker", ["unity-min-max-slider__tracker"]))
-	var dragger := P.part(el, "VisualElement", "dragger", "unity-dragger", ["unity-min-max-slider__dragger"])
-	dragger.children.append(P.part(el, "VisualElement", "thumb-min", "unity-thumb-min", ["unity-min-max-slider__min-thumb"]))
-	dragger.children.append(P.part(el, "VisualElement", "thumb-max", "unity-thumb-max", ["unity-min-max-slider__max-thumb"]))
+	input.children.append(UxmlParts.part(el, "VisualElement", "tracker", "unity-tracker", ["unity-min-max-slider__tracker"]))
+	var dragger := UxmlParts.part(el, "VisualElement", "dragger", "unity-dragger", ["unity-min-max-slider__dragger"])
+	dragger.children.append(UxmlParts.part(el, "VisualElement", "thumb-min", "unity-thumb-min", ["unity-min-max-slider__min-thumb"]))
+	dragger.children.append(UxmlParts.part(el, "VisualElement", "thumb-max", "unity-thumb-max", ["unity-min-max-slider__max-thumb"]))
 	input.children.append(dragger)
 	return el
 
@@ -292,8 +293,8 @@ static func _build_min_max_slider(el: UxmlElement) -> UxmlElement:
 static func min_max_styles(el: UxmlElement, input_w: float, thumbs: Vector2, edges: Vector2) -> Dictionary:
 	var v := min_max_values(el)
 	var span: float = v[3] - v[2]
-	var n0 := 0.0 if span == 0.0 else (v[0] - v[2]) / span
-	var n1 := 0.0 if span == 0.0 else (v[1] - v[2]) / span
+	var n0: float = 0.0 if span == 0.0 else (v[0] - v[2]) / span
+	var n1: float = 0.0 if span == 0.0 else (v[1] - v[2]) / span
 	var min_w := edges.x + edges.y
 	var left := _round_even(lerpf(thumbs.x, input_w - thumbs.y - min_w, n0))
 	var right := _round_even(lerpf(thumbs.x + min_w, input_w - thumbs.y, n1))
@@ -317,7 +318,7 @@ static func min_max_layout(el: UxmlElement, input_w: float, thumbs: Vector2, edg
 	var changed := false
 	var styles := min_max_styles(el, input_w, thumbs, edges)
 	for role in styles:
-		var p := P.find_part(el, role)
+		var p := UxmlParts.find_part(el, role)
 		if p == null:
 			continue
 		var cur = p.get_attribute("style")
@@ -337,7 +338,7 @@ static func min_max_layout(el: UxmlElement, input_w: float, thumbs: Vector2, edg
 static func _editor(el: UxmlElement, text: String, multiline: bool) -> UxmlElement:
 	var classes := ["unity-text-element", "unity-text-element__selectable",
 		"unity-text-element--inner-input-field-component"]
-	var te := P.part(el, "TextElement", "editor", "", classes, text)
+	var te := UxmlParts.part(el, "TextElement", "editor", "", classes, text)
 	if multiline:
 		te.set_meta(&"uxml_multiline", true)
 	return te
@@ -365,11 +366,11 @@ static func _build_text_field(el: UxmlElement) -> UxmlElement:
 		"unity-base-text-field__input--multiline" if multiline else "unity-base-text-field__input--single-line",
 		"unity-base-field__input", "unity-text-field__input"])
 	var text := text_value(el)
-	if text.is_empty() and not P._attr(el, "placeholder-text").is_empty():
-		P._append_class(input, "unity-base-text-field__input--placeholder")
+	if text.is_empty() and not UxmlParts._attr(el, "placeholder-text").is_empty():
+		UxmlParts._append_class(input, "unity-base-text-field__input--placeholder")
 	var te := _editor(el, text, multiline)
 	if multiline:
-		var box := P.part(el, "VisualElement", "multiline-container", "",
+		var box := UxmlParts.part(el, "VisualElement", "multiline-container", "",
 			["unity-base-text-field__multiline-container"])
 		box.children.append(te)
 		input.children.append(box)
@@ -404,10 +405,10 @@ static func _build_numeric(el: UxmlElement) -> UxmlElement:
 
 static func _sub_field(owner: UxmlElement, tag: String, part_name: String, label: String,
 		value: String, classes: Array, role: String) -> UxmlElement:
-	var f := P.part(owner, tag, role, part_name, classes)
+	var f := UxmlParts.part(owner, tag, role, part_name, classes)
 	f.attributes.append({"name": "label", "value": label, "offset": 0})
 	f.attributes.append({"name": "value", "value": value, "offset": 0})
-	P._build_nested(f)
+	UxmlParts._build_nested(f)
 	return f
 
 
@@ -424,7 +425,7 @@ static func _build_composite(el: UxmlElement) -> UxmlElement:
 	for gi in groups.size():
 		var host := input
 		if groups.size() > 1:
-			host = P.part(el, "VisualElement", "group-%d" % gi, "", ["unity-composite-field__field-group"])
+			host = UxmlParts.part(el, "VisualElement", "group-%d" % gi, "", ["unity-composite-field__field-group"])
 			input.children.append(host)
 		var fields: Array = groups[gi]
 		for fi in fields.size():
@@ -436,7 +437,7 @@ static func _build_composite(el: UxmlElement) -> UxmlElement:
 			var value := "0" if raw == null else String(raw)
 			host.children.append(_sub_field(el, spec[1], f[1], f[2], value, classes, "field-" + String(f[0])))
 		if fields.size() == 2:
-			host.children.append(P.part(el, "VisualElement", "spacer-%d" % gi, "",
+			host.children.append(UxmlParts.part(el, "VisualElement", "spacer-%d" % gi, "",
 				["unity-composite-field__field-spacer"]))
 	return el
 
@@ -451,7 +452,7 @@ static func _build_bounds(el: UxmlElement) -> UxmlElement:
 	var input := field_parts(el, [stem], "VisualElement", "",
 		["unity-base-field__input", "unity-%s__input" % stem])
 	for sub in spec[2]:
-		var f := P.part(el, spec[1], "field-" + String(sub[0]), sub[1], ["unity-%s__%s" % [stem, sub[3]]])
+		var f := UxmlParts.part(el, spec[1], "field-" + String(sub[0]), sub[1], ["unity-%s__%s" % [stem, sub[3]]])
 		f.attributes.append({"name": "label", "value": sub[2], "offset": 0})
 		for axis in ["x", "y", "z"]:
 			var raw = el.get_attribute(String(sub[0]) + axis)
@@ -463,7 +464,7 @@ static func _build_bounds(el: UxmlElement) -> UxmlElement:
 			if el.local == "BoundsIntField":
 				v = float(int(v))
 			f.attributes.append({"name": axis, "value": UxmlNumeric.format_g(v, 7, false), "offset": 0})
-		P._build_nested(f)
+		UxmlParts._build_nested(f)
 		input.children.append(f)
 	return el
 
@@ -481,13 +482,205 @@ static func _build_popup_field(el: UxmlElement) -> UxmlElement:
 	if enum_field:
 		input = field_parts(el, ["enum-field"], "VisualElement", "",
 			["unity-base-field__input", "unity-enum-field__input"])
-		input.children.append(P.part(el, "TextElement", "text", "", ["unity-text-element", "unity-enum-field__text"],
-			UxmlInputBehaviors.popup_initial_text(el)))
-		input.children.append(P.part(el, "VisualElement", "arrow", "", ["unity-enum-field__arrow"]))
+		input.children.append(UxmlParts.part(el, "TextElement", "text", "", ["unity-text-element", "unity-enum-field__text"],
+			popup_initial_text(el)))
+		input.children.append(UxmlParts.part(el, "VisualElement", "arrow", "", ["unity-enum-field__arrow"]))
 	else:
 		input = field_parts(el, ["base-popup-field", "popup-field"], "VisualElement", "",
 			["unity-base-field__input", "unity-base-popup-field__input", "unity-popup-field__input"])
-		input.children.append(P.part(el, "PopupTextElement", "text", "", ["unity-text-element", "unity-base-popup-field__text"],
-			UxmlInputBehaviors.popup_initial_text(el)))
-		input.children.append(P.part(el, "VisualElement", "arrow", "", ["unity-base-popup-field__arrow"]))
+		input.children.append(UxmlParts.part(el, "PopupTextElement", "text", "", ["unity-text-element", "unity-base-popup-field__text"],
+			popup_initial_text(el)))
+		input.children.append(UxmlParts.part(el, "VisualElement", "arrow", "", ["unity-base-popup-field__arrow"]))
 	return el
+
+
+## The `choices` attribute as a list (Unity's ParseStringListAttribute:
+## comma-separated, trimmed).
+static func choices_of(el: UxmlElement) -> PackedStringArray:
+	var out := PackedStringArray()
+	var raw := UxmlParts._attr(el, "choices")
+	if raw.strip_edges().is_empty():
+		return out
+	for c in raw.split(","):
+		out.append(String(c).strip_edges())
+	return out
+
+
+## The selected index of a DropdownField at load. Unity 6000.3 reads
+## `index` only; its `value` attribute maps to a placeholder property and
+## selects nothing (measured: ctl-dropdown, `value="High"` shows no text).
+static func dropdown_index(el: UxmlElement) -> int:
+	var n := choices_of(el).size()
+	var i := int(num(el, "index", -1.0))
+	return i if i >= 0 and i < n else -1
+
+
+## The text a DropdownField or EnumField shows at load.
+static func popup_initial_text(el: UxmlElement) -> String:
+	if el.local == "EnumField":
+		var info := enum_info(UxmlParts._attr(el, "type"))
+		if info.is_empty():
+			return ""
+		var i := enum_index(info, UxmlParts._attr(el, "value"))
+		return "" if i < 0 else String(info["labels"][i])
+	var i2 := dropdown_index(el)
+	return "" if i2 < 0 else choices_of(el)[i2]
+
+
+# ---------------------------------------------------------------------------
+# EnumField types
+# ---------------------------------------------------------------------------
+
+## Registered enum types: key -> {names, values, labels, obsolete}.
+static var _enums := {}
+
+
+## Register an enum for EnumField `type`. `type_name` is matched against the
+## attribute as written (`"Ns.Type, Assembly"`), without the assembly, and
+## as the last name segment. `values` is a GDScript enum Dictionary
+## (name -> int) or an Array of names (value = position). `obsolete` lists
+## names that Unity would mark [Obsolete]: they show only with
+## `include-obsolete-values="true"`.
+static func register_enum(type_name: String, values: Variant, obsolete: Array = []) -> void:
+	var names := PackedStringArray()
+	var ints: Array = []
+	if values is Dictionary:
+		for k in values:
+			names.append(String(k))
+			ints.append(int(values[k]))
+	else:
+		for i in (values as Array).size():
+			names.append(String(values[i]))
+			ints.append(i)
+	var labels := PackedStringArray()
+	for n in names:
+		labels.append(nicify(n))
+	var obs := {}
+	for o in obsolete:
+		obs[String(o)] = true
+	_enums[type_name] = {"names": names, "values": ints, "labels": labels, "obsolete": obs}
+
+
+static func unregister_enum(type_name: String) -> void:
+	_enums.erase(type_name)
+
+
+## The registered enum for a `type` attribute, or {}.
+static func enum_info(type_attr: String) -> Dictionary:
+	var t := type_attr.strip_edges()
+	if t.is_empty():
+		return {}
+	if _enums.has(t):
+		return _enums[t]
+	var bare := t.split(",")[0].strip_edges()
+	if _enums.has(bare):
+		return _enums[bare]
+	var last := _last_segment(bare)
+	for k in _enums:
+		var kb := String(k).split(",")[0].strip_edges()
+		if kb == bare or _last_segment(kb) == last:
+			return _enums[k]
+	return {}
+
+
+static func _last_segment(type_name: String) -> String:
+	var n := type_name.replace("+", ".")
+	return n.get_slice(".", n.get_slice_count(".") - 1)
+
+
+## Index of the entry named (or numbered) `value`; the first entry for an
+## empty value, as Unity shows the default enum value; -1 if none.
+static func enum_index(info: Dictionary, value: String) -> int:
+	var names: PackedStringArray = info.get("names", PackedStringArray())
+	if names.is_empty():
+		return -1
+	var v := value.strip_edges()
+	if v.is_empty():
+		return 0
+	var i := names.find(v)
+	if i >= 0:
+		return i
+	for k in names.size():
+		if names[k].to_lower() == v.to_lower():
+			return k
+	if v.is_valid_int():
+		return (info["values"] as Array).find(int(v))
+	return -1
+
+
+## Unity's ObjectNames.NicifyVariableName: "FlexStart" -> "Flex Start",
+## "m_Value" -> "Value", "kSpeed" -> "Speed", "HTTPServer" -> "HTTP Server".
+static func nicify(n: String) -> String:
+	var s := n
+	if s.begins_with("m_"):
+		s = s.substr(2)
+	elif s.length() > 1 and s[0] == "k" and s[1] == s[1].to_upper() and s[1] != s[1].to_lower():
+		s = s.substr(1)
+	elif s.begins_with("_"):
+		s = s.substr(1)
+	var out := ""
+	for i in s.length():
+		var c := s[i]
+		var up := c != c.to_lower()
+		if i > 0 and up:
+			var prev := s[i - 1]
+			var prev_up := prev != prev.to_lower()
+			var next_low := i + 1 < s.length() and s[i + 1] != s[i + 1].to_upper()
+			if not prev_up or next_low:
+				if prev != " " and prev != "_":
+					out += " "
+		elif i > 0 and c.is_valid_int() and not s[i - 1].is_valid_int():
+			out += " "
+		if c == "_":
+			out += " "
+			continue
+		out += c.to_upper() if i == 0 else c
+	return out
+
+
+# ---------------------------------------------------------------------------
+# Layout-dependent styles
+# ---------------------------------------------------------------------------
+
+## The px value of `prop` in a computed style (0 when unset or not px).
+static func style_px(style: Dictionary, prop: String) -> float:
+	var e = style.get(prop)
+	if e == null:
+		return 0.0
+	var p := UssValues.parse_length(String(e["value"]))
+	return float(p["value"]) if p["kind"] == "px" else 0.0
+
+
+## Write the layout-dependent inline styles of the Slider and MinMaxSlider
+## `el` from laid-out sizes: `size_of.call(el) -> Vector2` and
+## `style_of.call(el) -> Dictionary` (computed style). Returns true when a
+## style changed. The runtime behaviors and bench/parity.gd share it.
+static func layout_styles(el: UxmlElement, size_of: Callable, style_of: Callable) -> bool:
+	match el.local:
+		"Slider", "SliderInt":
+			var drag := UxmlParts.find_part(el, "drag-container")
+			var dragger := UxmlParts.find_part(el, "dragger")
+			if drag == null or dragger == null:
+				return false
+			var ds: Dictionary = style_of.call(dragger)
+			return slider_layout(el, size_of.call(drag), size_of.call(dragger),
+				style_px(ds, "margin-left") + style_px(ds, "margin-right"))
+		"MinMaxSlider":
+			var input := UxmlParts.find_part(el, "input")
+			var dragger2 := UxmlParts.find_part(el, "dragger")
+			var t0 := UxmlParts.find_part(el, "thumb-min")
+			var t1 := UxmlParts.find_part(el, "thumb-max")
+			if input == null or dragger2 == null or t0 == null or t1 == null:
+				return false
+			var st: Dictionary = style_of.call(dragger2)
+			var edges := Vector2(style_px(st, "border-left-width") + style_px(st, "margin-left"),
+				style_px(st, "border-right-width") + style_px(st, "margin-right"))
+			return min_max_layout(el, (size_of.call(input) as Vector2).x,
+				Vector2((size_of.call(t0) as Vector2).x, (size_of.call(t1) as Vector2).x), edges)
+	return false
+
+
+## Classes a control toggles on its parts at run time (focus, typing). The
+## parity harness copies them from Unity's dump like pseudo-states.
+const STATE_CLASSES := ["unity-base-slider--movable", "unity-min-max-slider--movable",
+	"unity-base-text-field__input--placeholder"]

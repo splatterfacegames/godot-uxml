@@ -106,6 +106,17 @@ func _style_has(doc: UxmlDocument, el_name: String, prop: String, want: String) 
 	return e != null and String(e["value"]).to_lower() == want.to_lower()
 
 
+## The open dropdown menu under `n`, or null.
+func _find_menu(n: Node) -> UxmlPopupMenu:
+	for ch in n.get_children(true):
+		if ch is UxmlPopupMenu:
+			return ch
+		var m := _find_menu(ch)
+		if m != null:
+			return m
+	return null
+
+
 func _focus_owner() -> Control:
 	return h.root.gui_get_focus_owner()
 
@@ -121,16 +132,20 @@ func test_load_builds_native_controls() -> void:
 	h.check(doc.get_element("mute") is UxmlToggle, "mute is a UxmlToggle (Unity part tree)")
 	h.eq((doc.get_element("mute") as UxmlToggle).button_pressed, true, "mute value=true")
 
+	# Slider, TextField and DropdownField are Unity part trees (the old
+	# HSlider / OptionButton / UxmlField mappings are gone): the slider and
+	# the dropdown are their own focusable controls, a text field's native
+	# is the LineEdit in its text element part.
 	var vol := doc.get_native("vol")
-	h.check(vol is HSlider, "vol native is HSlider (got %s)" % vol)
-	if vol is HSlider:
+	h.check(vol is UxmlSlider, "vol native is the UxmlSlider (got %s)" % vol)
+	if vol is UxmlSlider:
 		h.eq(vol.min_value, 0.0, "vol low-value")
 		h.eq(vol.max_value, 10.0, "vol high-value")
 		h.eq(vol.value, 4.0, "vol value")
-	h.check(doc.get_element("vol") is UxmlField, "vol outer is a labeled UxmlField")
+	h.eq(doc.get_element("vol"), vol, "the slider element is its own control")
 
 	var lives := doc.get_native("lives")
-	h.check(lives is HSlider and lives.rounded, "lives is a rounded int slider")
+	h.check(lives is UxmlSlider and typeof(lives.behavior.get_value()) == TYPE_INT, "lives is an int slider")
 
 	var player := doc.get_native("player")
 	h.check(player is LineEdit, "player native is LineEdit")
@@ -139,10 +154,12 @@ func test_load_builds_native_controls() -> void:
 		h.eq(player.placeholder_text, "type here", "placeholder")
 
 	var level := doc.get_native("level")
-	h.check(level is OptionButton, "level native is OptionButton")
-	if level is OptionButton:
+	h.check(level is UxmlPopupField, "level native is the UxmlPopupField")
+	if level is UxmlPopupField:
 		h.eq(level.item_count, 3, "level has 3 choices")
-		h.eq(level.get_item_text(level.selected), "Normal", "value=Normal selected")
+		# Unity 6000.3 maps the UXML `value` of a DropdownField to a
+		# placeholder property: it selects nothing (ctl-dropdown dump).
+		h.eq(level.selected, -1, "value=Normal selects nothing, as in Unity")
 
 	var icon := doc.get_native("icon")
 	h.check(icon is TextureRect, "icon native is TextureRect")
@@ -242,8 +259,9 @@ func test_keyboard_and_controller_nav() -> void:
 	h.check(_focus_owner() != null and _focus_owner() != doc.get_element("play"),
 		"ui_down moves focus spatially")
 
-	# Sliders consume arrows: value changes, focus stays.
-	var vol: HSlider = doc.get_native("vol")
+	# Sliders consume arrows: value changes, focus stays (a focused slider
+	# is movable, Unity's --movable dragger).
+	var vol: UxmlSlider = doc.get_native("vol")
 	vol.grab_focus()
 	var v0 := vol.value
 	_send_key(KEY_RIGHT)
@@ -355,14 +373,14 @@ func test_value_changed_semantics() -> void:
 	var events := [[]]
 	doc.value_changed.connect(func(n, v): events[0].append([n, v]))
 
-	var vol: HSlider = doc.get_native("vol")
+	var vol: UxmlSlider = doc.get_native("vol")
 	vol.value = 7.0
 	await h.process_frame
 	var vol_events: Array = events[0].filter(func(e): return e[0] == "vol")
 	h.eq(vol_events.size(), 1, "one value_changed per slider edit")
 	h.eq(vol_events[0][1], 7.0, "slider value payload")
 
-	var lives: HSlider = doc.get_native("lives")
+	var lives: UxmlSlider = doc.get_native("lives")
 	lives.value = 3.7
 	await h.process_frame
 	var int_events: Array = events[0].filter(func(e): return e[0] == "lives")
@@ -382,6 +400,10 @@ func test_value_changed_semantics() -> void:
 	# text_changed is emitted deferred, so two frames before counting.
 	var player: LineEdit = doc.get_native("player")
 	player.grab_focus()
+	await h.process_frame
+	# Unity's select-all-on-focus (default true) selects the text on focus;
+	# clear it so the key appends.
+	player.deselect()
 	player.caret_column = player.text.length()
 	await h.process_frame
 	_send_char("X")
@@ -392,15 +414,18 @@ func test_value_changed_semantics() -> void:
 	if s_events.size() == 1:
 		h.eq(s_events[0][1], "AdaX", "real key input appends and emits")
 
-	# Real dropdown selection: focus, open the popup with ui_accept,
-	# navigate, accept — the item_selected path fires once.
-	var level: OptionButton = doc.get_native("level")
+	# Real dropdown selection: focus, open the menu with ui_accept,
+	# navigate, accept — one value_changed. The menu (UxmlPopupMenu) starts
+	# without a highlight because nothing is selected; Up highlights the
+	# first item.
+	var level: UxmlPopupField = doc.get_native("level")
 	level.grab_focus()
 	await h.process_frame
 	_send_key(KEY_ENTER)
 	await h.process_frame
 	await h.process_frame
-	h.check(level.get_popup().visible, "ui_accept opens the dropdown popup")
+	var menu := _find_menu(level)
+	h.check(menu != null and menu.visible, "ui_accept opens the dropdown menu")
 	_send_key(KEY_UP)
 	await h.process_frame
 	_send_key(KEY_ENTER)
@@ -531,9 +556,9 @@ func test_invalid_attributes_warn() -> void:
 	var kinds := _warn_kinds(doc)
 	h.check(kinds.count("unsupported-value") >= 3,
 		"invalid values diagnosed (got %s)" % [kinds])
-	var s: HSlider = doc.get_native("s")
+	var s: UxmlSlider = doc.get_native("s")
 	h.check(s != null and s.min_value == 0.0, "bad low-value falls back to 0")
-	var d: OptionButton = doc.get_native("d")
+	var d: UxmlPopupField = doc.get_native("d")
 	h.check(d == null or d.selected < d.item_count, "out-of-range index safe")
 	_unload(doc)
 
@@ -593,7 +618,11 @@ func test_focusable_targets_native() -> void:
 	var yf_wrap := doc.get_element("yesfocus")
 	var yf_native := doc.get_native("yesfocus")
 	h.eq(yf_native.focus_mode, Control.FOCUS_ALL, "focusable=true native on")
-	h.eq(yf_wrap.focus_mode, Control.FOCUS_NONE, "focusable=true adds no wrapper stop")
+	# A Slider is a part tree now: the element control itself takes the
+	# focus (Unity's Slider is the focusable element), so the element and
+	# the native are one stop. A TextField keeps a wrapper box.
+	h.eq(yf_wrap, yf_native, "focusable=true: the slider is one focus stop")
+	h.eq(doc.get_element("focusfield").focus_mode, Control.FOCUS_NONE, "a text field box is no extra stop")
 
 	# Tab reaches the native; :focus resolves on the element for each
 	# wrapped control kind.
@@ -671,6 +700,8 @@ func test_readonly_preserved() -> void:
 	# An editable control takes the same real input.
 	var ed: LineEdit = doc.get_native("editablef")
 	ed.grab_focus()
+	await h.process_frame
+	ed.deselect()  # Unity's select-all-on-focus selected the text
 	ed.caret_column = ed.text.length()
 	_send_char("K")
 	await h.process_frame
@@ -685,8 +716,8 @@ func test_style_restoration_and_font_stability() -> void:
 	var doc := _load_review()
 	await h.process_frame
 
-	var fld: UxmlField = doc.get_element("caprestore")
-	var cap: Label = fld.caption_node()
+	# The caption is the label part of the TextField (a Label control).
+	var cap: Label = doc._controls[UxmlParts.find_part(doc.get_element_model("caprestore"), "label")]
 	doc.set_element_state("caprestore", "hover", true)
 	await h.process_frame
 	await h.process_frame
@@ -776,15 +807,18 @@ func test_diagnostics_dedupe() -> void:
 	_unload(doc)
 
 
-# Dropdown value selects by choice text; index selects positionally.
+# DropdownField: `index` selects positionally. Unity 6000.3 maps the UXML
+# `value` attribute to a placeholder property, so `value` selects nothing
+# (measured: ctl-dropdown); the runtime value setter (binding, code)
+# still selects by choice text.
 func test_dropdown_value_vs_index() -> void:
 	var doc := _load_review()
 	await h.process_frame
-	var res: OptionButton = doc.get_native("res")
-	h.eq(res.get_item_text(res.selected), "1080",
-		"value=1080 selects the choice TEXT, not index 1080")
-	h.eq(res.selected, 1, "text match resolves to index 1")
-	var idx: OptionButton = doc.get_native("byindex")
+	var res: UxmlPopupField = doc.get_native("res")
+	h.eq(res.selected, -1, "value=1080 in UXML selects nothing, as in Unity")
+	res.behavior.bind_write("value", "1080")
+	h.eq(res.selected, 1, "a runtime value selects the choice TEXT, not index 1080")
+	var idx: UxmlPopupField = doc.get_native("byindex")
 	h.eq(idx.get_item_text(idx.selected), "720", "index=0 selects positionally")
 	_unload(doc)
 
@@ -795,14 +829,18 @@ func test_dropdown_value_vs_index() -> void:
 func test_field_content_insets() -> void:
 	var doc := _load_review()
 	await h.process_frame
+	# The fields are part trees: the label part and the input part sit in
+	# the field's content box, so padding insets them like any children.
 	for n in ["padded", "padslider", "paddd"]:
-		var fld: UxmlField = doc.get_element(n)
-		h.check(fld is UxmlField, "%s is a field" % n)
-		var cap := fld.caption_node()
+		var model := doc.get_element_model(n)
+		var cap: Control = doc._controls[UxmlParts.find_part(model, "label")]
+		var inp: Control = doc._controls[UxmlParts.find_part(model, "input")]
 		h.check(cap.position.x >= 11.5 and cap.position.y >= 5.5,
-			"%s caption inset by padding+border (pos %s)" % [n, cap.position])
-		h.check(fld.field_node().position.x > cap.position.x,
-			"%s field follows caption inside content box" % n)
+			"%s label inset by padding (pos %s)" % [n, cap.position])
+		# Without the theme a field is a column (Unity's row direction is a
+		# theme rule), so the input starts at the content box too.
+		h.check(inp.position.x >= 11.5 and inp.position.y >= cap.position.y,
+			"%s input inside the content box (pos %s)" % [n, inp.position])
 
 	var lbl := doc.get_element("padlabel") as Label
 	var sb: StyleBox = lbl.get_theme_stylebox("normal")

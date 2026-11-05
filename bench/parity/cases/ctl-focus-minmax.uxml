@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:MinMaxSlider name="f" label="Focus" min-value="2" max-value="6" low-limit="0" high-limit="10" />
+  <ui:MinMaxSlider name="k" label="Keys" min-value="2" max-value="6" low-limit="0" high-limit="10" />
+  <ui:MinMaxSlider name="m" label="Middle" min-value="2" max-value="6" low-limit="0" high-limit="10" />
+</ui:UXML>

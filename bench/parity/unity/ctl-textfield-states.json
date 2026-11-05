@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:59:24.0779777Z"
+  "dumpedAtUtc": "2026-11-05T19:52:50.3616212Z"
  },
  "panel": {
   "width": 400,
@@ -250,6 +250,10 @@
    "visible": true,
    "text": "Focus",
    "textMeasure": {
+    "width": 40,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 40,
     "height": 17
    },
@@ -589,6 +593,10 @@
    "visible": true,
    "text": "abc",
    "textMeasure": {
+    "width": 25,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 25,
     "height": 17
    },
@@ -941,6 +949,10 @@
     "width": 40,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 40,
+    "height": 17
+   },
    "props": {
     "text": "Hover"
    },
@@ -1275,6 +1287,10 @@
    "visible": true,
    "text": "abc",
    "textMeasure": {
+    "width": 25,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 25,
     "height": 17
    },
@@ -1632,6 +1648,10 @@
     "width": 58,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 58,
+    "height": 17
+   },
    "props": {
     "text": "Disabled"
    },
@@ -1970,6 +1990,10 @@
    "visible": true,
    "text": "abc",
    "textMeasure": {
+    "width": 25,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 25,
     "height": 17
    },
@@ -2322,6 +2346,10 @@
     "width": 27,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 27,
+    "height": 17
+   },
    "props": {
     "text": "Hint"
    },
@@ -2660,6 +2688,10 @@
     "width": 0,
     "height": 0
    },
+   "layoutMeasure": {
+    "width": 33,
+    "height": 17
+   },
    "props": {
     "text": ""
    },
@@ -2691,7 +2723,7 @@
     "color": "rgba(88, 88, 88, 1)",
     "display": "flex",
     "filter": [],
-    "flex-basis": 38,
+    "flex-basis": 37,
     "flex-direction": "column",
     "flex-grow": 1,
     "flex-shrink": 0,
@@ -3011,6 +3043,10 @@
    "visible": true,
    "text": "Int",
    "textMeasure": {
+    "width": 17,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 17,
     "height": 17
    },
@@ -3349,6 +3385,10 @@
    "visible": true,
    "text": "5",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },

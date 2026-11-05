@@ -345,15 +345,16 @@ func test_two_way_write_back() -> void:
 		+ '<ui:Label name="echo"><Bindings><ui:DataBinding property="text" data-source-path="nick"/></Bindings></ui:Label>' \
 		+ '<ui:Slider name="ro" low-value="0" high-value="10"><Bindings><ui:DataBinding property="value" data-source-path="pos.x" binding-mode="ToTarget"/></Bindings></ui:Slider>' \
 		+ '<ui:Slider name="ts" low-value="0" high-value="10"><Bindings><ui:DataBinding property="value" data-source-path="pos.y" binding-mode="ToSource"/></Bindings></ui:Slider>', {}, p)
-	h.eq((doc.get_native("vol") as HSlider).value, 50.0, "source -> slider")
-	h.eq((doc.get_native("score") as HSlider).value, 10.0, "source -> slider int")
-	h.eq((doc.get_native("ro") as HSlider).value, 3.0, "ToTarget reads a Vector2 member")
-	h.eq((doc.get_native("ts") as HSlider).value, 0.0, "ToSource never writes the UI")
+	# Sliders are part trees (UxmlSlider) since the input controls branch.
+	h.eq((doc.get_native("vol") as UxmlSlider).value, 50.0, "source -> slider")
+	h.eq((doc.get_native("score") as UxmlSlider).value, 10.0, "source -> slider int")
+	h.eq((doc.get_native("ro") as UxmlSlider).value, 3.0, "ToTarget reads a Vector2 member")
+	h.eq((doc.get_native("ts") as UxmlSlider).value, 0.0, "ToSource never writes the UI")
 	var changed: Array = []
 	doc.value_changed.connect(func(n, v): changed.append([n, v]))
-	(doc.get_native("vol") as HSlider).value = 25
+	(doc.get_native("vol") as UxmlSlider).value = 25
 	h.eq(p.volume, 25.0, "slider -> source")
-	(doc.get_native("score") as HSlider).value = 42
+	(doc.get_native("score") as UxmlSlider).value = 42
 	h.eq(p.score, 42, "slider int -> int source")
 	(doc.get_native("mute") as UxmlToggle).button_pressed = true
 	h.eq(p.muted, true, "toggle -> source")
@@ -363,9 +364,9 @@ func test_two_way_write_back() -> void:
 	h.eq(p.nick, "zed", "text field -> source")
 	doc.update_bindings()
 	h.eq(_text(doc, "echo"), "zed", "a write-back refreshes the other bindings of the path")
-	(doc.get_native("ro") as HSlider).value = 9
+	(doc.get_native("ro") as UxmlSlider).value = 9
 	h.eq(p.pos.x, 3.0, "ToTarget does not write back")
-	(doc.get_native("ts") as HSlider).value = 6
+	(doc.get_native("ts") as UxmlSlider).value = 6
 	h.eq(p.pos.y, 6.0, "ToSource writes a Vector2 member back into the Object")
 	h.check(changed.size() >= 4, "document value_changed still fires")
 	_close(doc)
@@ -398,7 +399,7 @@ func test_converters() -> void:
 		+ '<ui:Label name="nog"><Bindings><ui:DataBinding property="text" data-source-path="score" source-to-ui-converters="nope"/></Bindings></ui:Label>', {}, p)
 	h.eq(_text(doc, "pct"), "50%", "typed converter for floats")
 	h.eq(_text(doc, "str"), "n/a", "untyped converter for other types")
-	(doc.get_native("s") as HSlider).value = 8
+	(doc.get_native("s") as UxmlSlider).value = 8
 	h.eq(p.volume, 0.8, "ui-to-source converter")
 	h.eq(_text(doc, "nog"), "10", "an unknown group leaves the value")
 	h.check(_kinds(doc.diagnostics).has("binding-failed"), "an unknown group is diagnosed")
@@ -428,8 +429,8 @@ func test_element_property_targets() -> void:
 		+ '<ui:DataBinding property="value" data-source-path="pick"/></Bindings></ui:DropdownField>' \
 		+ '<ui:Toggle name="t"><Bindings><ui:DataBinding property="label" data-source-path="cap"/></Bindings></ui:Toggle>', {}, data)
 	await h.process_frame
-	var s := doc.get_native("s") as HSlider
-	h.eq((doc.get_element("s") as UxmlField).caption.text, "Volume", "label")
+	var s := doc.get_native("s") as UxmlSlider
+	h.eq(_part_text(doc, "s", "label"), "Volume", "label (the label part)")
 	h.eq(s.min_value, 2.0, "lowValue")
 	h.eq(s.max_value, 20.0, "high-value")
 	h.eq(s.value, 5.0, "value")
@@ -438,7 +439,7 @@ func test_element_property_targets() -> void:
 	h.check((doc.get_native("b") as Button).disabled, "enabledSelf false disables")
 	h.eq(_text(doc, "b"), "Go", "button text")
 	h.check(not doc.get_element("l").visible, "visible false hides")
-	var ob := doc.get_native("d") as OptionButton
+	var ob := doc.get_native("d") as UxmlPopupField
 	h.eq(ob.item_count, 2, "choices")
 	h.eq(ob.get_item_text(ob.selected), "High", "dropdown value selects by text")
 	h.eq(_part_text(doc, "t", "label"), "Caption", "toggle label")
@@ -485,8 +486,8 @@ func test_binding_path_maps_to_value() -> void:
 		+ '<ui:Slider name="v" low-value="0" high-value="100" binding-path="volume"/>' \
 		+ '<ui:VisualElement name="ve" binding-path="x"/>', {}, p)
 	h.eq(_text(doc, "hp"), "7", "Label binding-path binds text inside the context path")
-	h.eq((doc.get_native("v") as HSlider).value, 50.0, "Slider binding-path binds value")
-	(doc.get_native("v") as HSlider).value = 75
+	h.eq((doc.get_native("v") as UxmlSlider).value, 50.0, "Slider binding-path binds value")
+	(doc.get_native("v") as UxmlSlider).value = 75
 	h.eq(p.volume, 75.0, "binding-path is two-way")
 	h.eq(doc.get_bindings("v")[0]["origin"], "binding-path", "binding origin is reported")
 	h.check(_kinds(doc.diagnostics).has("binding-failed"), "binding-path on a VisualElement is diagnosed")
@@ -751,8 +752,10 @@ func test_picking_mode() -> void:
 		+ '<ui:VisualElement name="bad" picking-mode="Sometimes"/>')
 	await h.process_frame
 	h.eq(doc.get_native("b").mouse_filter, Control.MOUSE_FILTER_IGNORE, "Ignore lets pointer events through")
-	h.eq(doc.get_native("s").mouse_filter, Control.MOUSE_FILTER_IGNORE, "Ignore reaches the inner native")
-	h.eq(doc.get_element("s").mouse_filter, Control.MOUSE_FILTER_IGNORE, "and the wrapper")
+	# The slider element is its own control now (a part tree); its drag
+	# container still takes the pointer, as in Unity (the Slider itself
+	# does not pick by default).
+	h.eq(doc.get_element("s").mouse_filter, Control.MOUSE_FILTER_IGNORE, "Ignore reaches the slider control")
 	h.check(doc.get_element("v").mouse_filter != Control.MOUSE_FILTER_IGNORE, "Position keeps picking")
 	doc.set_element_state("b", "hover", true)
 	await h.process_frame
@@ -767,7 +770,8 @@ func test_language_direction() -> void:
 		+ '<ui:Label name="plain" text="p"/>')
 	h.eq((doc.get_native("l") as Label).text_direction, Control.TEXT_DIRECTION_RTL, "inherited RTL")
 	h.eq((doc.get_native("t") as LineEdit).text_direction, Control.TEXT_DIRECTION_RTL, "RTL on a text field")
-	h.eq((doc.get_element("t") as UxmlField).caption.text_direction, Control.TEXT_DIRECTION_RTL, "and its caption")
+	h.eq((doc._controls[UxmlParts.find_part(doc.get_element_model("t"), "label")] as Label).text_direction,
+		Control.TEXT_DIRECTION_RTL, "and its label part")
 	h.eq((doc.get_native("ltr") as Label).text_direction, Control.TEXT_DIRECTION_LTR, "nearest value wins")
 	var probe := Label.new()
 	h.eq((doc.get_native("plain") as Label).text_direction, probe.text_direction, "outside: Godot default")

@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:56:34.5928829Z"
+  "dumpedAtUtc": "2026-11-05T19:52:49.4778909Z"
  },
  "panel": {
   "width": 400,
@@ -1197,6 +1197,10 @@
     "width": 42,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 42,
+    "height": 17
+   },
    "props": {
     "text": "Range"
    },
@@ -2326,6 +2330,10 @@
    "visible": true,
    "text": "Default",
    "textMeasure": {
+    "width": 48,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 48,
     "height": 17
    },

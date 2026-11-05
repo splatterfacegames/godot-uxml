@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:59:23.8159208Z"
+  "dumpedAtUtc": "2026-11-05T19:52:49.0609219Z"
  },
  "panel": {
   "width": 400,
@@ -237,6 +237,10 @@
    "visible": true,
    "text": "Focus",
    "textMeasure": {
+    "width": 40,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 40,
     "height": 17
    },
@@ -567,6 +571,10 @@
    "visible": true,
    "text": "A",
    "textMeasure": {
+    "width": 10,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 10,
     "height": 17
    },
@@ -1067,6 +1075,10 @@
     "width": 40,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 40,
+    "height": 17
+   },
    "props": {
     "text": "Hover"
    },
@@ -1392,6 +1404,10 @@
    "visible": true,
    "text": "A",
    "textMeasure": {
+    "width": 10,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 10,
     "height": 17
    },
@@ -1895,6 +1911,10 @@
     "width": 58,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 58,
+    "height": 17
+   },
    "props": {
     "text": "Disabled"
    },
@@ -2224,6 +2244,10 @@
    "visible": true,
    "text": "A",
    "textMeasure": {
+    "width": 10,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 10,
     "height": 17
    },

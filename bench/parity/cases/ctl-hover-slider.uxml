@@ -1,0 +1,3 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Slider name="h" label="Hover" low-value="0" high-value="10" value="5" fill="true" />
+</ui:UXML>

@@ -1,0 +1,4 @@
+{"actions": [
+  {"op": "submit", "target": "d"},
+  {"op": "pointer-move", "x": 250, "y": 88}
+]}

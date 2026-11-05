@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Slider name="s" label="Styled" low-value="0" high-value="10" value="2" fill="true" />
+  <ui:TextField name="t" label="Text" value="abc" />
+  <ui:IntegerField name="i" label="Int" value="7" />
+  <ui:DropdownField name="d" label="Drop" choices="A,B" index="1" />
+  <ui:Vector2Field name="v" label="Vec" x="1" y="2" />
+  <ui:MinMaxSlider name="m" label="Range" min-value="2" max-value="6" low-limit="0" high-limit="10" />
+</ui:UXML>

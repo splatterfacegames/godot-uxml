@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-05T18:56:35.0674240Z"
+  "dumpedAtUtc": "2026-11-05T19:52:50.4981850Z"
  },
  "panel": {
   "width": 600,
@@ -227,6 +227,10 @@
    "visible": true,
    "text": "Vector2",
    "textMeasure": {
+    "width": 52,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 52,
     "height": 17
    },
@@ -750,6 +754,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -1089,6 +1097,10 @@
    "visible": true,
    "text": "1",
    "textMeasure": {
+    "width": 7,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 7,
     "height": 17
    },
@@ -1448,6 +1460,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -1787,6 +1803,10 @@
    "visible": true,
    "text": "2",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -2277,6 +2297,10 @@
    "visible": true,
    "text": "Vector2Int",
    "textMeasure": {
+    "width": 69,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 69,
     "height": 17
    },
@@ -2800,6 +2824,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -3139,6 +3167,10 @@
    "visible": true,
    "text": "3",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -3498,6 +3530,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -3837,6 +3873,10 @@
    "visible": true,
    "text": "4",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -4327,6 +4367,10 @@
    "visible": true,
    "text": "Vector3",
    "textMeasure": {
+    "width": 53,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 53,
     "height": 17
    },
@@ -4850,6 +4894,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -5189,6 +5237,10 @@
    "visible": true,
    "text": "1",
    "textMeasure": {
+    "width": 7,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 7,
     "height": 17
    },
@@ -5548,6 +5600,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -5887,6 +5943,10 @@
    "visible": true,
    "text": "2",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -6246,6 +6306,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "Z"
    },
@@ -6588,6 +6652,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "3"
    },
@@ -6917,6 +6985,10 @@
    "visible": true,
    "text": "Vector3Int",
    "textMeasure": {
+    "width": 70,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 70,
     "height": 17
    },
@@ -7440,6 +7512,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -7779,6 +7855,10 @@
    "visible": true,
    "text": "5",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -8138,6 +8218,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -8477,6 +8561,10 @@
    "visible": true,
    "text": "6",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -8836,6 +8924,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "Z"
    },
@@ -9178,6 +9270,10 @@
     "width": 8,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 8,
+    "height": 17
+   },
    "props": {
     "text": "7"
    },
@@ -9507,6 +9603,10 @@
    "visible": true,
    "text": "Vector4",
    "textMeasure": {
+    "width": 53,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 53,
     "height": 17
    },
@@ -10031,6 +10131,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -10370,6 +10474,10 @@
    "visible": true,
    "text": "1",
    "textMeasure": {
+    "width": 7,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 7,
     "height": 17
    },
@@ -10729,6 +10837,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -11068,6 +11180,10 @@
    "visible": true,
    "text": "2",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -11427,6 +11543,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "Z"
    },
@@ -11766,6 +11886,10 @@
    "visible": true,
    "text": "3",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -12125,6 +12249,10 @@
     "width": 14,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 14,
+    "height": 17
+   },
    "props": {
     "text": "W"
    },
@@ -12464,6 +12592,10 @@
    "visible": true,
    "text": "4",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -13151,6 +13283,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "X"
    },
@@ -13490,6 +13626,10 @@
    "visible": true,
    "text": "0",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -13849,6 +13989,10 @@
     "width": 10,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 10,
+    "height": 17
+   },
    "props": {
     "text": "Y"
    },
@@ -14188,6 +14332,10 @@
    "visible": true,
    "text": "0",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
@@ -14547,6 +14695,10 @@
     "width": 9,
     "height": 17
    },
+   "layoutMeasure": {
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "Z"
    },
@@ -14886,6 +15038,10 @@
    "visible": true,
    "text": "0",
    "textMeasure": {
+    "width": 9,
+    "height": 17
+   },
+   "layoutMeasure": {
     "width": 9,
     "height": 17
    },
