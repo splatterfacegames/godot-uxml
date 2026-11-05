@@ -33,14 +33,25 @@ extends RefCounted
 ## through the same flex rules as every other element; the runtime shows
 ## and sizes its Scrollers after the layout, as Unity does.
 ##
+## Measure bounds (Yoga's AtMost measure mode): every measure of a flex
+## item gets the space its container has on each axis, less the item's
+## margins (bx, by; -1 for none). A container that measures its content
+## passes its own bound on (less padding and border), so a row-wrap grid in
+## an auto-sized container wraps at the container width. A leaf measure is
+## clamped to the bound, as Unity's TextElement and Image clamp their
+## measure (TextUtilities.PostProcessMeasuredSize), and a leaf without a
+## width hint is measured at the bound width (wrapping text). An
+## `overflow: scroll` container does not bound its children on its main
+## axis, and its own auto size stays inside its bound (Yoga).
+##
 ## Performance notes (the algorithm above is unchanged, bit for bit):
 ##   * every per-element style read is memoized for the pass — padding /
 ##     border / margin edges per containing-block width, enums, flex
 ##     children, numbers — and value parsing is memoized by text in
 ##     UssValues, so the hot recursion does no regex or string building;
 ##   * _measure() results are memoized per canonical (element, avail,
-##     hint) — avail only through the element's own percentage props, the
-##     hint only for leaves. options["volatile"] maps elements whose
+##     hint, bound) — avail only through the element's own percentage
+##     props. options["volatile"] maps elements whose
 ##     intrinsic size depends on measurer call history (a wrapping Label is
 ##     measured at the width the previous call left on it) to the control's
 ##     current width; the layout tracks that width through the pass
@@ -114,7 +125,7 @@ var _hint_free := false      # options["hint_free"]: only volatile measures read
 ## align stretch also measures them at their stretched width, as Yoga does.
 var _hinted: Dictionary = {}
 # Entries — measure: [kx, ky, kh, out, entry_state, exit_state, calls,
-# kids, ids, eid, el]; layout: [size, cb_width, scroll_bar_width,
+# kids, ids, eid, el, bx, by]; layout: [size, cb_width, scroll_bar_width,
 # entry_state, exit_state, sub, calls, kids, ids, eid, el, rects, insets,
 # content_sizes]. `calls` are the entry's OWN measurer calls, `kids` the
 # child entries its computation used, `ids` the layout-record ids of el and
@@ -202,7 +213,7 @@ static func _round_node(el: UxmlElement, abs_l: float, abs_t: float, src: Dictio
 	var top := float(rr.position.y)
 	var al := abs_l + left
 	var at := abs_t + top
-	out[el] = Rect2(_pixel(left), _pixel(top),
+	out[el] = Rect2(_pixel(al) - _pixel(abs_l), _pixel(at) - _pixel(abs_t),
 		_pixel(al + float(rr.size.x)) - _pixel(al), _pixel(at + float(rr.size.y)) - _pixel(at))
 	for c in el.children:
 		_round_node(c, al, at, src, out)
@@ -627,11 +638,15 @@ func _sens(el: UxmlElement) -> int:
 ## avail.x is the containing block's content width (the percentage base for
 ## width, margins and padding). border_w_hint, when >= 0, is the border-box
 ## width the element will actually get — the row case lets a wrapped label
-## report its real height at the width the line assigned it.
+## report its real height at the width the line assigned it. bx/by, when
+## >= 0, are the largest border-box size the container has for el (Yoga's
+## AtMost; see the class notes).
 func _measure(
 	el: UxmlElement,
 	avail: Vector2,
-	border_w_hint: float = -1.0
+	border_w_hint: float = -1.0,
+	bx: float = -1.0,
+	by: float = -1.0
 ) -> Vector2:
 	# Canonical memo key: avail reaches the result only through the
 	# element's OWN percentage props (children are measured against its own
@@ -649,7 +664,7 @@ func _measure(
 	if m != null:
 		memo = m
 		for e in memo:
-			if e[0] == kx and e[1] == ky and e[2] == kh and e[4] == entry:
+			if e[0] == kx and e[1] == ky and e[2] == kh and e[11] == bx and e[12] == by and e[4] == entry:
 				var ex: PackedFloat64Array = e[5]
 				for k in vl.size():
 					_vw[vl[k]] = ex[k]
@@ -663,8 +678,8 @@ func _measure(
 		var xe = _xc.get(el)
 		if xe != null:
 			for e in xe[0]:
-				if (e[0] == kx and e[1] == ky and e[2] == kh and e[4] == entry
-						and _entry_ok(e)):
+				if (e[0] == kx and e[1] == ky and e[2] == kh and e[11] == bx
+						and e[12] == by and e[4] == entry and _entry_ok(e)):
 					var ex2: PackedFloat64Array = e[5]
 					for k in vl.size():
 						_vw[vl[k]] = ex2[k]
@@ -688,15 +703,32 @@ func _measure(
 			hint = maxf(0.0, border_w_hint - in_w)
 		elif w >= 0.0:
 			hint = maxf(0.0, w - in_w)
+		elif bx >= 0.0:
+			# Yoga AtMost: text lays out in the width the container has.
+			hint = maxf(0.0, bx - in_w)
 		var intr := _measure_call(el, hint)
-		bw = w if w >= 0.0 else intr.x + in_w
-		bh = h if h >= 0.0 else intr.y + in_h
+		# Unity clamps a leaf measure to the space the leaf has (AtMost).
+		var ix: float = intr.x
+		var iy: float = intr.y
+		if bx >= 0.0:
+			ix = minf(ix, maxf(0.0, bx - in_w))
+		if by >= 0.0:
+			iy = minf(iy, maxf(0.0, by - in_h))
+		bw = w if w >= 0.0 else ix + in_w
+		bh = h if h >= 0.0 else iy + in_h
 	else:
 		var cw := w - in_w if w >= 0.0 else -1.0
 		if cw < 0.0 and border_w_hint >= 0.0:
 			cw = maxf(0.0, border_w_hint - in_w)
 		var ch := h - in_h if h >= 0.0 else -1.0
-		var nat := _measure_content(el, Vector2(cw, ch))
+		# The content bound: the content size, else the measure bound.
+		var lx := cw
+		if lx < 0.0 and bx >= 0.0:
+			lx = maxf(0.0, bx - in_w)
+		var ly := ch
+		if ly < 0.0 and by >= 0.0:
+			ly = maxf(0.0, by - in_h)
+		var nat := _measure_content(el, Vector2(cw, ch), lx, ly)
 		# Native chrome (e.g. a wrapped control's minimum size) can floor the
 		# auto size, but an authored px/% always wins.
 		var chrome := _measure_call(el, cw)
@@ -710,20 +742,35 @@ func _measure(
 			bh = bw / ar
 	# The border box can never be smaller than its own padding+border —
 	# the floor overrides explicit dims and max bounds alike (Yoga).
-	var out := Vector2(
-		maxf(
-			clampf(bw, _min_or(el, P_MINW, avail.x, 0.0), _bound(el, P_MAXW, avail.x, false)),
-			in_w
-		),
-		maxf(
-			clampf(bh, _min_or(el, P_MINH, avail.y, 0.0), _bound(el, P_MAXH, avail.y, false)),
-			in_h
-		)
+	var ox := maxf(
+		clampf(bw, _min_or(el, P_MINW, avail.x, 0.0), _bound(el, P_MAXW, avail.x, false)),
+		in_w
 	)
+	var oy := maxf(
+		clampf(bh, _min_or(el, P_MINH, avail.y, 0.0), _bound(el, P_MAXH, avail.y, false)),
+		in_h
+	)
+	if not kids.is_empty() and (bx >= 0.0 or by >= 0.0) and _str(el, "overflow", "visible") == "scroll":
+		# Yoga: an auto-sized scroll box measured AtMost stays inside the
+		# space it has on its cross axis. On its main axis only when the
+		# box and one of its children grow: else Yoga sizes the main axis
+		# to the content first (availableInnerMainDim = sizeConsumed).
+		var row := _is_row(el)
+		var main_clamp := false
+		if _num(el, P_GROW, 0.0) > 0.0:
+			for k in kids:
+				if _num(k, P_GROW, 0.0) > 0.0:
+					main_clamp = true
+					break
+		if bx >= 0.0 and w < 0.0 and border_w_hint < 0.0 and (main_clamp or not row):
+			ox = maxf(minf(ox, bx), in_w)
+		if by >= 0.0 and h < 0.0 and (main_clamp or row):
+			oy = maxf(minf(oy, by), in_h)
+	var out := Vector2(ox, oy)
 	var fr: Array = _frames.pop_back()
 	_eid_seq += 1
 	var ent := [kx, ky, kh, out, entry, _vstate(vl) if not vl.is_empty() else _no_state,
-		fr[0], fr[1], _ids_of(el) if _xc != null else _no_ids, _eid_seq, el]
+		fr[0], fr[1], _ids_of(el) if _xc != null else _no_ids, _eid_seq, el, bx, by]
 	_ok_m[_eid_seq] = true
 	memo.append(ent)
 	if _xc != null:
@@ -914,7 +961,10 @@ func _min_or(el: UxmlElement, pid: int, base: float, fallback: float) -> float:
 
 
 ## Natural content-box size of a container's children (no padding/border).
-func _measure_content(el: UxmlElement, cavail: Vector2) -> Vector2:
+## lx/ly bound the content (Yoga AtMost; -1 for none): lines wrap at the
+## main bound, and each child is measured at most as large as the bound
+## less its margins.
+func _measure_content(el: UxmlElement, cavail: Vector2, lx: float = -1.0, ly: float = -1.0) -> Vector2:
 	var kids := _flex_children(el)
 	if kids.is_empty():
 		return Vector2.ZERO
@@ -929,10 +979,18 @@ func _measure_content(el: UxmlElement, cavail: Vector2) -> Vector2:
 	var cur_main := 0.0
 	var cur_cross := 0.0
 	var cur_n := 0
-	var am: float = cavail[main]
+	var am: float = lx if row else ly
+	# Yoga: a scroll container does not bound its children on its main axis.
+	if _str(el, "overflow", "visible") == "scroll":
+		if row:
+			lx = -1.0
+		else:
+			ly = -1.0
 	for child in kids:
-		var msz := _measure(child, cavail)
 		var m := _margins(child, cavail.x)
+		var msz := _measure(child, cavail, -1.0,
+			-1.0 if lx < 0.0 else maxf(0.0, lx - m[L] - m[R]),
+			-1.0 if ly < 0.0 else maxf(0.0, ly - m[T] - m[B]))
 		var o_main: float
 		var o_cross: float
 		if row:
@@ -1191,6 +1249,11 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	var me_i := R if row else B
 	var cs_i := T if row else L
 	var ce_i := B if row else R
+	# Measure bounds (Yoga AtMost): the area less each item's margins; a
+	# scroll container leaves its main axis unbounded.
+	var sc := _str(el, "overflow", "visible") == "scroll"
+	var bnd_x: float = -1.0 if (sc and row) else asx
+	var bnd_y: float = -1.0 if (sc and not row) else area.size.y
 
 	# Hypothetical main sizes, with min/max already applied. Items are
 	# parallel arrays indexed by kid position.
@@ -1226,7 +1289,9 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	for k in n:
 		var child: UxmlElement = kids[k]
 		var m := _margins(child, asx)
-		var nat := _measure(child, area.size, _stretch_hint(child, row, align_items, ac, m))
+		var nat := _measure(child, area.size, _stretch_hint(child, row, align_items, ac, m),
+			-1.0 if bnd_x < 0.0 else maxf(0.0, bnd_x - m[L] - m[R]),
+			-1.0 if bnd_y < 0.0 else maxf(0.0, bnd_y - m[T] - m[B]))
 		var hyp: float
 		var basis := _len(child, P_BASIS, am)
 		if not is_nan(basis):
@@ -1320,9 +1385,12 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 			else:
 				# For a row item the final main size is now known — measuring
 				# with it lets wrapped text report the height it really needs.
+				var mc: PackedFloat64Array = it_m[k]
 				nat = _measure(
 					child, area.size,
-					it_main[k] if row else -1.0
+					it_main[k] if row else -1.0,
+					-1.0 if bnd_x < 0.0 else maxf(0.0, bnd_x - mc[L] - mc[R]),
+					-1.0 if bnd_y < 0.0 else maxf(0.0, bnd_y - mc[T] - mc[B])
 				)[cross]
 			# Cross sizes floor at the cross-axis padding+border total the
 			# same way the main axis does — an explicit dim or max bound
@@ -1482,12 +1550,9 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 					maxf(_bound(child, max_cross, ac, false), smin)
 				)
 			else:
+				# A scroll box keeps inside its line through the measure
+				# bound (see _measure).
 				it_cross[k] = it_ncross[k]
-				# Yoga: an overflow: scroll box sized by its content on the
-				# cross axis stays inside a definite available size (Unity's
-				# ScrollView viewport).
-				if ac >= 0.0 and _str(child, "overflow", "visible") == "scroll" and _dim(child, cross_prop, ac) < 0.0:
-					it_cross[k] = maxf(minf(it_cross[k], ac - mct), it_inc[k])
 			var mk: PackedFloat64Array = it_m[k]
 			var mc_start: float = mk[cs_i]
 			var mc_end: float = mk[ce_i]

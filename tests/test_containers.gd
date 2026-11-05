@@ -782,3 +782,91 @@ func test_collection_binding() -> void:
 	h.eq((row.get_element() as Label).text, "z", "itemsSource rows show the items")
 	h.eq(doc.get_selected_indices("lv"), [1], "selectedIndex binding selects")
 	_unload(doc)
+
+
+## Unity's FixedHeight Resize keeps floor(viewport / item height) + 2 rows;
+## the other pooled rows stay hidden and unbound, and a taller viewport
+## takes more rows (no new elements). A default Label row is as high as
+## the item (Godot's Label minimum is fitted: UxmlStyleApplier.fit_label).
+func test_list_view_rows_for_viewport() -> void:
+	var doc := _doc('<ui:ListView name="lv" fixed-item-height="20" style="height: 100px; width: 160px;"/>')
+	var bound := {}
+	doc.set_list_source("lv", 50, func(row: UxmlListRow, i: int):
+		bound[i] = true
+		(row.get_element() as Label).text = "Row %d" % i)
+	_settle(doc)
+	await h.process_frame
+	_settle(doc)
+	var rows: Array = doc.get_list_rows("lv")
+	h.eq(rows.size(), 7, "floor(100 / 20) + 2 rows in use")
+	h.eq(bound.size(), 7, "only the rows in use are bound (%s)" % [bound.keys()])
+	var c := (rows[0] as UxmlListRow).get_element() as Control
+	h.eq(c.size.y, 20.0, "a Label row is as high as fixed-item-height, not Godot's Label minimum")
+	h.eq((rows[1] as UxmlListRow).get_element().position.y, 20.0, "rows sit 20px apart")
+	var lv := doc.get_element_model("lv")
+	var pool := UxmlContainerParts.rows_of(lv).size()
+	lv.set_attribute("style", "height: 200px; width: 160px;")
+	_settle(doc)
+	await h.process_frame
+	_settle(doc)
+	h.eq(doc.get_list_rows("lv").size(), 12, "a taller viewport: floor(200 / 20) + 2 rows")
+	h.eq(UxmlContainerParts.rows_of(lv).size(), pool, "the pool is unchanged (no new elements)")
+	_unload(doc)
+
+
+## virtualization-method="DynamicHeight" (Unity's DynamicHeightVirtualization-
+## Controller): rows take the height of their item, the content is as tall
+## as the measured heights plus the expected height of the other items,
+## and a scroll shows the rows in item order.
+func test_list_view_dynamic_height() -> void:
+	var doc := _doc('<ui:ListView name="lv" virtualization-method="DynamicHeight" fixed-item-height="20" style="height: 100px; width: 160px;"/>')
+	h.eq(_warn_kinds_doc(doc).has("unsupported-value"), false, "DynamicHeight is supported")
+	doc.set_list_source("lv", 40, func(row: UxmlListRow, i: int):
+		var t := "Item %d" % i
+		for k in i % 3:
+			t += "\nmore"
+		(row.get_element() as Label).text = t)
+	for k in 4:
+		_settle(doc)
+		await h.process_frame
+	var lv := doc.get_element_model("lv")
+	var b = doc._behaviors.get(lv)
+	var rows: Array = doc.get_list_rows("lv")
+	var c0 := (rows[0] as UxmlListRow).get_element() as Control
+	var c1 := (rows[1] as UxmlListRow).get_element() as Control
+	h.check(c1.size.y > c0.size.y, "a two-line item is taller than a one-line item (%s, %s)" % [c0.size.y, c1.size.y])
+	h.eq(c1.position.y, c0.position.y + c0.size.y, "rows lay out in item order")
+	var content := _part(_part(lv, "scroll-view"), "content")
+	h.eq(_ctl(doc, content).size.y, b.content_extent(), "content height: measured plus expected heights")
+	h.check(b.content_extent() > 40 * 20.0, "the content is taller than 40 fixed rows")
+	doc.scroll_to_item("lv", 25)
+	for k in 6:
+		_settle(doc)
+		await h.process_frame
+	var shown := false
+	var vp := _ctl(doc, _part(_part(lv, "scroll-view"), "viewport"))
+	for r in doc.get_list_rows("lv"):
+		if (r as UxmlListRow).index == 25:
+			var rc := (r.get_element() as Control).get_global_rect()
+			shown = vp.get_global_rect().grow(0.5).encloses(rc)
+	h.check(shown, "scroll_to_item shows item 25 in the viewport")
+	_unload(doc)
+
+
+## A Tab outside a TabView: Unity lays its underline out as wide as the
+## Tab (ctl-tabview: 400px under an 81px header).
+func test_lone_tab_underline() -> void:
+	var doc := _doc('<ui:Tab name="loose" label="Loose" />')
+	_settle(doc)
+	var tab := doc.get_element_model("loose")
+	var ul := _ctl(doc, _part(tab, "header-underline"))
+	h.eq(ul.size.x, doc.get_element("loose").size.x, "underline as wide as the Tab")
+	h.check(_ctl(doc, _part(tab, "header")).size.x < ul.size.x, "the header stays as wide as its label")
+	_unload(doc)
+
+
+func _warn_kinds_doc(doc: UxmlDocument) -> Array:
+	var out: Array = []
+	for d in doc.diagnostics:
+		out.append(d["kind"])
+	return out

@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use godot::classes::{Control, Label, Object, RichTextLabel, StyleBox};
+use godot::classes::{Control, Font, Label, Object, RichTextLabel, StyleBox};
 use godot::prelude::*;
 
 use crate::cascade::Cascade;
@@ -333,6 +333,14 @@ impl Placement {
         }
         c.set_position(r.position);
         c.set_size(r.size);
+        if let (Some(lbl), Some(a)) = (&io.labels[i], applier) {
+            // UxmlDocument._place_control: Godot floors a Label at one text
+            // line; Unity's box can be shorter (UxmlStyleApplier.fit_label).
+            if d(c.get_size().y) > d(r.size.y) + 0.01 || lbl.has_meta("uxml_fit") {
+                let mut a = a.clone();
+                a.call("fit_label", &[c.to_variant(), r.size.to_variant()]);
+            }
+        }
         let Some((start, end)) = out.insets[i] else { return };
         if self.hooked.len() != io.controls.len() {
             self.hooked = vec![None; io.controls.len()];
@@ -395,6 +403,8 @@ struct MemoE {
     kx: f64,
     ky: f64,
     kh: f64,
+    bx: f64,
+    by: f64,
     entry: Vec<f64>,
     out: Vector2,
     exit: Vec<f64>,
@@ -422,6 +432,9 @@ pub struct Pass<'a> {
     /// Per-pass memo: the control carries `uxml_clip_text` (metas do not
     /// change during a pass).
     cliptext_m: Vec<Option<bool>>,
+    /// Per-pass memo: the `uxml_fit` deficit of a fitted Label
+    /// (UxmlStyleApplier.fit_label).
+    fit_m: Vec<Option<f64>>,
     /// Best-fit text (-unity-text-auto-size): measured through
     /// UxmlStyleApplier.autosize_measure, which reads the width hint.
     hinted: Vec<bool>,
@@ -439,6 +452,7 @@ pub struct Pass<'a> {
     sn_text: StringName,
     sn_cliptext: StringName,
     sn_clip: StringName,
+    sn_fit: StringName,
 }
 
 impl<'a> Pass<'a> {
@@ -485,6 +499,7 @@ impl<'a> Pass<'a> {
             meas_m: (0..n).map(|_| vec![]).collect(),
             margins_m: vec![None; n],
             cliptext_m: vec![None; n],
+            fit_m: vec![None; n],
             hinted,
             volatile,
             vw,
@@ -499,6 +514,7 @@ impl<'a> Pass<'a> {
             sn_text: StringName::from("text"),
             sn_cliptext: StringName::from("uxml_clip_text"),
             sn_clip: StringName::from("clip_text"),
+            sn_fit: StringName::from("uxml_fit"),
         }
     }
 
@@ -819,7 +835,7 @@ impl<'a> Pass<'a> {
                 }
             }
             if w < 0.0 || h < 0.0 {
-                let nat = self.measure(ch, Vector2::new(f(cbw), f(cbh)), w);
+                let nat = self.measure(ch, Vector2::new(f(cbw), f(cbh)), w, -1.0, -1.0);
                 if w < 0.0 {
                     w = d(nat.x);
                 }
@@ -964,6 +980,24 @@ impl<'a> Pass<'a> {
             }
             _ => c.get_combined_minimum_size(),
         };
+        if let Some(lbl) = self.io.labels[i].clone() {
+            if self.volatile[i] {
+                // Unity measures wrapping text at its max-content width
+                // (UxmlDocument._measure_leaf).
+                ms.x = f(label_max_content(&lbl));
+            }
+            let sn_fit = &self.sn_fit;
+            let fit = *self.fit_m[i].get_or_insert_with(|| {
+                if lbl.has_meta(sn_fit) {
+                    lbl.get_meta(sn_fit).try_to::<i64>().unwrap_or(0) as f64
+                } else {
+                    0.0
+                }
+            });
+            if fit != 0.0 {
+                ms.y = f(d(ms.y) + fit);
+            }
+        }
         if self.margins_m[i].is_none() {
             let mut m: Option<[f64; 4]> = None;
             if c.has_theme_stylebox_override(&self.sn_normal) {
@@ -1012,7 +1046,9 @@ impl<'a> Pass<'a> {
 
     // ------------------------------------------------------------- measure
 
-    fn measure(&mut self, i: usize, avail: Vector2, hint: f64) -> Vector2 {
+    /// flex_layout.gd _measure: bx/by are the measure bounds (Yoga AtMost;
+    /// -1 for none).
+    fn measure(&mut self, i: usize, avail: Vector2, hint: f64, bx: f64, by: f64) -> Vector2 {
         let sens = self.sens(i);
         let kx = if sens & 1 != 0 { d(avail.x) } else { 0.0 };
         let ky = if sens & 2 != 0 { d(avail.y) } else { 0.0 };
@@ -1020,7 +1056,7 @@ impl<'a> Pass<'a> {
         let vl = self.vlist(i);
         let entry: Vec<f64> = vl.iter().map(|&v| self.vw[v]).collect();
         for e in &self.meas_m[i] {
-            if e.kx == kx && e.ky == ky && e.kh == kh && e.entry == entry {
+            if e.kx == kx && e.ky == ky && e.kh == kh && e.bx == bx && e.by == by && e.entry == entry {
                 for (k, &v) in vl.iter().enumerate() {
                     self.vw[v] = e.exit[k];
                 }
@@ -1041,17 +1077,37 @@ impl<'a> Pass<'a> {
                 hint2 = gmax(0.0, hint - in_w);
             } else if w >= 0.0 {
                 hint2 = gmax(0.0, w - in_w);
+            } else if bx >= 0.0 {
+                // Yoga AtMost: text lays out in the width the container has.
+                hint2 = gmax(0.0, bx - in_w);
             }
             let intr = self.measure_call(i, hint2);
-            bw = if w >= 0.0 { w } else { d(intr.x) + in_w };
-            bh = if h >= 0.0 { h } else { d(intr.y) + in_h };
+            // Unity clamps a leaf measure to the space the leaf has.
+            let mut ix = d(intr.x);
+            let mut iy = d(intr.y);
+            if bx >= 0.0 {
+                ix = f64::min(ix, gmax(0.0, bx - in_w));
+            }
+            if by >= 0.0 {
+                iy = f64::min(iy, gmax(0.0, by - in_h));
+            }
+            bw = if w >= 0.0 { w } else { ix + in_w };
+            bh = if h >= 0.0 { h } else { iy + in_h };
         } else {
             let mut cw = if w >= 0.0 { w - in_w } else { -1.0 };
             if cw < 0.0 && hint >= 0.0 {
                 cw = gmax(0.0, hint - in_w);
             }
             let ch = if h >= 0.0 { h - in_h } else { -1.0 };
-            let nat = self.measure_content(i, Vector2::new(f(cw), f(ch)));
+            let mut lx = cw;
+            if lx < 0.0 && bx >= 0.0 {
+                lx = gmax(0.0, bx - in_w);
+            }
+            let mut ly = ch;
+            if ly < 0.0 && by >= 0.0 {
+                ly = gmax(0.0, by - in_h);
+            }
+            let nat = self.measure_content(i, Vector2::new(f(cw), f(ch)), lx, ly);
             let chrome = self.measure_call(i, cw);
             bw = if w >= 0.0 { w } else { gmax(d(nat.x), d(chrome.x)) + in_w };
             bh = if h >= 0.0 { h } else { gmax(d(nat.y), d(chrome.y)) + in_h };
@@ -1070,14 +1126,38 @@ impl<'a> Pass<'a> {
         let ox = gmax(gclamp(bw, minw, maxw), in_w);
         let minh = self.min_or(i, P_MINH, d(avail.y), 0.0);
         let maxh = self.bound(i, P_MAXH, d(avail.y), false);
-        let oy = gmax(gclamp(bh, minh, maxh), in_h);
+        let mut oy = gmax(gclamp(bh, minh, maxh), in_h);
+        let mut ox = ox;
+        if !kids.is_empty() && (bx >= 0.0 || by >= 0.0) && self.str_(i, E_OVERFLOW, "visible") == "scroll" {
+            // Yoga: an auto-sized scroll box measured AtMost stays inside the
+            // space it has on its cross axis; on its main axis only when the
+            // box and one of its children grow.
+            let row = self.is_row(i);
+            let mut main_clamp = false;
+            if self.num(i, P_GROW, 0.0) > 0.0 {
+                for &k in kids.iter() {
+                    if self.num(k, P_GROW, 0.0) > 0.0 {
+                        main_clamp = true;
+                        break;
+                    }
+                }
+            }
+            if bx >= 0.0 && w < 0.0 && hint < 0.0 && (main_clamp || !row) {
+                ox = gmax(f64::min(ox, bx), in_w);
+            }
+            if by >= 0.0 && h < 0.0 && (main_clamp || row) {
+                oy = gmax(f64::min(oy, by), in_h);
+            }
+        }
         let out = Vector2::new(f(ox), f(oy));
         let exit: Vec<f64> = vl.iter().map(|&v| self.vw[v]).collect();
-        self.meas_m[i].push(MemoE { kx, ky, kh, entry, out, exit });
+        self.meas_m[i].push(MemoE { kx, ky, kh, bx, by, entry, out, exit });
         out
     }
 
-    fn measure_content(&mut self, i: usize, cavail: Vector2) -> Vector2 {
+    /// flex_layout.gd _measure_content: lx/ly bound the content (Yoga
+    /// AtMost; -1 for none).
+    fn measure_content(&mut self, i: usize, cavail: Vector2, lx: f64, ly: f64) -> Vector2 {
         let kids = self.flex_children(i);
         if kids.is_empty() {
             return Vector2::ZERO;
@@ -1088,13 +1168,24 @@ impl<'a> Pass<'a> {
         let comp = |v: Vector2, a: usize| if a == 0 { d(v.x) } else { d(v.y) };
         let gap_m = self.gap(i, if row { P_CGAP } else { P_RGAP }, comp(cavail, main));
         let gap_c = self.gap(i, if row { P_RGAP } else { P_CGAP }, comp(cavail, cross));
-        let am = comp(cavail, main);
+        let am = if row { lx } else { ly };
+        let (mut lx, mut ly) = (lx, ly);
+        // Yoga: a scroll container does not bound its children on its main axis.
+        if self.str_(i, E_OVERFLOW, "visible") == "scroll" {
+            if row {
+                lx = -1.0;
+            } else {
+                ly = -1.0;
+            }
+        }
         let mut lines_main: Vec<f64> = vec![];
         let mut lines_cross: Vec<f64> = vec![];
         let (mut cur_main, mut cur_cross, mut cur_n) = (0.0f64, 0.0f64, 0usize);
         for &ch in kids.iter() {
-            let msz = self.measure(ch, cavail, -1.0);
             let m = self.margins(ch, d(cavail.x));
+            let bxc = if lx < 0.0 { -1.0 } else { gmax(0.0, lx - m[L] - m[R]) };
+            let byc = if ly < 0.0 { -1.0 } else { gmax(0.0, ly - m[T] - m[B]) };
+            let msz = self.measure(ch, cavail, -1.0, bxc, byc);
             let (o_main, o_cross) = if row {
                 (d(msz.x) + m[L] + m[R], d(msz.y) + m[T] + m[B])
             } else {
@@ -1176,6 +1267,17 @@ impl<'a> Pass<'a> {
         let me_i = if row { R } else { B };
         let cs_i = if row { T } else { L };
         let ce_i = if row { B } else { R };
+        // Measure bounds (Yoga AtMost): the area less each item's margins; a
+        // scroll container leaves its main axis unbounded.
+        let sc = self.str_(i, E_OVERFLOW, "visible") == "scroll";
+        let bnd_x = if sc && row { -1.0 } else { asx };
+        let bnd_y = if sc && !row { -1.0 } else { d(area.size.y) };
+        let bnd = |m: &Edges| -> (f64, f64) {
+            (
+                if bnd_x < 0.0 { -1.0 } else { gmax(0.0, bnd_x - m[L] - m[R]) },
+                if bnd_y < 0.0 { -1.0 } else { gmax(0.0, bnd_y - m[T] - m[B]) },
+            )
+        };
 
         let n = kids.len();
         let mut it_m: Vec<Edges> = Vec::with_capacity(n);
@@ -1196,7 +1298,8 @@ impl<'a> Pass<'a> {
             let ch = kids[k];
             let m = self.margins(ch, asx);
             let sh = self.stretch_hint(ch, row, align_items, ac, &m);
-            let nat = self.measure(ch, area.size, sh);
+            let (bxc, byc) = bnd(&m);
+            let nat = self.measure(ch, area.size, sh, bxc, byc);
             let basis = self.lenr(ch, P_BASIS, am);
             let hyp = if !basis.is_nan() {
                 basis
@@ -1275,7 +1378,8 @@ impl<'a> Pass<'a> {
                 } else if car > 0.0 {
                     if row { it_main[k] / car } else { it_main[k] * car }
                 } else {
-                    let v = self.measure(ch, area.size, if row { it_main[k] } else { -1.0 });
+                    let (bxc, byc) = bnd(&it_m[k]);
+                    let v = self.measure(ch, area.size, if row { it_main[k] } else { -1.0 }, bxc, byc);
                     comp(v, cross)
                 };
                 let cmin = gmax(self.min_or(ch, min_cross, ac, 0.0), it_inc[k]);
@@ -1435,13 +1539,9 @@ impl<'a> Pass<'a> {
                     let mxb = self.bound(ch, max_cross, ac, false);
                     it_cross[k] = gclamp(gmax(0.0, lc - mct), smin, gmax(mxb, smin));
                 } else {
+                    // A scroll box keeps inside its line through the measure
+                    // bound (see measure).
                     it_cross[k] = it_ncross[k];
-                    // Yoga: an overflow: scroll box sized by its content on
-                    // the cross axis stays inside a definite available size
-                    // (Unity's ScrollView viewport).
-                    if ac >= 0.0 && self.str_(ch, E_OVERFLOW, "visible") == "scroll" && self.dim(ch, cross_prop, ac) < 0.0 {
-                        it_cross[k] = gmax(f64::min(it_cross[k], ac - mct), it_inc[k]);
-                    }
                 }
                 let mc_start = it_m[k][cs_i];
                 let mc_end = it_m[k][ce_i];
@@ -1593,6 +1693,31 @@ impl RecCache {
 }
 
 /// flex_layout.gd _abs_free.
+/// UxmlStyleApplier.label_max_content: the longest paragraph of a Label as
+/// one line, plus its stylebox margins.
+fn label_max_content(l: &Gd<Label>) -> f64 {
+    let mut font: Option<Gd<Font>> = l.get_theme_font("font");
+    let mut fs = l.get_theme_font_size("font_size");
+    if let Some(ls) = l.get_label_settings() {
+        if let Some(lf) = ls.get_font() {
+            font = Some(lf);
+        }
+        fs = ls.get_font_size();
+    }
+    let mut t = l.get_text();
+    if l.is_uppercase() {
+        t = t.to_upper();
+    }
+    let mut w = 0.0f64;
+    if let Some(fo) = font {
+        if !t.is_empty() {
+            w = d(fo.get_multiline_string_size_ex(&t).width(-1.0).font_size(fs).done().x);
+        }
+    }
+    let sb = l.get_theme_stylebox("normal");
+    w + sb.map(|s| d(s.get_minimum_size().x)).unwrap_or(0.0)
+}
+
 fn abs_free(mode: &str, reverse: bool, outer: f64, sz: f64, lead: f64) -> f64 {
     if mode == "center" {
         return (outer - sz) / 2.0;
@@ -1617,8 +1742,10 @@ fn round_node(c: &Cascade, i: usize, abs_l: f64, abs_t: f64, src: &[Option<Rect2
     let top = d(r.position.y);
     let al = abs_l + left;
     let at = abs_t + top;
+    // Unity rounds a position from the absolute edges: the rounded
+    // absolute position less the rounded absolute position of the parent.
     out[i] = Some(Rect2::new(
-        Vector2::new(f(pixel(left)), f(pixel(top))),
+        Vector2::new(f(pixel(al) - pixel(abs_l)), f(pixel(at) - pixel(abs_t))),
         Vector2::new(f(pixel(al + d(r.size.x)) - pixel(al)), f(pixel(at + d(r.size.y)) - pixel(at))),
     ));
     for ch in c.children(i) {

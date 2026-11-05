@@ -26,17 +26,22 @@
   flex-grow: 1;
 }
 
-/* Unity gives the viewport its internal `scroll` overflow: it clips like
-   `hidden`, and Yoga keeps a content-sized scroll box inside the space
-   the parent has (the viewport of a short VerticalAndHorizontal view is
-   as tall as its content). */
+/* Overflow as Unity's ScrollView sets it (ScrollView.cs; measured in
+   inventory): the viewport clips (`hidden`) and the content container is
+   `scroll`, so the layout does not bound the content on its main axis. A
+   VerticalAndHorizontal viewport is `scroll` too, so its content is not
+   bound in any direction. Yoga keeps an auto-sized scroll box inside the
+   space of its parent on its cross axis (a row-wrap grid in a short
+   ScrollView is as tall as the viewport). The content container does not
+   clip (Unity: disableClipping); the viewport clips. */
 .unity-scroll-view__content-viewport {
   flex-grow: 1;
-  overflow: scroll;
+  overflow: hidden;
 }
 
 .unity-scroll-view__content-container {
   flex-shrink: 0;
+  overflow: scroll;
 }
 
 .unity-scroll-view__content-viewport--horizontal,
@@ -46,6 +51,7 @@
 
 .unity-scroll-view__content-viewport--vertical-horizontal {
   align-self: flex-start;
+  overflow: scroll;
 }
 
 .unity-scroll-view__content-container--horizontal {

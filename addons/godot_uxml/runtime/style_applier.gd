@@ -66,6 +66,20 @@ var _clip_content: Dictionary = {}
 ## Cached FontVariations for letter/word spacing, keyed by base font,
 ## style and spacing (spacing is rare; reusing them keeps restyles cheap).
 var _fv_cache: Dictionary = {}
+## Unity's line metrics on the default font (the default theme sets it):
+## see _line_font.
+var unity_line_metrics := false
+static var _line_fonts: Dictionary = {}
+## Unity's default runtime font (NotInter-Regular, an Inter clone): line
+## height and ascent per em. Measured: one line of text is ceil(1.2099 x
+## font-size) high (9px: 11, 10px: 13, 14px: 17, 16px: 20, 18px: 22, 20px:
+## 25 in bench/parity/unity), Inter's ascender is 1984/2048 em.
+const UNITY_LINE_EM := 1.2099
+const UNITY_ASCENT_EM := 0.96875
+## Labels fitted into a box shorter than their text line (fit_label):
+## control -> true.
+var fitted: Dictionary = {}
+static var _fit_fonts: Dictionary = {}
 ## How many controls carry clip_text for overflow: hidden text. While zero
 ## the measurers skip the clip-text check entirely.
 var clip_texts := 0
@@ -304,6 +318,15 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 
 	var font_name := _font_name(c)
 	var font := _font(c, style, el)
+	if unity_line_metrics and (c is Label or c is Button or c is LineEdit or c is TextEdit
+			or c is RichTextLabel) and not _has_url_font(style):
+		font = _line_font(c, font, style, el)
+	if fitted.has(c):
+		# The font override below replaces the fitted font: the next
+		# placement fits the Label again.
+		fitted.erase(c)
+		c.remove_meta(&"uxml_fit")
+		c.remove_meta(&"uxml_fit_base")
 	if font != null:
 		c.add_theme_font_override(font_name, font)
 	elif c.has_theme_font_override(font_name):
@@ -779,6 +802,124 @@ func _texture_ref(ref: String, e: Dictionary, name: String, el: UxmlElement) -> 
 			'%s "%s" resolved to %s but is not a readable image' % [name, e["value"], path]
 		)
 	return tex
+
+
+## True when -unity-font or -unity-font-definition names a font file.
+static func _has_url_font(style: Dictionary) -> bool:
+	for prop in ["-unity-font", "-unity-font-definition"]:
+		var e = style.get(prop)
+		if e != null and String(e["value"]).begins_with("url("):
+			return true
+	return false
+
+
+## Unity's line height on Godot's default font. Unity lays a line of its
+## default font out ceil(1.2099 x font-size) high with the baseline 0.969
+## em below the line top; Godot's default font is taller (20px at 14px:
+## a TextField 42px high, Unity 39px). A FontVariation with whole-pixel top
+## and bottom spacing gives the Godot font Unity's line height and
+## baseline, so text boxes, field heights and line pitch measure as in
+## Unity. The glyphs keep Godot's font. Cached per base font and size.
+func _line_font(c: Control, font: Font, style: Dictionary, el: UxmlElement) -> Font:
+	var base := font
+	if base == null:
+		_capture_base_font(c)
+		base = c.get_meta("uxml_base_font", null)
+	if base == null:
+		return font
+	var fs := _effective_font_size(c, style, el)
+	if fs <= 0:
+		return font
+	var key := "%d|%d" % [base.get_instance_id(), fs]
+	var hit = _line_fonts.get(key)
+	if hit == null:
+		var want_h := ceilf(UNITY_LINE_EM * fs - 0.001)
+		var top := roundi(UNITY_ASCENT_EM * fs - base.get_ascent(fs))
+		var bottom := roundi(want_h - base.get_height(fs)) - top
+		if top == 0 and bottom == 0:
+			hit = base
+		else:
+			var fv := FontVariation.new()
+			fv.base_font = base
+			fv.set_spacing(TextServer.SPACING_TOP, top)
+			fv.set_spacing(TextServer.SPACING_BOTTOM, bottom)
+			hit = fv
+		_line_fonts[key] = hit
+	return hit if hit != base or font != null else font
+
+
+## Max-content width of a wrapping Label (its longest paragraph, as one
+## line) plus its stylebox margins: what Unity's TextElement measures
+## without a width bound. The native measurer computes the same value
+## (layout.rs, label_max_content).
+static func label_max_content(l: Label) -> float:
+	var font: Font = l.get_theme_font(&"font")
+	var fs: int = l.get_theme_font_size(&"font_size")
+	var ls := l.label_settings
+	if ls != null:
+		if ls.font != null:
+			font = ls.font
+		fs = ls.font_size
+	var t := l.text
+	if l.uppercase:
+		t = t.to_upper()
+	var w := 0.0
+	if font != null and not t.is_empty():
+		w = font.get_multiline_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs).x
+	var sb := l.get_theme_stylebox(&"normal")
+	return w + (0.0 if sb == null else sb.get_minimum_size().x)
+
+
+## Godot floors a Control at its minimum size, and the minimum height of a
+## Label is one line of its font. Unity draws text that does not fit its
+## box: a Label in a 20px TreeView row is 14px high, and a Label row of a
+## ListView is as high as the item. When the layout gives a one-line Label
+## less height than its line, the Label gets a FontVariation of its font
+## with a negative bottom spacing as large as the deficit (whole pixels).
+## The control then takes the laid-out height, and the text keeps its
+## baseline. `uxml_fit` (on the control) holds the deficit; the measurers
+## add it back, so the measure does not change. Called after the control
+## got its laid-out size.
+func fit_label(c: Label, want: Vector2) -> void:
+	var fit: int = int(c.get_meta(&"uxml_fit", 0))
+	var need := 0
+	if c.autowrap_mode == TextServer.AUTOWRAP_OFF and c.label_settings == null and c.get_line_count() <= 1:
+		need = maxi(0, int(ceilf(c.get_combined_minimum_size().y + fit - want.y - 0.01)))
+	if need == fit:
+		if c.size != want:
+			c.size = want
+		return
+	var had: bool
+	var base: Font
+	if fit > 0:
+		var keep: Array = c.get_meta(&"uxml_fit_base")
+		had = keep[0]
+		base = keep[1]
+	else:
+		had = c.has_theme_font_override(&"font")
+		base = c.get_theme_font(&"font")
+	if need == 0:
+		if had:
+			c.add_theme_font_override(&"font", base)
+		else:
+			c.remove_theme_font_override(&"font")
+		c.remove_meta(&"uxml_fit")
+		c.remove_meta(&"uxml_fit_base")
+		fitted.erase(c)
+	else:
+		var key := "%d|%d" % [0 if base == null else base.get_instance_id(), need]
+		var fv: FontVariation = _fit_fonts.get(key)
+		if fv == null:
+			fv = FontVariation.new()
+			fv.base_font = base
+			fv.set_spacing(TextServer.SPACING_BOTTOM, -need)
+			_fit_fonts[key] = fv
+		c.add_theme_font_override(&"font", fv)
+		c.set_meta(&"uxml_fit", need)
+		if fit == 0:
+			c.set_meta(&"uxml_fit_base", [had, base])
+		fitted[c] = true
+	c.size = want
 
 
 ## Records the control's pre-override theme font once, at apply() entry —
@@ -1277,6 +1418,10 @@ func _apply_overflow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	var hidden := ov == "hidden" or ov == "scroll"
 	if not ov.is_empty() and not hidden and ov != "visible":
 		_warn(el, "overflow", 'overflow: "%s" is not visible, hidden or scroll; visible used' % ov)
+	if ov == "scroll" and el != null and el.part_of != null and str(el.get_attribute("class")).contains("unity-scroll-view__content-container"):
+		# Unity's ScrollView content container is `scroll` for the layout
+		# but does not clip (disableClipping); the viewport clips.
+		hidden = false
 	if hidden or c.has_meta("uxml_clip_default"):
 		if not c.has_meta("uxml_clip_default"):
 			c.set_meta("uxml_clip_default", c.clip_contents)

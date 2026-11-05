@@ -122,6 +122,19 @@ class ScrollViewBehavior extends UxmlBehaviors.Behavior:
 		var c: Control = doc._controls.get(x)
 		return null if c == null else c.size
 
+	func _rect_of(x: UxmlElement):
+		var c: Control = doc._controls.get(x)
+		return null if c == null or not c.visible else Rect2(c.position, c.size)
+
+	func _clips(x: UxmlElement) -> bool:
+		var c: Control = doc._controls.get(x)
+		return c != null and c.clip_contents
+
+	## Unity contentContainer.boundingBox (the content and the children
+	## that overflow it).
+	func _bounds_of(x: UxmlElement):
+		return UxmlContainerParts.bounding_size(x, _rect_of, _clips)
+
 	func after_layout() -> void:
 		var before := offset()
 		# Scroller state depends only on the viewport, content and Scroller
@@ -134,7 +147,7 @@ class ScrollViewBehavior extends UxmlBehaviors.Behavior:
 			return
 		_last_sizes = key
 		# update_scroll_view also places the Scroller draggers.
-		UxmlContainerParts.update_scroll_view(el, _size_of)
+		UxmlContainerParts.update_scroll_view(el, _size_of, _bounds_of)
 		if _pending != null:
 			var want: Vector2 = _pending
 			UxmlContainerParts.set_scroll_offset(el, want)
@@ -595,6 +608,16 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 	var _resize_col := -1
 	var _resize_x := 0.0
 	var _resize_w := 0.0
+	# Rows in use: Unity's floor(viewport / item height) + 2 (FixedHeight)
+	# or ceil(viewport / expected height) + 2 (DynamicHeight); the other
+	# pooled rows stay hidden and unbound.
+	var _active := 0
+	# virtualization-method="DynamicHeight": measured item heights, the
+	# smallest measured height (Unity's m_MinimumItemHeight).
+	var _dynamic := false
+	var _heights: Dictionary = {}
+	var _min_h := -1.0
+	var _scroll_target := -1   # scroll_to_item waits for measured heights
 
 	func setup() -> void:
 		_sv = UxmlContainerParts.get_part(el, "scroll-view")
@@ -619,6 +642,8 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 						UxmlContainerBehaviors.set_focus(t, Control.FOCUS_NONE)
 						t.toggled.connect(_on_toggle.bind(r))
 		_info = {"rows": _rows, "h": h, "count": 0, "bind": Callable(), "first": 0}
+		_dynamic = UxmlContainerParts.is_dynamic(el)
+		_active = _rows.size()
 		doc._lists[el] = _info
 		_selection = []
 		for s in _initial_sort():
@@ -684,10 +709,70 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 	func item_height() -> float:
 		return float(_info["h"])
 
+	## The rows in use (get_list_rows).
+	func active_rows() -> Array:
+		return _rows.slice(0, _active)
+
+	# ---- DynamicHeight ----------------------------------------------------
+
+	## Unity's defaultExpectedHeight: the smallest measured item height when
+	## it is below fixed-item-height, else fixed-item-height (22 without).
+	func expected_height() -> float:
+		return _min_h if _min_h > 0.0 else item_height()
+
+	## Height of item `i`: measured, else expected (DynamicHeight).
+	func height_of(i: int) -> float:
+		if not _dynamic:
+			return item_height()
+		return float(_heights.get(i, expected_height()))
+
+	## Content offset of the top of item `i`.
+	func item_top(i: int) -> float:
+		if not _dynamic:
+			return i * item_height()
+		var exp_h := expected_height()
+		var out := i * exp_h
+		for k in _heights:
+			if int(k) < i:
+				out += float(_heights[k]) - exp_h
+		return out
+
+	## Unity GetExpectedContentHeight.
+	func content_extent() -> float:
+		return item_top(count())
+
+	## The item at content offset `y` (clamped to the items).
+	func index_at(y: float) -> int:
+		var n := count()
+		if n == 0:
+			return 0
+		if not _dynamic:
+			return clampi(int(floor(y / item_height())), 0, n - 1)
+		var top := 0.0
+		for i in n:
+			var hh := height_of(i)
+			if top + hh > y:
+				return i
+			top += hh
+		return n - 1
+
+	## Rows Unity keeps for the current viewport (all rows before a layout).
+	func _rows_for_viewport() -> int:
+		var vh := _viewport_h()
+		if vh <= 0.0:
+			return _rows.size()
+		var want: int
+		if _dynamic:
+			want = int(ceil(vh / expected_height())) + 2
+		else:
+			want = int(floor(vh / item_height())) + 2
+		return clampi(want, 1, _rows.size())
+
 	# ---- data ---------------------------------------------------------
 
 	## set_list_source: `n` items, `bind.call(row: UxmlListRow, index)`.
 	func set_source(n: int, bind: Callable) -> void:
+		_forget_heights()
 		_info["count"] = maxi(0, n)
 		_info["bind"] = bind
 		_clamp_selection()
@@ -766,21 +851,38 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 		_items = items
 
 	func refresh(rebind_all: bool) -> void:
-		var pool := _rows.size()
+		_active = _rows_for_viewport()
+		var pool := _active
 		var n := count()
 		var h := item_height()
 		var off := Vector2.ZERO
 		var svb = doc._behaviors.get(_sv)
 		if svb != null:
 			off = svb.offset()
-		var first := clampi(int(floor(off.y / h)), 0, maxi(0, n - pool))
+		var first: int
+		if _dynamic:
+			first = clampi(index_at(off.y), 0, maxi(0, n - pool))
+		else:
+			first = clampi(int(floor(off.y / h)), 0, maxi(0, n - pool))
 		_info["first"] = first
 		var bind: Callable = _info["bind"]
 		var rebound := false
-		UxmlContainerParts.content_height(el, n)
-		for k in pool:
+		if _dynamic:
+			# Rows lay out in item order below a padding as tall as the items
+			# above the first row (Unity's contentPadding); the content is
+			# as tall as the expected content height.
+			UxmlContainerParts.content_extent(el, content_extent() if n > 0 else -1.0, item_top(first))
+		else:
+			UxmlContainerParts.content_height(el, n)
+		for k in _rows.size():
 			var row: UxmlListRow = _rows[k]
-			var idx := first + posmod(k - first, pool)
+			if k >= pool:
+				if row.index != -1:
+					row.index = -1
+					UxmlContainerParts.bind_row(el, row.element, -1, false)
+					rebound = true
+				continue
+			var idx := (first + k) if _dynamic else (first + posmod(k - first, pool))
 			if idx >= n:
 				if row.index != -1:
 					row.index = -1
@@ -848,7 +950,10 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 				set_state(UxmlContainerParts.get_part(x, "input"), "checked", open)
 
 	## Slot k is laid out at k * h; the control moves to its item's place.
+	## DynamicHeight rows lay out in item order (no move).
 	func _place() -> void:
+		if _dynamic:
+			return
 		var h := item_height()
 		for k in _rows.size():
 			var c: Control = _row_ctl[k]
@@ -864,10 +969,88 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 		# A layout put every row back at its slot.
 		_shift.fill(0)
 		_place()
+		if _dynamic and (_measure_rows() or _follow_target()):
+			return
+		if _rows_for_viewport() != _active:
+			# The viewport changed: Unity's Resize adds or releases rows.
+			refresh(false)
+			return
 		if UxmlContainerParts.is_multi_column(el):
 			var hc := control_of(UxmlContainerParts.get_part(el, "header"))
 			if hc != null:
 				UxmlContainerParts.update_columns(el, hc.size.x)
+
+	## DynamicHeight: register the laid-out height of each bound row
+	## (Unity UpdateRegisteredHeight). When a height changes, the content
+	## height and the padding follow, and the scroll offset moves so that
+	## the first visible item stays where it is on screen. Returns true when
+	## it changed the model.
+	func _measure_rows() -> bool:
+		var svb = doc._behaviors.get(_sv)
+		var off: Vector2 = Vector2.ZERO if svb == null else svb.offset()
+		var anchor := index_at(off.y)
+		var anchor_delta := off.y - item_top(anchor)
+		var changed := false
+		for k in _active:
+			var row: UxmlListRow = _rows[k]
+			var c: Control = _row_ctl[k]
+			if row.index < 0 or c == null or not c.visible:
+				continue
+			var hh := c.size.y
+			if hh <= 0.0:
+				continue
+			if hh < expected_height() and not is_equal_approx(hh, _min_h):
+				_min_h = hh
+				changed = true
+			var old = _heights.get(row.index)
+			if old == null or not is_equal_approx(float(old), hh):
+				_heights[row.index] = hh
+				changed = true
+		if not changed:
+			return false
+		if svb != null and anchor > 0:
+			var want := Vector2(off.x, item_top(anchor) + anchor_delta)
+			if not want.is_equal_approx(off):
+				svb.set_offset_pending(want)
+		refresh(false)
+		return true
+
+	## DynamicHeight scroll_to_item: the target offset uses expected heights
+	## until the rows around the item are measured; the scroll follows the
+	## measured heights until it holds (Unity schedules ScrollToItem again
+	## after the layout). Returns true when it changed the model.
+	func _follow_target() -> bool:
+		if _scroll_target < 0:
+			return false
+		var i := _scroll_target
+		var svb = doc._behaviors.get(_sv)
+		if svb == null or i >= count():
+			_scroll_target = -1
+			return false
+		var off: Vector2 = svb.offset()
+		var want := _offset_showing(i, off)
+		if want.is_equal_approx(off):
+			_scroll_target = -1
+			return false
+		svb.set_offset_pending(want)
+		refresh(false)
+		return true
+
+	## The smallest scroll from `off` that shows item `i`.
+	func _offset_showing(i: int, off: Vector2) -> Vector2:
+		var top := item_top(i)
+		var bottom := top + height_of(i)
+		var vh := _viewport_h()
+		if top < off.y:
+			off.y = top
+		elif bottom > off.y + vh:
+			off.y = bottom - vh
+		return off
+
+	## Item heights change with the items: a new source forgets them.
+	func _forget_heights() -> void:
+		_heights.clear()
+		_min_h = -1.0
 
 	# ---- selection -------------------------------------------------------
 
@@ -941,7 +1124,7 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 		if cc == null:
 			return
 		var local := cc.get_global_transform().affine_inverse() * at
-		var to := clampi(int(floor(local.y / item_height())), 0, count() - 1)
+		var to := clampi(index_at(local.y), 0, count() - 1)
 		move_item(_drag_from, to)
 
 	## Move item `from` to index `to` (reorderable): the bound Array moves
@@ -990,7 +1173,7 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 		if not ev.is_pressed() or count() == 0:
 			return
 		var cur: int = _selection[-1] if not _selection.is_empty() else -1
-		var page := maxi(1, int(floor(_viewport_h() / item_height())))
+		var page := maxi(1, int(floor(_viewport_h() / expected_height())))
 		var to := -2
 		if ev.is_action_pressed("ui_down"):
 			to = cur + 1
@@ -1042,14 +1225,13 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 		var svb = doc._behaviors.get(_sv)
 		if svb == null or i < 0:
 			return
-		var h := item_height()
-		var off: Vector2 = svb.offset()
-		var vh := _viewport_h()
-		if i * h < off.y:
-			off.y = i * h
-		elif (i + 1) * h > off.y + vh:
-			off.y = (i + 1) * h - vh
-		svb.set_offset(off)
+		var off := _offset_showing(i, svb.offset())
+		if _dynamic:
+			_scroll_target = i
+			svb.set_offset_pending(off)
+			refresh(false)
+		else:
+			svb.set_offset(off)
 
 	# ---- footer, size field ----------------------------------------------
 
@@ -1457,6 +1639,17 @@ class TabViewBehavior extends UxmlBehaviors.Behavior:
 
 ## Tab: its `label` and `icon-image` reach the header parts.
 class TabBehavior extends UxmlBehaviors.Behavior:
+	func setup() -> void:
+		var header := UxmlContainerParts.get_part(el, "header")
+		if header != null and el.children.has(header):
+			# A Tab outside a TabView: the underline follows the Tab width.
+			doc._post_layout.append(self)
+
+	func after_layout() -> void:
+		UxmlContainerParts.update_lone_tab(el, func(x: UxmlElement):
+			var c: Control = doc._controls.get(x)
+			return null if c == null else c.size)
+
 	func on_model_changed() -> void:
 		# Inside a TabView the header moved; the part cache still finds it.
 		var lbl := UxmlContainerParts.get_part(el, "header-label")

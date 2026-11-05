@@ -334,10 +334,15 @@ static func min_max_layout(el: UxmlElement, input_w: float, thumbs: Vector2, edg
 # ---------------------------------------------------------------------------
 
 ## The editable text part: a TextElement whose control is the Godot
-## LineEdit/TextEdit (UxmlControlFactory, role "editor").
-static func _editor(el: UxmlElement, text: String, multiline: bool) -> UxmlElement:
-	var classes := ["unity-text-element", "unity-text-element__selectable",
-		"unity-text-element--inner-input-field-component"]
+## LineEdit/TextEdit (UxmlControlFactory, role "editor"). In an inner
+## ScrollView the text element has Unity's scroll-view classes instead.
+static func _editor(el: UxmlElement, text: String, multiline: bool, scroll: bool = false) -> UxmlElement:
+	var classes := ["unity-text-element", "unity-text-element__selectable"]
+	if scroll:
+		classes.append_array(["unity-text-element--inner-input-field-component--scroll-view",
+			"unity-text-element--inner-input-field-component--vertical-horizontal"])
+	else:
+		classes.append("unity-text-element--inner-input-field-component")
 	var te := UxmlParts.part(el, "TextElement", "editor", "", classes, text)
 	if multiline:
 		te.set_meta(&"uxml_multiline", true)
@@ -357,19 +362,51 @@ static func text_value(el: UxmlElement) -> String:
 	return s
 
 
+## True for a multiline TextField with a vertical Scroller
+## (`vertical-scroller-visibility` Auto or AlwaysVisible): Unity puts a
+## ScrollView in its text input (TextInputBase.SetMultiline).
+static func has_inner_scroll_view(el: UxmlElement) -> bool:
+	return (el.local == "TextField" and flag(el, "multiline", false)
+		and UxmlParts._attr(el, "vertical-scroller-visibility", "Hidden") in ["Auto", "AlwaysVisible"])
+
+
 ## TextField: [label] TextInput#unity-text-input > TextElement (single
-## line) or > .unity-base-text-field__multiline-container > TextElement.
+## line), > .unity-base-text-field__multiline-container > TextElement, or,
+## with a vertical Scroller, > ScrollView.unity-scroll-view--inner-input-
+## field-component > ... > content container > TextElement (measured:
+## ctl-textfield-multiline). The inner ScrollView is VerticalAndHorizontal
+## (Unity: Vertical for `white-space: normal`) and never shows a
+## horizontal Scroller.
 static func _build_text_field(el: UxmlElement) -> UxmlElement:
 	var multiline := flag(el, "multiline", false)
+	var scroll := has_inner_scroll_view(el)
+	var input_class := "unity-base-text-field__input--single-line"
+	if scroll:
+		input_class = "unity-base-text-field__input--multiline--scroll-view"
+	elif multiline:
+		input_class = "unity-base-text-field__input--multiline"
 	var input := field_parts(el, ["base-text-field", "text-field"], "TextInput", "unity-text-input",
-		["unity-base-text-field__input",
-		"unity-base-text-field__input--multiline" if multiline else "unity-base-text-field__input--single-line",
+		["unity-base-text-field__input", input_class,
 		"unity-base-field__input", "unity-text-field__input"])
 	var text := text_value(el)
 	if text.is_empty() and not UxmlParts._attr(el, "placeholder-text").is_empty():
 		UxmlParts._append_class(input, "unity-base-text-field__input--placeholder")
-	var te := _editor(el, text, multiline)
-	if multiline:
+	var te := _editor(el, text, multiline, scroll)
+	if scroll:
+		var sv := UxmlParts.part(el, "ScrollView", "scroll-view", "",
+			["unity-scroll-view--inner-input-field-component"])
+		sv.attributes.append({"name": "mode", "value": "VerticalAndHorizontal", "offset": 0})
+		sv.attributes.append({"name": "horizontal-scroller-visibility", "value": "Hidden", "offset": 0})
+		sv.attributes.append({"name": "vertical-scroller-visibility",
+			"value": UxmlParts._attr(el, "vertical-scroller-visibility"), "offset": 0})
+		UxmlParts.build(sv)
+		UxmlParts._append_class(UxmlContainerParts.get_part(sv, "viewport"),
+			"unity-scroll-view__content-viewport--inner-input-field-component")
+		var content := UxmlContainerParts.get_part(sv, "content")
+		UxmlParts._append_class(content, "unity-scroll-view__content-container--inner-input-field-component")
+		content.children.append(te)
+		input.children.append(sv)
+	elif multiline:
 		var box := UxmlParts.part(el, "VisualElement", "multiline-container", "",
 			["unity-base-text-field__multiline-container"])
 		box.children.append(te)

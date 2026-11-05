@@ -734,3 +734,96 @@ func test_disabled_input_controls() -> void:
 	h.eq(_val(doc, _part(doc, "t", "input"), "background-color"), "rgb(209, 209, 209)", "disabled text input")
 	h.eq((doc.get_native("t") as LineEdit).editable, false, "disabled editor is not editable")
 	_unload(doc)
+
+
+## A multiline TextField with a vertical Scroller (Auto, AlwaysVisible):
+## Unity's inner ScrollView in the text input (ctl-textfield-multiline).
+## The editor is as large as its text and the ScrollView scrolls it.
+func test_text_field_inner_scroll_view() -> void:
+	var lines := PackedStringArray()
+	for i in 12:
+		lines.append("line %d" % i)
+	var doc := _doc('<ui:TextField name="m" multiline="true" value="%s" style="height: 80px;" vertical-scroller-visibility="AlwaysVisible" />' % "&#10;".join(lines)
+		+ '<ui:TextField name="hid" multiline="true" value="x" vertical-scroller-visibility="Hidden" />')
+	await h.process_frame
+	await h.process_frame
+	var input := _part(doc, "m", "input")
+	h.check(input.class_list().has("unity-base-text-field__input--multiline--scroll-view"), "input --multiline--scroll-view class")
+	var sv := _part(doc, "m", "scroll-view")
+	h.check(sv != null and sv.local == "ScrollView", "a ScrollView part in the input")
+	if sv == null:
+		_unload(doc)
+		return
+	h.eq(_classes(sv), _sorted(["unity-scroll-view", "unity-scroll-view--inner-input-field-component",
+		"unity-scroll-view--scroll", "unity-scroll-view--vertical-horizontal"]), "ScrollView classes")
+	var content := UxmlContainerParts.get_part(sv, "content")
+	var ed := _part(doc, "m", "editor")
+	h.check(content.children.has(ed), "the text element is in the ScrollView content")
+	h.check(ed.class_list().has("unity-text-element--inner-input-field-component--scroll-view"), "text element --scroll-view class")
+	var vs := UxmlContainerParts.get_part(sv, "vertical-scroller")
+	h.check(_val(doc, vs, "display") != "none", "AlwaysVisible: the vertical Scroller shows")
+	var te := doc.get_native("m") as TextEdit
+	var vp: Control = doc._controls[UxmlContainerParts.get_part(sv, "viewport")]
+	h.check(te.size.y > vp.size.y, "the editor is as tall as its text (%s > %s)" % [te.size.y, vp.size.y])
+	h.eq(doc.get_element("m").size.y, 80.0, "the field keeps its height")
+	h.check(_part(doc, "hid", "multiline-container") != null, "Hidden: the multiline container, no ScrollView")
+	# The caret at the end scrolls the ScrollView (Unity UpdateScrollOffset).
+	te.grab_focus()
+	te.set_caret_line(11)
+	await h.process_frame
+	var b = doc._behaviors.get(sv)
+	h.check(b != null and b.offset().y > 0.0, "the caret on the last line scrolls the view")
+	_unload(doc)
+
+
+## Unity's line height on the default font: a TextField is 39px high and a
+## Label 25px at 14px (Godot's own font metrics give 42px and 28px).
+func test_unity_line_height() -> void:
+	var doc := _doc('<ui:TextField name="t" label="Name" value="Ada" /><ui:Label name="l" text="Hi" />')
+	await h.process_frame
+	h.eq(doc.get_element("t").size.y, 39.0, "TextField height (ctl-textfield: 39)")
+	h.eq(doc.get_element("l").size.y, 25.0, "Label height (17px line + 8px padding)")
+	_unload(doc)
+
+
+## The dropdown menu: Unity's GenericDropdownMenu has a ScrollView inside
+## the outer container, which a long menu gets as max-height, and author
+## sheets style the menu (Unity attaches it under the document root).
+func test_dropdown_menu_scrolls_and_takes_author_styles() -> void:
+	var choices := PackedStringArray()
+	for i in 60:
+		choices.append("Choice %d" % i)
+	var doc := _doc('<ui:DropdownField name="d" label="Q" choices="%s" index="0" />' % ",".join(choices),
+		'.unity-base-dropdown__label { color: rgb(255, 0, 0); }')
+	await h.process_frame
+	var pf := doc.get_native("d") as UxmlPopupField
+	pf.grab_focus()
+	_action(pf, "ui_accept")
+	await h.process_frame
+	var menu: UxmlPopupMenu = null
+	for ch in input_ctl(doc, "d").get_children(true) + doc.get_element("d").get_children(true):
+		if ch is UxmlPopupMenu:
+			menu = ch
+	h.check(menu != null, "the menu opens")
+	if menu == null:
+		_unload(doc)
+		return
+	var md := menu.document()
+	var inner := md.get_element_model("inner")
+	h.eq(inner.local, "ScrollView", "the inner container is a ScrollView")
+	h.check(inner.class_list().has("unity-base-dropdown__container-inner"), "inner container class")
+	h.check(menu.size.y < 60 * 20, "a long menu is limited to the space it has (%d)" % menu.size.y)
+	var lbl: UxmlElement = null
+	for x in md.get_element_model("item-3").walk():
+		if x.local == "Label":
+			lbl = x
+	h.eq(md._styles.get(lbl, {}).get("color", {}).get("value"), "rgb(255, 0, 0)", "an author sheet styles the menu")
+	var down := InputEventAction.new()
+	down.action = "ui_down"
+	down.pressed = true
+	for k in 40:
+		menu.window_input.emit(down)
+	await h.process_frame
+	h.check(md.get_scroll_offset("inner").y > 0.0, "the highlight scrolls the menu")
+	menu.hide()
+	_unload(doc)

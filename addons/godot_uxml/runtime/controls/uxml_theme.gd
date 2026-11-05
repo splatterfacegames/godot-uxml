@@ -55,7 +55,7 @@ static func attach_containers(doc: UxmlDocumentModel) -> void:
 		return
 	var found := false
 	for el in doc.root.walk():
-		if CONTAINER_TAGS.has(el.local):
+		if CONTAINER_TAGS.has(el.local) or UxmlInputParts.has_inner_scroll_view(el):
 			found = true
 			break
 	if not found:

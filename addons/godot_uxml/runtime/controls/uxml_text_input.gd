@@ -98,5 +98,9 @@ static func configure(c: Control, field: UxmlElement) -> void:
 		le.virtual_keyboard_enabled = not UxmlParts._bool(field, "hide-mobile-input", false)
 		le.virtual_keyboard_type = KEYBOARD.get(UxmlParts._attr(field, "keyboard-type", "Default"), LineEdit.KEYBOARD_TYPE_DEFAULT)
 	elif c is TextEdit:
-		var vis := UxmlParts._attr(field, "vertical-scroller-visibility", "Hidden")
-		(c as TextEdit).scroll_fit_content_height = vis == "Hidden"
+		# Hidden: the field grows with the text. Auto/AlwaysVisible: the
+		# editor is as large as its text and the inner ScrollView scrolls
+		# it (TextFieldBehavior keeps the caret in view).
+		var te := c as TextEdit
+		te.scroll_fit_content_height = true
+		te.scroll_fit_content_width = UxmlInputParts.has_inner_scroll_view(field)
