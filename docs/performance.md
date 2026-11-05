@@ -147,3 +147,28 @@ Layout (`runtime/flex_layout.gd`)
 - Computed-style entries and origin Dictionaries are shared between
   elements (they already partly were); treat `get_computed_style()`
   results as read-only.
+
+## Versus hand-built native Godot UI
+
+`bench/native_compare.gd` builds the same big screen the way you would
+author it in Godot — VBox/HBox/HFlow/Scroll/PanelContainers, StyleBoxFlat
+panels, theme overrides (1678 nodes) — and times the same operations
+synchronously. Native container re-sorts are forced on every container (an
+upper bound: the engine's deferred sort only touches containers whose size
+or children's minimum sizes changed).
+
+| op | native Godot | godot-uxml |
+| --- | ---: | ---: |
+| build in code + first layout | 289.6 ms | 1472.3 ms (load .uxml/.uss incl. settle) |
+| instantiate `.tscn` + first layout | 282.8 ms | — |
+| hover-style recolor | 0.034 ms | 10.04 ms (incl. O(n) cascade input scan) |
+| resize relayout | 6.67 ms | 56.4 ms (validated cached layout) |
+| one Label text change + relayout | 1.26 ms | 64.2 ms (`relayout()`) |
+| engine idle frame, same tree size | 10.7 ms | 6.9 ms |
+
+Native containers are C++ and incremental by construction — a recolor is a
+property write, a text change re-sorts one container chain. godot-uxml pays
+GDScript for the USS cascade and the Yoga-semantics flex pass, plus an O(n)
+scan per restyle that keeps direct model edits visible. On small documents
+(the 37-element HUD: hover 0.49 ms, per-frame `relayout()` 1.6 ms) the gap
+is affordable; on 1500-element screens it is ~10 ms per state change.

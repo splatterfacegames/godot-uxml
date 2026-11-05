@@ -461,6 +461,10 @@ func _restyle_now() -> void:
 	var need_layout := _force_layout or _full_apply or _unsettled
 	var applied: Array = []
 	var fresh := 0  # applied[0..fresh) changed this pass; the rest are re-applies
+	# Only applies that can change a measure keep the document unsettled:
+	# paint-only changes (colors, radii, ...) never move a minimum size, so
+	# a stream of hovers right after a load must not relayout forever.
+	var measure_fresh := _full_apply
 	if _full_apply:
 		applied = _controls.keys()
 		fresh = applied.size()
@@ -471,14 +475,16 @@ func _restyle_now() -> void:
 		for k in changed.size():
 			var el: UxmlElement = els[changed[k]]
 			seen[el] = true
-			if not need_layout and not _paint_only(olds[k], _styles[el]):
+			if not _paint_only(olds[k], _styles[el]):
 				need_layout = true
+				measure_fresh = true
 		# Effective disabled / display:none flips (ancestors included).
 		# Disabled flips relayout too: native disabled styling may change
 		# a control's minimum size.
 		for el in flipped:
 			seen[el] = true
 			need_layout = true
+			measure_fresh = true
 		for el in seen:
 			if _controls.has(el):
 				applied.append(el)
@@ -491,6 +497,7 @@ func _restyle_now() -> void:
 			var del = _el_of.get(c)
 			if del != null:
 				need_layout = true
+				measure_fresh = true
 				if not seen.has(del):
 					seen[del] = true
 					applied.append(del)
@@ -505,7 +512,7 @@ func _restyle_now() -> void:
 	_full_apply = false
 	_force_layout = false
 	if need_layout:
-		_pending_fresh = fresh > 0
+		_pending_fresh = measure_fresh
 		_do_layout()
 	else:
 		# Re-applied themed controls got fresh styleboxes: hand them the
