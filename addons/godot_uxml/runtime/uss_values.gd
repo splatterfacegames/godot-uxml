@@ -266,3 +266,412 @@ static func _parse_color_uncached(text: String) -> Dictionary:
 		"color": Color.TRANSPARENT, "ok": false,
 		"problem": 'cannot read "%s" as a color' % text.strip_edges(),
 	}
+
+
+# ---------------------------------------------------------------------------
+# Visual properties (opacity, transforms, text shadow, backgrounds, cursor)
+# ---------------------------------------------------------------------------
+# Each parser follows Unity 6 StylePropertyReader / StylePropertyReaderHelper
+# and returns a shared, memoized Dictionary with `ok` and, when false, a
+# `problem` string. Callers treat the results as read-only.
+
+static var _c_visual := {}
+
+
+static func _memo(kind: String, text: String, fn: Callable) -> Dictionary:
+	var key := kind + "|" + text
+	var hit = _c_visual.get(key)
+	if hit != null:
+		return hit
+	if _c_visual.size() > 8192:
+		_c_visual.clear()
+	var out: Dictionary = fn.call(text.strip_edges())
+	_c_visual[key] = out
+	return out
+
+
+static func _bad(problem: String) -> Dictionary:
+	return {"ok": false, "problem": problem}
+
+
+## <number>, clamped to 0..1 (Unity clamps the resolved opacity).
+static func parse_opacity(text: String) -> Dictionary:
+	return _memo("opacity", text, _opacity)
+
+
+static func _opacity(v: String) -> Dictionary:
+	var n := parse_number(v)
+	if is_nan(n):
+		return _bad('opacity: "%s" is not a number' % v)
+	return {"ok": true, "value": clampf(n, 0.0, 1.0)}
+
+
+## A <length> | <percentage> component -> [px, ratio] (one of them nonzero).
+static func _len_pct(part: String) -> Variant:
+	var p := parse_length(part)
+	match p["kind"]:
+		"px":
+			return [float(p["value"]), 0.0]
+		"percent":
+			return [0.0, float(p["value"]) / 100.0]
+	return null
+
+
+## translate: none | <lp> [<lp> <length>?]? -> {px: Vector2, ratio: Vector2}.
+## One value translates both axes; the z component is accepted and ignored.
+## A percentage is of the element's own size.
+static func parse_translate(text: String) -> Dictionary:
+	return _memo("translate", text, _translate)
+
+
+static func _translate(v: String) -> Dictionary:
+	if v == "none":
+		return {"ok": true, "px": Vector2.ZERO, "ratio": Vector2.ZERO}
+	var parts := UssProperties.split_value(v)
+	if parts.is_empty() or parts.size() > 3:
+		return _bad('translate: "%s" expects 1 to 3 values' % v)
+	var x = _len_pct(parts[0])
+	var y = x if parts.size() == 1 else _len_pct(parts[1])
+	if x == null or y == null:
+		return _bad('translate: "%s" is not a px or %% length' % v)
+	if parts.size() == 3 and parse_length(parts[2])["kind"] != "px":
+		return _bad('translate: z "%s" is not a length' % parts[2])
+	return {"ok": true, "px": Vector2(x[0], y[0]), "ratio": Vector2(x[1], y[1])}
+
+
+## <angle> in deg | rad | grad | turn (a bare number is degrees) -> radians,
+## NAN when unreadable.
+static func parse_angle(text: String) -> float:
+	var v := text.strip_edges().to_lower()
+	for pair in [["grad", PI / 200.0], ["turn", TAU], ["deg", PI / 180.0], ["rad", 1.0]]:
+		var u: String = pair[0]
+		if v.ends_with(u):
+			var n := parse_number(v.substr(0, v.length() - u.length()))
+			return NAN if is_nan(n) else n * float(pair[1])
+	var bare := parse_number(v)
+	return NAN if is_nan(bare) else deg_to_rad(bare)
+
+
+## rotate: none | <angle> | [x|y|z|<number>{3}] && <angle> -> {angle}.
+## Godot rotates a Control in the screen plane only, so an axis other than
+## z is a problem.
+static func parse_rotate(text: String) -> Dictionary:
+	return _memo("rotate", text, _rotate)
+
+
+static func _rotate(v: String) -> Dictionary:
+	if v == "none":
+		return {"ok": true, "angle": 0.0}
+	var parts := UssProperties.split_value(v)
+	var angle := NAN
+	var axis_ok := true
+	match parts.size():
+		1:
+			angle = parse_angle(parts[0])
+		2:
+			var a: String = parts[0]
+			var b: String = parts[1]
+			if ["x", "y", "z"].has(b.to_lower()):
+				var t := a
+				a = b
+				b = t
+			angle = parse_angle(b)
+			axis_ok = a.to_lower() == "z"
+		4:
+			angle = parse_angle(parts[3])
+			var ax := parse_number(parts[0])
+			var ay := parse_number(parts[1])
+			var az := parse_number(parts[2])
+			if is_nan(ax) or is_nan(ay) or is_nan(az):
+				return _bad('rotate: "%s" has a non-numeric axis' % v)
+			axis_ok = is_zero_approx(ax) and is_zero_approx(ay) and az > 0.0
+		_:
+			return _bad('rotate: "%s" expects an angle, optionally with an axis' % v)
+	if is_nan(angle):
+		return _bad('rotate: "%s" has no readable angle (deg, rad, grad or turn)' % v)
+	if not axis_ok:
+		return _bad('rotate: "%s" turns about a 3D axis; only z rotation is supported' % v)
+	return {"ok": true, "angle": angle}
+
+
+## scale: none | <number>{1,3} -> {scale: Vector2}. One value scales both
+## axes; z is accepted and ignored.
+static func parse_scale(text: String) -> Dictionary:
+	return _memo("scale", text, _scale)
+
+
+static func _scale(v: String) -> Dictionary:
+	if v == "none":
+		return {"ok": true, "scale": Vector2.ONE}
+	var parts := UssProperties.split_value(v)
+	if parts.is_empty() or parts.size() > 3:
+		return _bad('scale: "%s" expects 1 to 3 numbers' % v)
+	var nums: Array = []
+	for p in parts:
+		var n := parse_number(p)
+		if is_nan(n):
+			# Unity reads the number of a dimension too (scale: 2px is 2).
+			var l := parse_length(p)
+			if l["kind"] != "px":
+				return _bad('scale: "%s" is not a number' % p)
+			n = float(l["value"])
+		nums.append(n)
+	var sx: float = nums[0]
+	var sy: float = sx if nums.size() == 1 else nums[1]
+	return {"ok": true, "scale": Vector2(sx, sy)}
+
+
+## One transform-origin component -> [px, ratio, can_be_x, can_be_y].
+static func _origin_part(part: String) -> Variant:
+	match part.to_lower():
+		"left":
+			return [0.0, 0.0, true, false]
+		"right":
+			return [0.0, 1.0, true, false]
+		"top":
+			return [0.0, 0.0, false, true]
+		"bottom":
+			return [0.0, 1.0, false, true]
+		"center":
+			return [0.0, 0.5, true, true]
+	var lp = _len_pct(part)
+	if lp == null:
+		return null
+	return [lp[0], lp[1], true, true]
+
+
+## transform-origin (ReadTransformOrigin) -> {px: Vector2, ratio: Vector2}.
+## Each axis defaults to 50%; keywords can come in either order; z is
+## accepted and ignored.
+static func parse_transform_origin(text: String) -> Dictionary:
+	return _memo("origin", text, _transform_origin)
+
+
+static func _transform_origin(v: String) -> Dictionary:
+	var parts := UssProperties.split_value(v)
+	if parts.is_empty() or parts.size() > 3:
+		return _bad('transform-origin: "%s" expects 1 to 3 values' % v)
+	var x := [0.0, 0.5]
+	var y := [0.0, 0.5]
+	var a = _origin_part(parts[0])
+	if a == null:
+		return _bad('transform-origin: "%s" is not a keyword, px or %% value' % parts[0])
+	if parts.size() == 1:
+		if a[2]:
+			x = [a[0], a[1]]
+		else:
+			y = [a[0], a[1]]
+	else:
+		var b = _origin_part(parts[1])
+		if b == null:
+			return _bad('transform-origin: "%s" is not a keyword, px or %% value' % parts[1])
+		if parts.size() == 3 and parse_length(parts[2])["kind"] != "px":
+			return _bad('transform-origin: z "%s" is not a length' % parts[2])
+		if a[2] and b[3]:
+			x = [a[0], a[1]]
+			y = [b[0], b[1]]
+		elif b[2] and a[3]:
+			x = [b[0], b[1]]
+			y = [a[0], a[1]]
+		else:
+			return _bad('transform-origin: "%s" names the same axis twice' % v)
+	return {"ok": true, "px": Vector2(x[0], y[0]), "ratio": Vector2(x[1], y[1])}
+
+
+## text-shadow (ReadTextShadow): <length>{2,3} && <color>? ->
+## {offset: Vector2, blur: float, color: Color}. Without a color the shadow
+## is transparent, exactly as in Unity.
+static func parse_text_shadow(text: String) -> Dictionary:
+	return _memo("shadow", text, _text_shadow)
+
+
+static func _text_shadow(v: String) -> Dictionary:
+	if v == "none":
+		return {"ok": true, "offset": Vector2.ZERO, "blur": 0.0, "color": Color(0, 0, 0, 0)}
+	var lens: Array = []
+	var color = null
+	var color_at := -1
+	for p in UssProperties.split_value(v):
+		var l := parse_length(p)
+		if l["kind"] == "px":
+			lens.append(float(l["value"]))
+			continue
+		var c := parse_color(p)
+		if not c["ok"] or color != null:
+			return _bad('text-shadow: cannot read "%s"' % p)
+		color = c["color"]
+		color_at = lens.size()
+	if lens.size() < 2 or lens.size() > 3:
+		return _bad('text-shadow: "%s" expects 2 or 3 lengths and an optional color' % v)
+	if color_at != -1 and color_at != 0 and color_at != lens.size():
+		return _bad('text-shadow: "%s" puts the color between the lengths' % v)
+	return {
+		"ok": true, "offset": Vector2(lens[0], lens[1]),
+		"blur": lens[2] if lens.size() == 3 else 0.0,
+		"color": color if color != null else Color(0, 0, 0, 0),
+	}
+
+
+## background-position-x / -y (ReadBackgroundPosition):
+##   <keyword> | <lp> | <keyword> <lp>
+## -> {keyword: center|left|right|top|bottom, unit: "px"|"percent", value}.
+## A bare length measures from the leading edge (left or top).
+static func parse_background_position(text: String, vertical: bool) -> Dictionary:
+	return _memo("bgpos-y" if vertical else "bgpos-x", text,
+		_bg_pos_y if vertical else _bg_pos_x)
+
+
+static func _bg_pos_x(v: String) -> Dictionary:
+	return _bg_pos(v, false)
+
+
+static func _bg_pos_y(v: String) -> Dictionary:
+	return _bg_pos(v, true)
+
+
+static func _bg_pos(v: String, vertical: bool) -> Dictionary:
+	var prop := "background-position-y" if vertical else "background-position-x"
+	var lead := "top" if vertical else "left"
+	var trail := "bottom" if vertical else "right"
+	var parts := UssProperties.split_value(v)
+	var kw := ""
+	var len_part := ""
+	if parts.size() == 1:
+		var w := String(parts[0]).to_lower()
+		if w == "center" or w == lead or w == trail:
+			kw = w
+		else:
+			kw = lead
+			len_part = parts[0]
+	elif parts.size() == 2:
+		kw = String(parts[0]).to_lower()
+		len_part = parts[1]
+		if kw != lead and kw != trail:
+			return _bad('%s: "%s" -- an offset needs %s or %s' % [prop, v, lead, trail])
+	else:
+		return _bad('%s: "%s" expects a keyword and/or one length' % [prop, v])
+	var out := {"ok": true, "keyword": kw, "unit": "px", "value": 0.0}
+	if not len_part.is_empty():
+		var l := parse_length(len_part)
+		if l["kind"] != "px" and l["kind"] != "percent":
+			return _bad('%s: cannot read "%s" as px or %%' % [prop, len_part])
+		out["unit"] = l["kind"]
+		out["value"] = float(l["value"])
+	return out
+
+
+## background-repeat (ReadBackgroundRepeat) -> {x, y}, each one of
+## repeat | space | round | no-repeat.
+static func parse_background_repeat(text: String) -> Dictionary:
+	return _memo("bgrep", text, _bg_repeat)
+
+
+static func _bg_repeat(v: String) -> Dictionary:
+	var parts := UssProperties.split_value(v.to_lower())
+	var valid := ["repeat", "space", "round", "no-repeat"]
+	if parts.size() == 1:
+		if parts[0] == "repeat-x":
+			return {"ok": true, "x": "repeat", "y": "no-repeat"}
+		if parts[0] == "repeat-y":
+			return {"ok": true, "x": "no-repeat", "y": "repeat"}
+		if valid.has(parts[0]):
+			return {"ok": true, "x": parts[0], "y": parts[0]}
+	elif parts.size() == 2 and valid.has(parts[0]) and valid.has(parts[1]):
+		return {"ok": true, "x": parts[0], "y": parts[1]}
+	return _bad('background-repeat: "%s" is not repeat-x, repeat-y or 1-2 of repeat, space, round, no-repeat' % v)
+
+
+## background-size (ReadBackgroundSize): [<lp>|auto]{1,2} | cover | contain
+## -> {type: "length"|"cover"|"contain", x: [unit, value], y: [unit, value]}
+## with unit "auto"|"px"|"percent". One length means `<x> auto`.
+static func parse_background_size(text: String) -> Dictionary:
+	return _memo("bgsize", text, _bg_size)
+
+
+static func _bg_size(v: String) -> Dictionary:
+	var parts := UssProperties.split_value(v.to_lower())
+	if parts.size() == 1 and (parts[0] == "cover" or parts[0] == "contain"):
+		return {"ok": true, "type": parts[0], "x": ["auto", 0.0], "y": ["auto", 0.0]}
+	if parts.is_empty() or parts.size() > 2:
+		return _bad('background-size: "%s" expects cover, contain or 1-2 sizes' % v)
+	var axes: Array = []
+	for p in parts:
+		if p == "auto":
+			axes.append(["auto", 0.0])
+			continue
+		var l := parse_length(p)
+		if l["kind"] != "px" and l["kind"] != "percent":
+			return _bad('background-size: cannot read "%s" as px, %% or auto' % p)
+		axes.append([l["kind"], float(l["value"])])
+	if axes.size() == 1:
+		# Unity: one length sets x and leaves y auto; a lone `auto` is
+		# auto on both axes.
+		axes.append(["auto", 0.0])
+	return {"ok": true, "type": "length", "x": axes[0], "y": axes[1]}
+
+
+## Unity cursor keywords -> Control.CursorShape. Unity draws keyword cursors
+## in Editor UI only; this runtime maps them to the nearest Godot shape.
+const CURSOR_SHAPES := {
+	"arrow": Control.CURSOR_ARROW,
+	"text": Control.CURSOR_IBEAM,
+	"resize-vertical": Control.CURSOR_VSIZE,
+	"resize-horizontal": Control.CURSOR_HSIZE,
+	"link": Control.CURSOR_POINTING_HAND,
+	"slide-arrow": Control.CURSOR_HSIZE,
+	"resize-up-right": Control.CURSOR_BDIAGSIZE,
+	"resize-up-left": Control.CURSOR_FDIAGSIZE,
+	"move-arrow": Control.CURSOR_MOVE,
+	"rotate-arrow": Control.CURSOR_DRAG,
+	"scale-arrow": Control.CURSOR_FDIAGSIZE,
+	"arrow-plus": Control.CURSOR_CAN_DROP,
+	"arrow-minus": Control.CURSOR_FORBIDDEN,
+	"pan": Control.CURSOR_DRAG,
+	"orbit": Control.CURSOR_DRAG,
+	"zoom": Control.CURSOR_CROSS,
+	"fps": Control.CURSOR_CROSS,
+	"split-resize-up-down": Control.CURSOR_VSPLIT,
+	"split-resize-left-right": Control.CURSOR_HSPLIT,
+	"not-allowed": Control.CURSOR_FORBIDDEN,
+}
+
+
+## cursor (ReadCursor): <keyword> | [<url>|<resource>] [<int> <int>]? ->
+## {kind: "keyword", shape} or {kind: "texture", ref, hotspot: Vector2}.
+static func parse_cursor(text: String) -> Dictionary:
+	return _memo("cursor", text, _cursor)
+
+
+static func _cursor(v: String) -> Dictionary:
+	var kw := v.to_lower()
+	if CURSOR_SHAPES.has(kw):
+		return {"ok": true, "kind": "keyword", "shape": CURSOR_SHAPES[kw]}
+	var parts := UssProperties.split_value(v)
+	if parts.is_empty():
+		return _bad("cursor: empty value")
+	var first: String = parts[0]
+	if not (first.begins_with("url(") or first.begins_with("resource(")):
+		return _bad('cursor: "%s" is not a Unity cursor keyword or a texture' % v)
+	var hot := Vector2.ZERO
+	if parts.size() == 3:
+		var hx := parse_number(parts[1])
+		var hy := parse_number(parts[2])
+		if is_nan(hx) or is_nan(hy):
+			return _bad('cursor: hotspot "%s %s" needs two integers' % [parts[1], parts[2]])
+		hot = Vector2(hx, hy)
+	elif parts.size() != 1:
+		return _bad('cursor: "%s" expects a texture and an optional x y hotspot' % v)
+	return {"ok": true, "kind": "texture", "ref": first, "hotspot": hot}
+
+
+## letter-spacing / word-spacing / -unity-paragraph-spacing: a <length>
+## that Unity's text generator reads in em/100 units (the value times
+## font-size / 100 px). Returns that px amount; NAN when unreadable.
+static func spacing_px(text: String, font_size: float) -> float:
+	var l := parse_length(text)
+	match l["kind"]:
+		"px":
+			return float(l["value"]) * font_size / 100.0
+		"auto":
+			return 0.0
+	return NAN

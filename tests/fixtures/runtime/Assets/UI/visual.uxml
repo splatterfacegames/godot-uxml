@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Visual USS properties: opacity, overflow, transforms, text effects,
+     elision, rich text, background placement, cursor, all: initial. -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="visual.uss" />
+  <ui:VisualElement name="screen" class="screen">
+    <ui:VisualElement name="row" class="row">
+      <ui:VisualElement name="faded" class="box faded">
+        <ui:VisualElement name="fadedkid" class="kid" />
+      </ui:VisualElement>
+      <ui:VisualElement name="moved" class="box moved" />
+      <ui:VisualElement name="after" class="box" />
+    </ui:VisualElement>
+    <ui:VisualElement name="clipped" class="clipped">
+      <ui:VisualElement name="clipkid" class="kid" />
+    </ui:VisualElement>
+    <ui:VisualElement name="clipcontent" class="clipped content">
+      <ui:VisualElement name="clipkid2" class="kid" />
+    </ui:VisualElement>
+    <ui:Label name="plain" class="f20" text="Spacing" />
+    <ui:Label name="spaced" class="f20 spaced" text="Spacing" />
+    <ui:Label name="paras" class="f20" text="one&#10;two" />
+    <ui:Label name="paraspaced" class="f20 paragraph" text="one&#10;two" />
+    <ui:VisualElement name="shadowparent" class="shadow">
+      <ui:Label name="shadowkid" text="Shade" />
+      <ui:Button name="shadowbtn" text="Btn" />
+    </ui:VisualElement>
+    <ui:Label name="blurry" class="blur" text="Blur" />
+    <ui:Label name="elide-end" class="elide" text="The quick brown fox jumps over the lazy dog" />
+    <ui:Label name="elide-start" class="elide start" text="The quick brown fox jumps over the lazy dog" />
+    <ui:Label name="elide-mid" class="elide mid" text="The quick brown fox jumps over the lazy dog" />
+    <ui:Label name="elide-notip" class="elide" text="The quick brown fox jumps over the lazy dog" display-tooltip-when-elided="false" tooltip="authored" />
+    <ui:Label name="elide-visible" class="elide visible" text="The quick brown fox jumps over the lazy dog" />
+    <ui:Label name="elide-fits" class="elide" text="Fox" />
+    <ui:Label name="pre" class="pre" text="a  b" />
+    <ui:Label name="prewrap" class="prewrap" text="a  b" />
+    <ui:Label name="rich" class="f20" text="&lt;b&gt;Bold&lt;/b&gt; and &lt;color=#ff0000&gt;red&lt;/color&gt; &lt;sup&gt;2&lt;/sup&gt;" />
+    <ui:Label name="richplain" class="f20" text="Bold and red 2" />
+    <ui:Label name="richoff" text="&lt;b&gt;raw&lt;/b&gt;" enable-rich-text="false" />
+    <ui:Label name="richlit" text="&lt;noparse&gt;&lt;b&gt;&lt;/noparse&gt; a &lt;unknown&gt;" />
+    <ui:Label name="richdrop" text="&lt;sprite=1&gt;x &lt;link=&quot;go&quot;&gt;link&lt;/link&gt;" />
+    <ui:Label name="escapes" text="a\nb&#92;u0041" parse-escape-sequences="true" />
+    <ui:Label name="noescapes" text="a\nb" />
+    <ui:Button name="richbtn" text="&lt;b&gt;Go&lt;/b&gt;" />
+    <ui:VisualElement name="tiles" class="tiles" />
+    <ui:VisualElement name="fit" class="fit" />
+    <ui:Button name="bgbtn" class="bgbtn" text="Bg" />
+    <ui:VisualElement name="plainbg" class="plainbg" />
+    <ui:VisualElement name="linkcursor" class="linkcursor" />
+    <ui:VisualElement name="texcursor" class="texcursor" />
+    <ui:VisualElement name="reset" class="reset" />
+    <ui:Label name="ignored" class="ignored" text="x" />
+  </ui:VisualElement>
+</ui:UXML>

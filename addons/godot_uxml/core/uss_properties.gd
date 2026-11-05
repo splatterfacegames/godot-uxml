@@ -25,6 +25,9 @@ const INHERITED := {
 	"-unity-text-align": true,
 	"-unity-text-outline-color": true,
 	"-unity-text-outline-width": true,
+	"text-shadow": true,
+	"-unity-text-generator": true,
+	"-unity-editor-text-rendering-mode": true,
 }
 
 ## Property names inside the planned support envelope — the dedicated flex
@@ -35,9 +38,8 @@ const INHERITED := {
 ## silent. Until the layout/runtime milestone lands, EVERY property is
 ## declaration-only: being listed here means "in scope", not "renders".
 ##
-## Deliberately outside the envelope (warn today): absolute positioning
-## (position/left/top/right/bottom), overflow, opacity, cursor,
-## picking-mode, letter/word/paragraph spacing, and -unity-text-outline-*.
+## Still outside the envelope (warn): the transition-* properties, which
+## belong to the transition runtime.
 const SUPPORTED := {
 	# display
 	"display": true, "visibility": true,
@@ -80,6 +82,23 @@ const SUPPORTED := {
 	# transitions (runtime/uss_transitions.gd)
 	"transition": true, "transition-property": true, "transition-duration": true,
 	"transition-delay": true, "transition-timing-function": true,
+	# opacity, clipping, transforms
+	"opacity": true, "overflow": true, "-unity-overflow-clip-box": true,
+	"translate": true, "rotate": true, "scale": true, "transform-origin": true,
+	# text
+	"letter-spacing": true, "word-spacing": true, "-unity-paragraph-spacing": true,
+	"text-shadow": true, "text-overflow": true, "-unity-text-overflow-position": true,
+	# Accepted and ignored: Godot has one text generator and one glyph
+	# rendering path (docs/design.md, "Visual properties").
+	"-unity-text-generator": true, "-unity-editor-text-rendering-mode": true,
+	# background image placement (background-position and
+	# -unity-background-scale-mode are shorthands for these)
+	"background-position": true,
+	"background-position-x": true, "background-position-y": true,
+	"background-repeat": true, "background-size": true,
+	"-unity-background-scale-mode": true, "-unity-slice-type": true,
+	# other
+	"cursor": true, "all": true,
 }
 
 ## Unity's EasingMode names, in enum order (index 0, `ease`, is also the
@@ -185,6 +204,107 @@ static func _is_ident(t: String) -> bool:
 	# letters, '-' or '_' start an identifier; digits do not.
 	return (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 45 or c == 95
 
+
+## Shorthands: never present in a computed style, only their longhands.
+const _SHORTHANDS := {
+	"flex": true, "gap": true, "margin": true, "padding": true,
+	"border-width": true, "border-color": true, "border-radius": true,
+	"-unity-text-outline": true, "background-position": true,
+	"-unity-background-scale-mode": true, "all": true,
+}
+
+## `all: initial` resets every supported longhand. Custom properties are
+## not affected (Unity: "Does not apply to custom USS properties").
+static var _all_initial: Array = []
+
+
+static func _expand_all(value: String) -> Array:
+	if value.strip_edges().to_lower() != "initial":
+		return []  # Unity accepts only `all: initial`
+	if _all_initial.is_empty():
+		for prop in SUPPORTED:
+			if not _SHORTHANDS.has(prop):
+				_all_initial.append([prop, "initial"])
+	return _all_initial
+
+
+## background-position shorthand (Unity StyleSheetApplicator
+## CompileBackgroundPosition): 1 keyword, 2 lengths (x y), 2 keywords in
+## either order, keyword keyword length, keyword length keyword, or
+## keyword length keyword length. Any other shape is invalid.
+static func _expand_background_position(value: String) -> Array:
+	var p := split_value(value)
+	var kws := {"left": "x", "right": "x", "top": "y", "bottom": "y", "center": "c"}
+	var is_kw := func(t: String) -> bool: return kws.has(t.to_lower())
+	var x := ""
+	var y := ""
+	match p.size():
+		1:
+			var k := String(p[0]).to_lower()
+			if not kws.has(k):
+				return []
+			if k == "left" or k == "right":
+				x = k
+				y = "center"
+			elif k == "top" or k == "bottom":
+				x = "center"
+				y = k
+			else:
+				x = "center"
+				y = "center"
+		2:
+			if not is_kw.call(p[0]) and not is_kw.call(p[1]):
+				x = "left " + p[0]
+				y = "top " + p[1]
+			elif is_kw.call(p[0]) and is_kw.call(p[1]):
+				var k1 := String(p[0]).to_lower()
+				var k2 := String(p[1]).to_lower()
+				if k2 == "left" or k2 == "right" or k1 == "top" or k1 == "bottom":
+					var t := k1
+					k1 = k2
+					k2 = t
+				x = k1
+				y = k2
+			else:
+				return []
+		3:
+			if is_kw.call(p[0]) and is_kw.call(p[1]) and not is_kw.call(p[2]):
+				x = String(p[0]).to_lower()
+				y = String(p[1]).to_lower() + " " + p[2]
+			elif is_kw.call(p[0]) and not is_kw.call(p[1]) and is_kw.call(p[2]):
+				x = String(p[0]).to_lower() + " " + p[1]
+				y = String(p[2]).to_lower()
+			else:
+				return []
+		4:
+			if is_kw.call(p[0]) and not is_kw.call(p[1]) and is_kw.call(p[2]) and not is_kw.call(p[3]):
+				x = String(p[0]).to_lower() + " " + p[1]
+				y = String(p[2]).to_lower() + " " + p[3]
+			else:
+				return []
+		_:
+			return []
+	return [["background-position-x", x], ["background-position-y", y]]
+
+
+## -unity-background-scale-mode (Unity BackgroundPropertyHelper): sets the
+## four background placement longhands.
+static func _expand_scale_mode(value: String) -> Array:
+	var size := ""
+	match value.strip_edges().to_lower():
+		"stretch-to-fill":
+			size = "100% 100%"
+		"scale-and-crop":
+			size = "cover"
+		"scale-to-fit":
+			size = "contain"
+		_:
+			return []
+	return [
+		["background-position-x", "center"], ["background-position-y", "center"],
+		["background-repeat", "no-repeat no-repeat"], ["background-size", size],
+	]
+
 ## Shorthand -> longhands. Radii run clockwise from the top-left corner,
 ## not top/right/bottom/left.
 const BOX_SHORTHANDS := {
@@ -284,6 +404,12 @@ static func _expand_flex(values: Array) -> Array:
 ## cascade — an earlier valid declaration still wins. The resolver
 ## diagnoses the empty expansion.
 static func expand_shorthand(property: String, value: String) -> Array:
+	if property == "all":
+		return _expand_all(value)
+	if property == "background-position":
+		return _expand_background_position(value)
+	if property == "-unity-background-scale-mode":
+		return _expand_scale_mode(value)
 	if property == "flex":
 		var flex_values := split_value(value)
 		if flex_values.size() > 3:

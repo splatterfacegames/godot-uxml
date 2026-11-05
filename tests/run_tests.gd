@@ -25,6 +25,7 @@ func _initialize() -> void:
 		["res://tests/test_templates.gd", "templates"],
 		["res://tests/test_transitions.gd", "transitions"],
 		["res://tests/test_binding.gd", "binding"],
+		["res://tests/test_visual.gd", "visual"],
 	]:
 		var cls = load(entry[0])
 		if cls == null:
@@ -468,10 +469,10 @@ func test_shorthand_loses_to_later_longhand() -> void:
 
 
 func test_unsupported_property_warns_but_keeps() -> void:
-	var doc := _doc(ONE, '.x { cursor: link; color: red; }')
+	var doc := _doc(ONE, '.x { -unity-material: url("m.mat"); color: red; }')
 	var res := _resolved(doc)
-	eq(_count_kind(res["warnings"], "unsupported-property"), 1, "cursor warns")
-	eq(_val(doc, 'a', 'cursor'), 'link', "value still computed")
+	eq(_count_kind(res["warnings"], "unsupported-property"), 1, "-unity-material warns")
+	eq(_val(doc, 'a', '-unity-material'), 'url("m.mat")', "value still computed")
 	eq(_val(doc, 'a', 'color'), 'red', "supported property unaffected")
 
 
@@ -925,10 +926,64 @@ func test_escaped_quotes_in_values() -> void:
 # ---------------------------------------------------------------------------
 
 func test_out_of_scope_properties_warn() -> void:
-	var doc := _doc(ONE, '.x { cursor: pointer; opacity: 0.5; letter-spacing: 2px; color: red; }')
+	# filter, -unity-material and -unity-text-auto-size are later Unity
+	# versions' properties, not yet implemented.
+	var doc := _doc(ONE, '.x { -unity-material: none; filter: blur(2px); -unity-text-auto-size: best-fit; color: red; }')
 	var res := _resolved(doc)
 	eq(_count_kind(res["warnings"], "unsupported-property"), 3, "out-of-scope properties each warn")
 	eq(_val(doc, 'a', 'color'), 'red', "supported property unaffected")
+
+
+# The visual properties (opacity, cursor, text spacing, ...) are inside the
+# supported envelope: no unsupported-property diagnostic.
+func test_visual_properties_supported() -> void:
+	var doc := _doc(ONE, '.x { cursor: link; opacity: 0.5; letter-spacing: 2px; overflow: hidden; '
+		+ 'translate: 5px 10%; rotate: 45deg; scale: 2; transform-origin: left top; '
+		+ 'word-spacing: 1px; -unity-paragraph-spacing: 3px; text-shadow: 1px 1px red; '
+		+ 'text-overflow: ellipsis; -unity-text-overflow-position: middle; white-space: pre-wrap; '
+		+ '-unity-text-generator: advanced; -unity-editor-text-rendering-mode: bitmap; '
+		+ 'background-position: right 4px bottom; background-repeat: repeat-x; background-size: cover; '
+		+ '-unity-background-scale-mode: scale-to-fit; -unity-slice-type: tiled; '
+		+ '-unity-overflow-clip-box: content-box; }')
+	var res := _resolved(doc)
+	eq(_count_kind(res["warnings"], "unsupported-property"), 0, "visual properties are supported")
+	eq(_val(doc, 'a', 'background-size'), 'contain', "scale mode (later) expands over background-size")
+	eq(_val(doc, 'a', 'background-position-x'), 'center', "scale mode resets position-x")
+	eq(_val(doc, 'a', 'background-repeat'), 'no-repeat no-repeat', "scale mode resets repeat")
+
+
+func test_background_position_shorthand() -> void:
+	var cases := [
+		["left", "left", "center"], ["bottom", "center", "bottom"], ["center", "center", "center"],
+		["10px 20%", "left 10px", "top 20%"], ["bottom right", "right", "bottom"],
+		["top left", "left", "top"], ["right 5px bottom 6px", "right 5px", "bottom 6px"],
+		["left top 3px", "left", "top 3px"], ["right 4px center", "right 4px", "center"],
+	]
+	for c in cases:
+		var doc := _doc(ONE, '.x { background-position: %s; }' % c[0])
+		eq(_val(doc, 'a', 'background-position-x'), c[1], "background-position: %s -> x" % c[0])
+		eq(_val(doc, 'a', 'background-position-y'), c[2], "background-position: %s -> y" % c[0])
+	var bad := _doc(ONE, '.x { background-position: 1px 2px 3px; }')
+	var res := _resolved(bad)
+	eq(_count_kind(res["warnings"], "invalid-shorthand"), 1, "malformed background-position is dropped")
+
+
+# all: initial resets every non-custom property to its initial value (the
+# entry disappears, inheritance included); later declarations still win.
+func test_all_initial() -> void:
+	var body := '<ui:VisualElement name="p" class="p"><ui:Label name="a" class="x" text="t" /></ui:VisualElement>'
+	var doc := _doc(body, '.p { color: red; --tok: 4px; } .x { width: 10px; opacity: 0.5; all: initial; height: 3px; } .x { padding-left: var(--tok); }')
+	var res := _resolved(doc)
+	var st: Dictionary = res["styles"][doc.find_by_name("a")]
+	check(not st.has("width"), "all: initial drops an earlier declaration")
+	check(not st.has("opacity"), "all: initial drops opacity")
+	check(not st.has("color"), "all: initial stops inheritance")
+	eq(st.get("height", {}).get("value"), "3px", "a later declaration in the rule still wins")
+	eq(st.get("padding-left", {}).get("value"), "4px", "custom properties are untouched")
+	eq(_count_kind(res["warnings"], "unsupported-property"), 0, "all expands to supported longhands only")
+	var initial := _doc(ONE, '.x { color: red; } #a { color: initial; }')
+	check(not (_resolved(initial)["styles"][initial.find_by_name("a")] as Dictionary).has("color"),
+		"a single initial keyword drops the property")
 
 
 func test_recognized_but_unmapped_controls_warn() -> void:

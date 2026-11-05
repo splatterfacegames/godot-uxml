@@ -1222,6 +1222,7 @@ impl Cascade {
         } else {
             (VarDictionary::new(), vec![])
         };
+        let initial_v = GString::from("initial").to_variant();
         for b in &best {
             let pidx = b.pid as usize;
             if b.failed {
@@ -1238,18 +1239,25 @@ impl Cascade {
                     e.to_variant()
                 }
             };
-            computed.set(&self.props.keys[pidx], &entry);
-            let item = Item { pid: b.pid, value: b.val.clone(), origin: b.origin.clone(), entry };
-            match comp.iter_mut().find(|it| it.pid == b.pid) {
-                Some(it) => *it = item,
-                None => comp.push(item),
-            }
             if !self.props.supported[pidx] {
                 let m = format!(
                     "\"{}\" is not a supported USS property; the value is kept but has no effect",
                     self.props.names[pidx]
                 );
                 warns.push(self.diag(i, "unsupported-property", m));
+            }
+            // `initial` (also what `all: initial` expands to): the property
+            // is dropped, inherited value included (uss_cascade.gd _compute).
+            if b.val == initial_v {
+                computed.remove(&self.props.keys[pidx]);
+                comp.retain(|it| it.pid != b.pid);
+                continue;
+            }
+            computed.set(&self.props.keys[pidx], &entry);
+            let item = Item { pid: b.pid, value: b.val.clone(), origin: b.origin.clone(), entry };
+            match comp.iter_mut().find(|it| it.pid == b.pid) {
+                Some(it) => *it = item,
+                None => comp.push(item),
             }
         }
 
@@ -1501,10 +1509,12 @@ impl UxmlNativeCascade {
     fn set_controls(&mut self, controls: VarArray, kinds: PackedByteArray, natives: VarArray) {
         let mut ctl = vec![];
         let mut labels = vec![];
+        let mut rich = vec![];
         let mut texrects = vec![];
         for (k, v) in controls.iter_shared().enumerate() {
             let c = v.try_to::<Gd<godot::classes::Control>>().ok();
             labels.push(c.as_ref().and_then(|c| c.clone().try_cast::<godot::classes::Label>().ok()));
+            rich.push(c.as_ref().and_then(|c| c.clone().try_cast::<godot::classes::RichTextLabel>().ok()));
             ctl.push(c);
             let nat = natives.get(k).and_then(|n| n.try_to::<Gd<godot::classes::TextureRect>>().ok());
             texrects.push(nat.map(|t| t.upcast::<godot::classes::Control>()));
@@ -1514,10 +1524,20 @@ impl UxmlNativeCascade {
             controls: ctl,
             boxed: ks.iter().map(|&b| b & 1 != 0).collect(),
             labels,
+            rich,
+            text_clip: false,
             fields: ks.iter().map(|&b| b & 2 != 0).collect(),
             texrects,
         });
         self.placement = crate::layout::Placement::default();
+    }
+
+    /// Whether any control carries `uxml_clip_text` (see LayoutIn::text_clip).
+    #[func]
+    fn set_text_clip(&mut self, any: bool) {
+        if let Some(io) = self.layout_in.as_mut() {
+            io.text_clip = any;
+        }
     }
 
     /// Layout + native placement in one call (UxmlDocument._do_layout).

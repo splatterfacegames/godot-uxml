@@ -1119,13 +1119,19 @@ func _compute(i: int) -> void:
 			))
 			continue
 		var ent = b_ent[slot]
-		computed[prop] = ent if ent != null else {"value": b_val[slot], "origin": b_origin[slot]}
 		if not _is_supported(prop):
 			warns.append(UxmlDiagnostic.make(
 				"unsupported-property",
 				'"%s" is not a supported USS property; the value is kept but has no effect' % prop,
 				doc.source, node.open_tag_start, doc.path
 			))
+		# `initial` (also what `all: initial` expands to): the property takes
+		# its initial value, which the runtime reads as "not declared" — so
+		# the entry goes, inherited value included.
+		if b_val[slot] == "initial":
+			computed.erase(prop)
+			continue
+		computed[prop] = ent if ent != null else {"value": b_val[slot], "origin": b_origin[slot]}
 
 	if not _ov.is_empty():
 		var ov = _ov.get(i)

@@ -6,8 +6,9 @@ extends RefCounted
 ##
 ##   VisualElement / TemplateContainer / unknown tag
 ##                -> UxmlBox (styled rectangle, real Control)
-##   Label        -> Label
-##   Button       -> Button
+##   Label        -> Label, or RichTextLabel when its text holds Unity rich
+##                   text tags (enable-rich-text, default true)
+##   Button       -> Button (rich text tags are removed from its text)
 ##   Image        -> UxmlBox host wrapping a full-rect TextureRect, so
 ##                   background-color/borders still paint behind the image
 ##   Slider       -> UxmlField(Label caption + HSlider)
@@ -24,7 +25,8 @@ extends RefCounted
 ##
 ## Attributes consumed here: name, tooltip, focusable, text, label, value,
 ## low-value, high-value, choices, index, src, image, placeholder-text,
-## max-length, readonly, multiline, mask-char. enabled is a runtime state
+## max-length, readonly, multiline, mask-char, enable-rich-text,
+## parse-escape-sequences, display-tooltip-when-elided. enabled is a runtime state
 ## (handled by the document/applier), style/class belong to the cascade.
 ## Invalid attribute values produce an `unsupported-value` diagnostic and a
 ## fallback, never a crash.
@@ -92,13 +94,26 @@ func build(el: UxmlElement) -> Control:
 func _create(el: UxmlElement) -> Control:
 	match el.local:
 		"Label":
+			var text := _text_attr(el)
+			if _bool_attr(el, "enable-rich-text", true):
+				var pr := UxmlRichText.parse(text)
+				if pr["rich"]:
+					return _create_rich_label(el, text, pr)
 			var l := Label.new()
-			l.text = _attr(el, "text")
+			l.text = text
+			_text_element_attrs(el, l)
 			return l
 		"Button":
 			var b := Button.new()
-			b.text = _attr(el, "text")
+			var btext := _text_attr(el)
+			if _bool_attr(el, "enable-rich-text", true):
+				var bpr := UxmlRichText.parse(btext)
+				if bpr["rich"]:
+					_warn(el, "text", "rich text tags on a Button: Godot buttons draw plain text, so the tags are removed")
+					btext = bpr["plain"]
+			b.text = btext
 			b.focus_mode = Control.FOCUS_ALL
+			_text_element_attrs(el, b)
 			return b
 		"Image":
 			return _create_image(el)
@@ -123,6 +138,51 @@ func _create(el: UxmlElement) -> Control:
 			# Every unmapped tag: a styled box. Children are preserved by
 			# the caller.
 			return UxmlBox.new()
+
+
+## The `text` attribute, with \n \t \uXXXX ... decoded when
+## parse-escape-sequences is true (Unity's default is false).
+func _text_attr(el: UxmlElement) -> String:
+	var t := _attr(el, "text")
+	if t.find("\\") >= 0 and _bool_attr(el, "parse-escape-sequences", false):
+		t = UxmlRichText.unescape(t)
+	return t
+
+
+## TextElement attributes the runtime reads later (applier elision).
+func _text_element_attrs(el: UxmlElement, c: Control) -> void:
+	if el.has_attribute("display-tooltip-when-elided"):
+		c.set_meta("uxml_tooltip_elided", _bool_attr(el, "display-tooltip-when-elided", true))
+
+
+## A Label whose text holds rich text tags: a RichTextLabel that sizes to
+## its content (fit_content) and behaves like a Label otherwise: no
+## scrolling, no selection, no wrap until white-space asks for it, and
+## mouse input only when it has links (meta_clicked).
+func _create_rich_label(el: UxmlElement, text: String, pr: Dictionary) -> RichTextLabel:
+	var r := RichTextLabel.new()
+	r.bbcode_enabled = false
+	r.fit_content = true
+	r.scroll_active = false
+	r.selection_enabled = false
+	r.context_menu_enabled = false
+	r.shortcut_keys_enabled = false
+	r.autowrap_mode = TextServer.AUTOWRAP_OFF
+	r.meta_underlined = false
+	r.focus_mode = Control.FOCUS_NONE
+	var has_link := false
+	for op in pr["ops"]:
+		if op[0] == "+" and (op[1] == "link" or op[1] == "a"):
+			has_link = true
+			break
+	r.mouse_filter = Control.MOUSE_FILTER_STOP if has_link else Control.MOUSE_FILTER_IGNORE
+	r.set_meta("uxml_rich", pr)
+	r.set_meta("uxml_rich_src", text)
+	r.add_text(pr["plain"])  # until the applier renders the styled runs
+	for tag in pr["dropped"]:
+		_warn(el, "text", "rich text tag <%s> is not supported; its text is drawn without the effect" % tag)
+	_text_element_attrs(el, r)
+	return r
 
 
 func _create_image(el: UxmlElement) -> Control:
@@ -260,7 +320,7 @@ func _apply_common_attributes(el: UxmlElement, c: Control) -> void:
 			Control.FOCUS_ALL if _attr(el, "focusable") == "true"
 			else Control.FOCUS_NONE
 		)
-	elif c is UxmlBox or c is Label:
+	elif c is UxmlBox or c is Label or c is RichTextLabel:
 		c.focus_mode = Control.FOCUS_NONE
 	if target != c:
 		c.focus_mode = Control.FOCUS_NONE

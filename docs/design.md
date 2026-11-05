@@ -265,8 +265,14 @@ Unity UXML declares a binding as a UxmlObject child of the bound element:
   declaration rather than hanging or overflowing the stack.
 - Inheritance: `color`, `font-size`, `letter-spacing`, `word-spacing`,
   `visibility`, `white-space`, `-unity-font*`, `-unity-paragraph-spacing`,
-  `-unity-text-align`, `-unity-text-outline-*`, and all `--*` custom
-  properties.
+  `-unity-text-align`, `-unity-text-outline-*`, `text-shadow`,
+  `-unity-text-generator`, `-unity-editor-text-rendering-mode`, and all
+  `--*` custom properties.
+- The `initial` keyword: a declaration whose winning value is `initial`
+  removes the property from the computed style. The runtime reads a
+  missing property as the initial value, and children do not inherit a
+  removed property. `all: initial` expands to `initial` for every
+  supported longhand. Custom properties keep their values, as in Unity.
 - `transition` expands in the cascade into `transition-property`,
   `transition-duration`, `transition-delay` and
   `transition-timing-function` (comma-separated lists). The expansion
@@ -283,11 +289,8 @@ Unity UXML declares a binding as a UxmlObject child of the bound element:
   layout plus the appearance properties the applier paints (see the table
   comment). The runtime implements a subset of it; values that cascade
   but are not painted warn `unsupported-value` at apply/layout time.
-  Properties outside the envelope —
-  absolute positioning (`position`/`left`/`top`/`right`/`bottom`),
-  `overflow`, `opacity`, `cursor`, `picking-mode`,
-  `letter-spacing`/`word-spacing`/`-unity-paragraph-spacing`,
-  transforms — warn
+  Properties outside the envelope (properties of later Unity versions
+  such as `filter`) warn
   `unsupported-property` once per element/property; the value still
   cascades so the data is not lost.
 
@@ -676,9 +679,11 @@ computed style — a `:hover` caption color/size, stylebox, alignment or
 wrap mode cannot strand after the state clears. Synthetic fonts
 (`-unity-font-style`) always derive from the control's original theme
 font, so repeated restyles never nest `FontVariation`s. `readonly` is
-recorded at build and survives disable/re-enable cycles. Props the
-cascade supports but the runtime does not paint (e.g. `transform`,
-`position`) warn `unsupported-value` once per element/property.
+recorded at build and survives disable/re-enable cycles. A value that the
+runtime cannot read (for example `rotate: x 30deg`) warns
+`unsupported-value` once per element/property. The section "Visual
+properties" gives the opacity, overflow, transform, text effect,
+background placement and cursor mapping.
 
 `background-image: url(...)` resolves relative to the stylesheet that
 supplied the *winning* declaration (tracked per-property through
@@ -881,14 +886,11 @@ rows that scrolled out; slots past the item count are `display: none`.
   stylesheet or a project-rooted path (`Assets/...`) for such references.
 - Unsupported at-rules (`@media`, `@supports`, other unknown at-rules) —
   `unsupported-feature`, contents never apply.
-- Transforms and animations — `unsupported-property` (cascade)
-  and `unsupported-value` (runtime). So are absolute positioning
-  (`position`/offsets), `overflow`, `opacity`, `cursor`, `picking-mode`,
-  letter/word/paragraph spacing, `-unity-text-outline-*`, `order`,
-  `translate`, `transform-origin`, `rotate`, `scale`, `baseline`
-  alignment, `auto` margins, and non-px/% units (`em`, `rem`, `vh`, `vw`,
-  `pt`, `cm`, ...) — each diagnosed once per element/property by the
-  layout or applier rather than silently dropped.
+- Animations (`@keyframes`) — `unsupported-feature`. CSS
+  properties that USS does not have (`order`, ...) and non-px/% units
+  (`em`, `rem`, `vh`, `vw`, `pt`, `cm`, ...) — each diagnosed once per
+  element/property by the cascade, layout or applier rather than
+  silently dropped.
 - `[attr]`, `::`, functional pseudos, `+`/`~`, malformed combinators,
   empty selector fragments, non-subset pseudo names —
   `unsupported-selector`, rule dropped.
@@ -1190,15 +1192,17 @@ Tests and tools use these calls for deterministic time.
   an unreadable time as `0s`.
 - The computed values of `opacity`, `translate`, `rotate`, `scale`,
   `transform-origin`, `background-size`, `background-position-*` and
-  `text-shadow` animate. The style applier paints each property only when
-  the applier supports the property.
+  `text-shadow` animate. The style applier paints each animated value (see
+  "Visual properties"); every frame of a transition on these properties is
+  a paint-only restyle.
 
 ## Background slicing, image tint, text outline
 
 - `-unity-slice-left/right/top/bottom` (source pixels) turn a
   `background-image` into a 9-sliced `StyleBoxTexture`; on a
   VisualElement the sliced image is drawn over any flat background/border.
-  `-unity-slice-scale` other than `1` warns `unsupported-value` and uses 1.
+  `-unity-slice-scale` other than `1` and `-unity-slice-type: tiled` use
+  `UxmlBackgroundStyle` (see "Visual properties").
 - `-unity-background-image-tint-color` multiplies the image
   (`StyleBoxTexture.modulate_color`) — one white panel texture can be
   recoloured per element/class.
@@ -1207,3 +1211,191 @@ Tests and tools use these calls for deterministic time.
   `outline_size` (2 × width, Godot strokes are centred) and
   `font_outline_color` on Label, Button, LineEdit and field captions.
   Inherited, as in Unity.
+
+## Visual properties
+
+The properties in this section change only how an element draws. The
+document lists each property in `PAINT_ONLY`, so a restyle that changes
+only these properties applies the controls again but does not run the
+layout. Exceptions: `letter-spacing`, `word-spacing`,
+`-unity-paragraph-spacing`, `white-space` and rich text change the
+measured text size, so a change to one of these properties runs the
+layout. The applier writes to a control only when the element declares
+the property, or when an earlier restyle wrote to the control. A
+document without these properties gets the same controls as before.
+
+Both layout paths (`UxmlDocument._place_control` in GDScript and
+`Placement::place` in `native/src/layout.rs`) are unchanged: transforms
+use the Godot 4.7 offset transform, which Godot applies after placement.
+The measurer is the only shared code that changed (elided and clipped
+text, rich text Labels), and the GDScript measurer and the Rust measurer
+contain the same steps.
+
+### Opacity, overflow, clip box
+
+- `opacity` (0 to 1, clamped) sets `modulate.a` on the element's outer
+  control. Godot multiplies every canvas item of the subtree by the
+  modulate. Unity also multiplies each child separately ("perceived
+  opacity"): a child does not hide its parent.
+- `overflow: hidden` sets `clip_contents`. Unity also accepts `scroll`;
+  the runtime clips for `scroll` as for `hidden`. A Label or Button with
+  `overflow: hidden` and no wrap also gets `clip_text`, so the authored
+  box can be narrower than the text, as in Unity. The measurer turns
+  `clip_text` off for the measurement, so the intrinsic size stays the
+  full text size.
+- `-unity-overflow-clip-box: padding-box` (the default) clips inside the
+  border, and `content-box` clips inside the padding. Godot clips a
+  control at its border box, and the clip also removes the control's own
+  border. When the clip box differs from the border box, `UxmlClip`
+  moves the canvas items of the children under one extra clipping canvas
+  item (a RenderingServer item). The element's own background and border
+  stay on the element's canvas item and draw in full. The content-box
+  inset follows the resolved padding (`apply_resolved_insets`).
+- Limit: Unity clips children to rounded corners when the element has a
+  `border-radius`. The runtime clips to a rectangle.
+- Limit: input clipping uses the border box: a child area inside the
+  border but outside the padding box can still get mouse input.
+
+### Transforms
+
+- `translate`, `rotate`, `scale` and `transform-origin` set
+  `Control.offset_transform_*` (Godot 4.7). Godot applies the offset
+  transform after the layout placed the control, so a transform never
+  moves the layout of the element or of other elements. Children draw
+  with the parent transform.
+- Godot computes `position + translate + origin + rotation * scale *
+  (point - origin)`, the Unity order (scale, rotate, then translate).
+- A `translate` percentage is a fraction of the element's own size
+  (`offset_transform_position_ratio`). A `transform-origin` percentage or
+  keyword is a fraction of the element's size
+  (`offset_transform_pivot_ratio`); a px origin is
+  `offset_transform_pivot`. The default origin is the center. Godot
+  resolves the ratios again on every resize.
+- `offset_transform_visual_only` is false: mouse input follows the
+  transform, as Unity picking does.
+- Angles: `deg`, `rad`, `grad`, `turn`; a bare number is degrees. The
+  keyword `none` is the identity. A z component of `translate`, `scale`
+  or `transform-origin` is accepted and ignored. A rotation about the x
+  or y axis warns `unsupported-value`: Godot rotates a Control only in
+  the screen plane.
+
+### Text
+
+- `letter-spacing` and `word-spacing` make a `FontVariation` over the
+  element's font (with the element `-unity-font-style`), with `spacing_glyph` and
+  `spacing_space`. Unity's standard text generator reads both lengths in
+  em/100 units: the extra advance is the value times `font-size` / 100
+  px. Godot spacing is whole pixels, so the runtime rounds the advance.
+  The applier caches the variations, so restyles do not make new fonts.
+- `-unity-paragraph-spacing` uses the same em/100 units. A RichTextLabel
+  gets `paragraph_separation`. A Godot Label has no paragraph spacing
+  theme item, so the Label gets a `LabelSettings` with the paragraph
+  spacing and copies of the Label's resolved font, size, color, line
+  spacing, outline and shadow.
+- `text-shadow: <x> <y> [<blur>] [<color>]` (the color first or last)
+  sets `font_shadow_color` and `shadow_offset_x/y` on a Label or a rich
+  text Label (field captions included). Without a color the shadow is
+  transparent, as in Unity. Godot draws a sharp shadow: a blur radius
+  warns `unsupported-value` and the shadow draws without blur. A Button
+  or text field has no Godot text shadow; the applier warns only when
+  the element declares the shadow itself, because the property inherits.
+- `text-overflow: ellipsis` with `-unity-text-overflow-position: start |
+  middle | end`: Unity elides only when `overflow` is hidden and the text
+  does not wrap (`TextElement.isElided`). After every layout and every
+  paint-only restyle, `UxmlStyleApplier.update_elision()` runs Unity's
+  `ElideText` binary search with `"..."` against the control's content
+  width and sets the shown text on the Label or Button. The measurer
+  swaps the full text back in to measure, so the layout always sees the
+  full text. When game code sets new text, the new text becomes the full
+  text.
+- `display-tooltip-when-elided` (default true): while the text is
+  elided, the full text replaces the tooltip. The authored tooltip
+  returns when the text fits. A Label ignores the mouse by default, so
+  an elided Label passes mouse input while the tooltip shows, except with
+  `picking-mode="Ignore"`.
+- `white-space`: `normal` and `pre-wrap` wrap (`AUTOWRAP_WORD_SMART`);
+  `nowrap` and `pre` do not wrap. `pre-wrap` also sets
+  `autowrap_trim_flags` to 0, so white space at a wrap point stays.
+  Godot never collapses white space, so `normal` and `pre-wrap` differ
+  only at wrap points.
+- `-unity-text-generator` and `-unity-editor-text-rendering-mode` are
+  accepted without a diagnostic and have no effect: Godot has one text
+  shaper and one glyph rendering path per font.
+
+### Rich text
+
+- A Label with `enable-rich-text` (default true) and at least one Unity
+  rich text tag in the text becomes a `RichTextLabel` (`UxmlRichText`).
+  A Label without tags stays a Godot Label. `UxmlRichText.parse()` reads
+  the tags once per text; the applier then fills the RichTextLabel
+  through the push API with the element's computed font, font size and
+  color. The push API is necessary because superscript, subscript and
+  `voffset` need a `FontVariation.baseline_offset`, which BBCode cannot
+  name.
+- Drawn tags: `b`, `i`, `u`, `s`, `color`, `#rrggbb`, `alpha`, `size`
+  (px, %, +n, -n, em), `mark`, `sup`, `sub`, `br`, `noparse`, `link`,
+  `a href`, `align`, `allcaps`, `uppercase`, `lowercase`, `smallcaps`,
+  `cspace`, `font-weight` (600 and more is bold), `nobr`, `voffset`.
+- Dropped tags (the text draws without the effect, one
+  `unsupported-value` per tag): `font`, `indent`, `line-height`,
+  `line-indent`, `margin`, `mspace`, `pos`, `rotate`, `space`, `sprite`,
+  `style`, `width`, `gradient`, `page`, `action`. An unknown or
+  malformed tag stays as literal text, as in Unity.
+- Bold and italic are synthetic, as for `-unity-font-style`.
+  Superscript and subscript use half size and a fixed baseline shift;
+  Unity takes these values from the font asset.
+- A rich text Label measures through `fit_content`. A wrapping rich text Label is
+  volatile like a wrapping Label, in both layout paths.
+- `link` and `a href` emit the document signal `link_clicked(name, id)`.
+- Game code sets the text of a rich text Label with
+  `UxmlDocument.set_text(name, text)`. `RichTextLabel.text` does not
+  parse Unity tags.
+- `parse-escape-sequences="true"` decodes `\n`, `\t`, `\r`, `\\`,
+  `\uXXXX` and `\UXXXXXXXX` in the `text` attribute.
+- A Button has no Godot rich text: the factory removes the tags from the
+  Button text and warns `unsupported-value`.
+- Limit: `text-overflow: ellipsis` does not apply to rich text. The text
+  is clipped and the applier warns.
+
+### Background placement
+
+- `background-position` (shorthand), `background-position-x`,
+  `background-position-y`, `background-repeat`, `background-size`,
+  `-unity-background-scale-mode` (shorthand), `-unity-slice-type` and
+  `-unity-slice-scale` other than 1 select `UxmlBackgroundStyle`, a
+  `StyleBox` subclass. The same StyleBox draws on a UxmlBox and in the
+  stylebox slots of a themed control, so padding still insets the
+  control text through the content margins.
+- `-unity-background-scale-mode` sets the four placement longhands, as
+  Unity's `BackgroundPropertyHelper` does: `stretch-to-fill` is
+  `100% 100%`, `scale-and-crop` is `cover` and `scale-to-fit` is
+  `contain`, all centered and not repeated. The longhand initial values
+  are the Unity values (center, no-repeat, `100% 100%`).
+- `UxmlBackgroundStyle.tiles()` is a port of Unity's
+  `MeshGenerator.DoDrawRectangleRepeat`: `repeat`, `space` and `round`
+  on each axis, keyword and offset positions, pixel-grid rounding of
+  centered and percentage offsets, and crop of the tiles at the border
+  box (the source region crops with the tile).
+- 9-slicing in `UxmlBackgroundStyle` uses a RenderingServer nine-patch:
+  `-unity-slice-type: tiled` repeats the middle and the edges, and
+  `-unity-slice-scale` scales the slices through a draw transform.
+- An image without placement properties keeps the `StyleBoxTexture` /
+  `box_texture` path.
+- Limit: a 9-sliced tile is not cropped at the box edge, and an image is
+  not clipped to rounded corners.
+
+### Cursor
+
+- A Unity cursor keyword sets `mouse_default_cursor_shape` on the outer
+  control and on the inner native control, with the nearest Godot shape
+  (`text` is the I-beam, `link` the pointing hand, `resize-*` the size
+  arrows, `not-allowed` the forbidden shape, and so on). Unity draws
+  keyword cursors only in Editor UI; the runtime draws the shapes in
+  every build.
+- `cursor: url(...) [x y]` loads the texture through the resolver. While
+  the element is hovered, `Input.set_custom_mouse_cursor` replaces the
+  image of `UxmlStyleApplier.TEXTURE_CURSOR_SHAPE` (the help shape) with
+  the texture and the texture hotspot, and the element uses that shape. On exit
+  the runtime resets the help shape to the system image.
+- `resource()` lookup is not supported (as for every `resource()`
+  reference).

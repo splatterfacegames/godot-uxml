@@ -81,6 +81,9 @@ const KNOWN_ATTRIBUTES := {
 	"view-data-key": true, "usage-hints": true, "language-direction": true,
 	# ListView AutoAssign: rows get the bound itemsSource as data source.
 	"binding-source-selection-mode": true,
+	# TextElement (Label, Button): rich text, escapes, elided tooltips.
+	"enable-rich-text": true, "parse-escape-sequences": true,
+	"display-tooltip-when-elided": true,
 }
 
 

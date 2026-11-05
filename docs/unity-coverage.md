@@ -26,15 +26,15 @@ Status values:
 | `color`, `font-size`, `-unity-font`, `-unity-font-definition`, `-unity-font-style`, `-unity-text-align` | done |
 | `-unity-slice-left/right/top/bottom`, `-unity-background-image-tint-color` | done |
 | `-unity-text-outline*` | done |
-| `opacity`, `overflow`, `-unity-overflow-clip-box` | in progress (`unity/visual-props`) |
-| `translate`, `rotate`, `scale`, `transform-origin` | in progress (`unity/visual-props`) |
-| `cursor` | in progress (`unity/visual-props`) |
-| `letter-spacing`, `word-spacing`, `-unity-paragraph-spacing` | in progress (`unity/visual-props`) |
-| `text-shadow`, `text-overflow`, `-unity-text-overflow-position`, `white-space` | in progress (`unity/visual-props`) |
-| `background-position*`, `background-repeat`, `background-size`, `-unity-background-scale-mode` | in progress (`unity/visual-props`) |
-| `-unity-slice-type`, `-unity-slice-scale` | in progress (`unity/visual-props`) |
-| `-unity-text-generator`, `-unity-editor-text-rendering-mode` | in progress (`unity/visual-props`) |
-| `all` | in progress (`unity/visual-props`) |
+| `opacity`, `overflow`, `-unity-overflow-clip-box` | done (rectangular clip only: no rounded-corner clipping) |
+| `translate`, `rotate`, `scale`, `transform-origin` | done (z rotation only; z components ignored) |
+| `cursor` | done (keywords map to the nearest Godot shape; `resource()` planned) |
+| `letter-spacing`, `word-spacing`, `-unity-paragraph-spacing` | done (em/100 units as in Unity; rounded to whole px) |
+| `text-shadow`, `text-overflow`, `-unity-text-overflow-position`, `white-space` | done (shadow blur not drawn; no ellipsis on rich text) |
+| `background-position*`, `background-repeat`, `background-size`, `-unity-background-scale-mode` | done |
+| `-unity-slice-type`, `-unity-slice-scale` | done |
+| `-unity-text-generator`, `-unity-editor-text-rendering-mode` | done (accepted; Godot has one text generator) |
+| `all` | done |
 | `transition`, `transition-*` | done |
 | `filter`, `-unity-material`, `-unity-text-auto-size` | planned |
 
@@ -47,6 +47,7 @@ Status values:
 | `:hover`, `:active`, `:inactive`, `:focus`, `:checked`, `:disabled`, `:enabled`, `:selected`, `:root` | done |
 | `var()` custom properties, `@import`, inline `style` | done |
 | `url()`, `resource()` | done for files; Unity `Resources` folder lookup planned |
+| Rich text tags in Label text (`enable-rich-text`, `parse-escape-sequences`, `display-tooltip-when-elided`) | done (see docs/design.md, "Rich text", for dropped tags) |
 | `@media`, `@supports` | not USS |
 | `+` and `~` combinators, attribute selectors, `::` pseudo-elements, functional pseudo-classes | not USS |
 | `em`, `rem`, `vh`, `vw`, `pt` and other non-px/% lengths | not USS |

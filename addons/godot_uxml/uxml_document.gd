@@ -39,6 +39,8 @@ signal transition_run(element_name, property, elapsed_time)
 signal transition_start(element_name, property, elapsed_time)
 signal transition_end(element_name, property, elapsed_time)
 signal transition_cancel(element_name, property, elapsed_time)
+## A rich text <link="id"> or <a href="url"> was clicked in a Label.
+signal link_clicked(element_name, link_id)
 
 ## The UXML file to load. Setting it while the node is inside the tree
 ## reloads the document.
@@ -142,8 +144,16 @@ const PAINT_ONLY := {
 	"-unity-text-outline-color": true,
 	"-unity-text-align": true, "visibility": true,
 	# Painted without affecting flex geometry or intrinsic measures.
-	"opacity": true, "translate": true, "rotate": true, "scale": true,
-	"transform-origin": true,
+	# Elision (text-overflow, and overflow, which gates it) is recomputed by
+	# the applier after every restyle; the measurer always measures full text.
+	"opacity": true, "overflow": true, "-unity-overflow-clip-box": true,
+	"translate": true, "rotate": true, "scale": true, "transform-origin": true,
+	"text-shadow": true, "text-overflow": true, "-unity-text-overflow-position": true,
+	"background-position-x": true, "background-position-y": true,
+	"background-repeat": true, "background-size": true,
+	"-unity-slice-type": true, "-unity-slice-scale": true,
+	"cursor": true,
+	"-unity-text-generator": true, "-unity-editor-text-rendering-mode": true,
 }
 
 
@@ -407,6 +417,9 @@ func _wire(el: UxmlElement, c: Control) -> void:
 	elif native is OptionButton:
 		native.item_selected.connect(func(i: int):
 			value_changed.emit(el_name, native.get_item_text(i)))
+	elif native is RichTextLabel:
+		native.meta_clicked.connect(func(meta):
+			link_clicked.emit(el_name, str(meta)))
 
 
 ## Any left-button press on a control toggles :active — the USS "pressed"
@@ -613,6 +626,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		else:
 			for el in applied:
 				_place_control(el)
+		_update_elision()
 	# Runtime warnings accumulate during apply/layout — surface last so they
 	# are all included.
 	diagnostics = _doc.warnings + _cascade.collect_warnings() + _rt_warnings
@@ -726,7 +740,7 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 	var c: Control = _controls.get(el)
 	if c == null:
 		return Vector2.ZERO
-	if c is Label and c.autowrap_mode != TextServer.AUTOWRAP_OFF and content_w >= 0.0:
+	if (c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF and content_w >= 0.0:
 		# Label reports its wrapped height from its current width — hand it
 		# the width the line assigned so the measurement is honest.
 		c.size.x = content_w
@@ -736,6 +750,19 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 		# custom_minimum_size would also clamp the laid-out Control size,
 		# which is not Yoga semantics.
 		ms = c.natural_size
+	elif _applier != null and _applier.clip_texts > 0 and c.has_meta(&"uxml_clip_text"):
+		# overflow: hidden text (clip_text, so the box may be narrower than
+		# the text) and elided text measure as the full text, as Unity
+		# measures them; the shown state is put back afterwards.
+		var shown = c.get(&"text")
+		var swap: bool = c.has_meta(&"uxml_full_text") and shown == c.get_meta(&"uxml_elided")
+		c.set(&"clip_text", false)
+		if swap:
+			c.set(&"text", c.get_meta(&"uxml_full_text"))
+		ms = c.get_combined_minimum_size()
+		if swap:
+			c.set(&"text", shown)
+		c.set(&"clip_text", true)
 	else:
 		ms = c.get_combined_minimum_size()
 	# A USS stylebox carries padding+border as content margins, which the
@@ -759,7 +786,7 @@ func _volatile_measures() -> Dictionary:
 	var out := {}
 	for el in _controls:
 		var c: Control = _controls[el]
-		if c is Label and c.autowrap_mode != TextServer.AUTOWRAP_OFF:
+		if (c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF:
 			out[el] = c.size.x
 	return out
 
@@ -784,6 +811,7 @@ func _scroll_bar_width() -> float:
 ## the native pass when the extension is loaded, UxmlFlexLayout otherwise.
 func _compute_layout(host: Vector2) -> Dictionary:
 	if _cascade != null and _cascade._native != null and use_native_layout:
+		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		var r: Array = _cascade._native.call(
 			"layout", host, _scroll_bar_width(), _layout_warned, _rt_warnings)
 		return {"rects": r[0], "content_sizes": r[1], "insets": r[2]}
@@ -812,6 +840,7 @@ func _do_layout() -> void:
 		return
 	if _native_layout():
 		# Native layout + placement; results stay native.
+		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		var force := PackedInt32Array()
 		var cidx: Dictionary = _cascade.index
 		for el in _placed_force:
@@ -825,6 +854,7 @@ func _do_layout() -> void:
 		_unsettled = _pending_fresh or bool(r[0])
 		_pending_fresh = false
 		_lists_after_layout()
+		_update_elision()
 		return
 	var prev := _rects
 	var res := _compute_layout(size)
@@ -843,6 +873,14 @@ func _do_layout() -> void:
 	_unsettled = _pending_fresh or prev != _rects
 	_pending_fresh = false
 	_lists_after_layout()
+	_update_elision()
+
+
+## text-overflow: ellipsis needs the laid-out width: elide after placement
+## (both layout paths and the paint-only path run this same code).
+func _update_elision() -> void:
+	if _applier != null and not _applier.elide.is_empty():
+		_applier.update_elision()
 
 
 ## Position/size one element's control from the last layout and inset its
@@ -938,6 +976,29 @@ func set_element_state(element_name: String, state: String, on: bool) -> void:
 	var el: UxmlElement = _by_name.get(element_name)
 	if el != null:
 		_set_state(el, state, on)
+
+
+## Set a Label's or Button's text. Rich text tags are parsed for a Label
+## that was created with rich text (a RichTextLabel); setting `text` on that
+## control directly would bypass the Unity tags. Re-lays out.
+func set_text(element_name: String, text: String) -> void:
+	var el: UxmlElement = _by_name.get(element_name)
+	if el == null:
+		return
+	var c: Control = _natives.get(el)
+	if c is RichTextLabel:
+		var pr := UxmlRichText.parse(text)
+		c.set_meta("uxml_rich", pr)
+		c.set_meta("uxml_rich_src", text)
+		c.remove_meta("uxml_rich_key")
+		refresh()
+		return
+	if c is Label or c is Button:
+		if c.has_meta("uxml_full_text"):
+			c.remove_meta("uxml_full_text")
+			c.remove_meta("uxml_elided")
+		c.set("text", text)
+		relayout()
 
 
 ## Replace the element's `class` attribute and re-resolve. Runtime class

@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use godot::classes::{Control, Label, Object, StyleBox};
+use godot::classes::{Control, Label, Object, RichTextLabel, StyleBox};
 use godot::prelude::*;
 
 use crate::cascade::Cascade;
@@ -280,6 +280,11 @@ pub struct LayoutIn {
     pub controls: Vec<Option<Gd<Control>>>,
     pub boxed: Vec<bool>,
     pub labels: Vec<Option<Gd<Label>>>,
+    /// Rich text Labels (RichTextLabel): wrap-volatile like Labels.
+    pub rich: Vec<Option<Gd<RichTextLabel>>>,
+    /// Some control carries `uxml_clip_text` (overflow: hidden text); while
+    /// false the measurer skips the meta check (UxmlStyleApplier.clip_texts).
+    pub text_clip: bool,
     /// UxmlField wrappers (insets via set_content_insets).
     pub fields: Vec<bool>,
     /// TextureRect natives (Image elements: anchor offsets follow insets).
@@ -395,6 +400,9 @@ pub struct Pass<'a> {
     sens_m: Vec<i32>,
     meas_m: Vec<Vec<MemoE>>,
     margins_m: Vec<Option<Option<[f64; 4]>>>,
+    /// Per-pass memo: the control carries `uxml_clip_text` (metas do not
+    /// change during a pass).
+    cliptext_m: Vec<Option<bool>>,
     // volatile (wrapping label) emulation
     volatile: Vec<bool>,
     vw: Vec<f64>,
@@ -404,6 +412,11 @@ pub struct Pass<'a> {
     sn_natural: StringName,
     sn_normal: StringName,
     sn_margins: StringName,
+    sn_full: StringName,
+    sn_elided: StringName,
+    sn_text: StringName,
+    sn_cliptext: StringName,
+    sn_clip: StringName,
 }
 
 impl<'a> Pass<'a> {
@@ -415,11 +428,14 @@ impl<'a> Pass<'a> {
         for i in 0..n {
             if let Some(ctl) = &io.controls[i] {
                 kinds[i] = if io.boxed[i] { CtlKind::Boxed } else { CtlKind::Plain };
-                if let Some(lbl) = &io.labels[i] {
-                    if lbl.get_autowrap_mode() != godot::classes::text_server::AutowrapMode::OFF {
-                        volatile[i] = true;
-                        vw[i] = d(ctl.get_size().x);
-                    }
+                let wraps = match (&io.labels[i], &io.rich[i]) {
+                    (Some(lbl), _) => lbl.get_autowrap_mode() != godot::classes::text_server::AutowrapMode::OFF,
+                    (None, Some(r)) => r.get_autowrap_mode() != godot::classes::text_server::AutowrapMode::OFF,
+                    _ => false,
+                };
+                if wraps {
+                    volatile[i] = true;
+                    vw[i] = d(ctl.get_size().x);
                 }
             }
         }
@@ -442,6 +458,7 @@ impl<'a> Pass<'a> {
             sens_m: vec![-1; n],
             meas_m: (0..n).map(|_| vec![]).collect(),
             margins_m: vec![None; n],
+            cliptext_m: vec![None; n],
             volatile,
             vw,
             vset: (0..n).map(|_| HashMap::new()).collect(),
@@ -450,6 +467,11 @@ impl<'a> Pass<'a> {
             sn_natural: StringName::from("natural_size"),
             sn_normal: StringName::from("normal"),
             sn_margins: StringName::from("uxml_margins"),
+            sn_full: StringName::from("uxml_full_text"),
+            sn_elided: StringName::from("uxml_elided"),
+            sn_text: StringName::from("text"),
+            sn_cliptext: StringName::from("uxml_clip_text"),
+            sn_clip: StringName::from("clip_text"),
         }
     }
 
@@ -856,8 +878,30 @@ impl<'a> Pass<'a> {
             let mut cm = c.clone();
             cm.set_size(s);
         }
+        let clipped = match self.kinds[i] {
+            CtlKind::Boxed => false,
+            _ if !self.io.text_clip => false,
+            _ => *self.cliptext_m[i].get_or_insert_with(|| c.has_meta(&self.sn_cliptext)),
+        };
         let mut ms = match self.kinds[i] {
             CtlKind::Boxed => c.clone().upcast::<Object>().get(&self.sn_natural).try_to::<Vector2>().unwrap_or(Vector2::ZERO),
+            _ if clipped => {
+                // overflow: hidden / elided text measures as its full text
+                // with clip_text off (UxmlDocument._measure_leaf).
+                let mut o = c.clone().upcast::<Object>();
+                let shown = o.get(&self.sn_text);
+                let swap = c.has_meta(&self.sn_full) && shown == c.get_meta(&self.sn_elided);
+                o.set(&self.sn_clip, &false.to_variant());
+                if swap {
+                    o.set(&self.sn_text, &c.get_meta(&self.sn_full));
+                }
+                let m = c.get_combined_minimum_size();
+                if swap {
+                    o.set(&self.sn_text, &shown);
+                }
+                o.set(&self.sn_clip, &true.to_variant());
+                m
+            }
             _ => c.get_combined_minimum_size(),
         };
         if self.margins_m[i].is_none() {
