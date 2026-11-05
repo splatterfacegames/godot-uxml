@@ -580,3 +580,26 @@ func test_auto_margins() -> void:
 	_vec_eq(_rect(r, "m"), Rect2(100, 0, 100, 40), "auto side margins center on the cross axis")
 	_vec_eq(_rect(r, "e"), Rect2(240, 160, 60, 40), "auto top takes the free main space; auto left pushes across")
 	h.check(not _warn_kinds(r).has("unsupported-value"), "margin auto is not diagnosed: %s" % [_warn_kinds(r)])
+
+
+# aspect-ratio (Unity 6.3): width / height. A definite side gives the other;
+# a flex item's cross size follows its final main size and does not stretch.
+func test_aspect_ratio() -> void:
+	var r := _layout(
+		'<ui:VisualElement name="row" class="row">'
+		+ '<ui:VisualElement name="a" class="a"/>'
+		+ '<ui:VisualElement name="b" class="b"/>'
+		+ '</ui:VisualElement>'
+		+ '<ui:VisualElement name="c" class="c"/>'
+		+ '<ui:VisualElement name="bad" class="bad"/>',
+		'.row { flex-direction: row; width: 300px; height: 100px; }'
+		+ '.a { width: 80px; aspect-ratio: 2; }'
+		+ '.b { flex-grow: 1; aspect-ratio: 16 / 9; }'
+		+ '.c { height: 30px; aspect-ratio: 3/1; align-self: flex-start; }'
+		+ '.bad { height: 10px; aspect-ratio: wide; }',
+		Vector2(300, 400)
+	)
+	_vec_eq(_rect(r, "a"), Rect2(0, 0, 80, 40), "width 80 at 2:1 gives height 40, no stretch")
+	_vec_eq(_rect(r, "b"), Rect2(80, 0, 220, 123.75), "grown width 220 at 16:9 gives height 123.75")
+	_vec_eq(_rect(r, "c"), Rect2(0, 100, 90, 30), "height 30 at 3:1 gives width 90")
+	h.check(_warn_kinds(r).has("unsupported-value"), "an invalid ratio is diagnosed: %s" % [_warn_kinds(r)])

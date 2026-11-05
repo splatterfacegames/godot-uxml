@@ -16,13 +16,13 @@ use godot::prelude::*;
 use crate::cascade::Cascade;
 
 const EPS: f64 = 0.01;
-pub const LAYOUT_PROPS: [&str; 35] = [
+pub const LAYOUT_PROPS: [&str; 36] = [
     "width", "height", "min-width", "min-height", "max-width", "max-height", "flex-basis",
     "padding-top", "padding-right", "padding-bottom", "padding-left",
     "margin-top", "margin-right", "margin-bottom", "margin-left",
     "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
     "row-gap", "column-gap", "flex-grow", "flex-shrink",
-    "top", "right", "bottom", "left",
+    "top", "right", "bottom", "left", "aspect-ratio",
     "display", "flex-direction", "flex-wrap", "justify-content", "align-items", "align-content", "align-self",
     "position",
 ];
@@ -41,15 +41,16 @@ const P_CGAP: usize = 20;
 const P_GROW: usize = 21;
 const P_SHRINK: usize = 22;
 const P_POS: usize = 23; // 23..26 top,right,bottom,left
-const NP: usize = 27;
-const E_DISPLAY: usize = 27;
-const E_DIR: usize = 28;
-const E_WRAP: usize = 29;
-const E_JUSTIFY: usize = 30;
-const E_ALIGN_ITEMS: usize = 31;
-const E_ALIGN_CONTENT: usize = 32;
-const E_ALIGN_SELF: usize = 33;
-const E_POSITION: usize = 34;
+const P_ASPECT: usize = 27;
+const NP: usize = 28;
+const E_DISPLAY: usize = 28;
+const E_DIR: usize = 29;
+const E_WRAP: usize = 30;
+const E_JUSTIFY: usize = 31;
+const E_ALIGN_ITEMS: usize = 32;
+const E_ALIGN_CONTENT: usize = 33;
+const E_ALIGN_SELF: usize = 34;
+const E_POSITION: usize = 35;
 const NE: usize = 8;
 const T: usize = 0;
 const R: usize = 1;
@@ -157,6 +158,30 @@ fn parse_length(text: &str) -> Len {
 }
 
 /// UssValues.parse_number (NAN when not a number).
+/// flex_layout.gd _parse_ratio.
+fn parse_ratio(text: &str) -> f64 {
+    let t = strip(text);
+    if t == "auto" {
+        return 0.0;
+    }
+    let parts: Vec<&str> = t.split('/').collect();
+    if parts.len() > 2 {
+        return f64::NAN;
+    }
+    let a = parse_number(strip(parts[0]));
+    if a.is_nan() || a < 0.0 {
+        return f64::NAN;
+    }
+    if parts.len() == 1 {
+        return a;
+    }
+    let b = parse_number(strip(parts[1]));
+    if b.is_nan() || b <= 0.0 {
+        return f64::NAN;
+    }
+    a / b
+}
+
 fn parse_number(text: &str) -> f64 {
     let v = strip(text);
     match scan_number(v.as_bytes()) {
@@ -197,7 +222,17 @@ fn build_rec(vals_in: &[Option<GString>]) -> Rec {
     for pid in 0..NP {
         let Some(raw) = &vals_in[pid] else { continue };
         let raw = raw.to_string();
-        if pid == P_GROW || pid == P_SHRINK {
+        if pid == P_ASPECT {
+            let ar = parse_ratio(&raw);
+            if ar.is_nan() {
+                r.kinds[pid] = K::Nan;
+            } else if ar <= 0.0 {
+                r.kinds[pid] = K::Auto;
+            } else {
+                r.kinds[pid] = K::Num;
+                r.vals[pid] = ar;
+            }
+        } else if pid == P_GROW || pid == P_SHRINK {
             let n = parse_number(&raw);
             if n.is_nan() {
                 r.kinds[pid] = K::Nan;
@@ -508,6 +543,19 @@ impl<'a> Pass<'a> {
         }
     }
 
+    /// flex_layout.gd _ratio.
+    fn ratio(&mut self, i: usize) -> f64 {
+        match self.recs[i].kinds[P_ASPECT] {
+            K::Num => self.recs[i].vals[P_ASPECT],
+            K::Nan => {
+                let m = format!("aspect-ratio: \"{}\" is not a valid ratio; auto used", self.recs[i].raws[P_ASPECT]);
+                self.warn_once(i, "aspect-ratio", m);
+                0.0
+            }
+            _ => 0.0,
+        }
+    }
+
     fn dim(&mut self, i: usize, pid: usize, base: f64) -> f64 {
         let r = self.lenr(i, pid, base);
         if r.is_nan() { -1.0 } else { r }
@@ -708,6 +756,14 @@ impl<'a> Pass<'a> {
             if h < 0.0 && !top.is_nan() && !bot.is_nan() {
                 h = gmax(0.0, cbh - top - bot - m[T] - m[B]);
             }
+            let aar = self.ratio(ch);
+            if aar > 0.0 {
+                if w >= 0.0 && h < 0.0 {
+                    h = w / aar;
+                } else if h >= 0.0 && w < 0.0 {
+                    w = h * aar;
+                }
+            }
             if w < 0.0 || h < 0.0 {
                 let nat = self.measure(ch, Vector2::new(f(cbw), f(cbh)), w);
                 if w < 0.0 {
@@ -892,6 +948,15 @@ impl<'a> Pass<'a> {
             let chrome = self.measure_call(i, cw);
             bw = if w >= 0.0 { w } else { gmax(d(nat.x), d(chrome.x)) + in_w };
             bh = if h >= 0.0 { h } else { gmax(d(nat.y), d(chrome.y)) + in_h };
+        }
+        let (mut bw, mut bh) = (bw, bh);
+        let ar = self.ratio(i);
+        if ar > 0.0 {
+            if h >= 0.0 && w < 0.0 {
+                bw = h * ar;
+            } else if h < 0.0 {
+                bh = bw / ar;
+            }
         }
         let minw = self.min_or(i, P_MINW, d(avail.x), 0.0);
         let maxw = self.bound(i, P_MAXW, d(avail.x), false);
@@ -1112,8 +1177,11 @@ impl<'a> Pass<'a> {
             for k in line_lo[li]..line_hi[li] {
                 let ch = kids[k];
                 let explicit = self.dim(ch, cross_prop, ac);
+                let car = self.ratio(ch);
                 let mut nat = if explicit >= 0.0 {
                     explicit
+                } else if car > 0.0 {
+                    if row { it_main[k] / car } else { it_main[k] * car }
                 } else {
                     let v = self.measure(ch, area.size, if row { it_main[k] } else { -1.0 });
                     comp(v, cross)
@@ -1270,7 +1338,7 @@ impl<'a> Pass<'a> {
                     };
                     continue;
                 }
-                if al == "stretch" && self.dim(ch, cross_prop, ac) < 0.0 {
+                if al == "stretch" && self.dim(ch, cross_prop, ac) < 0.0 && self.ratio(ch) <= 0.0 {
                     let smin = gmax(self.min_or(ch, min_cross, ac, 0.0), it_inc[k]);
                     let mxb = self.bound(ch, max_cross, ac, false);
                     it_cross[k] = gclamp(gmax(0.0, lc - mct), smin, gmax(mxb, smin));

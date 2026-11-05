@@ -48,6 +48,7 @@ const SUPPORTED := {
 	"align-content": true, "gap": true, "row-gap": true, "column-gap": true,
 	# positioning
 	"position": true, "top": true, "right": true, "bottom": true, "left": true,
+	"aspect-ratio": true,
 	# box
 	"width": true, "height": true,
 	"min-width": true, "min-height": true, "max-width": true, "max-height": true,

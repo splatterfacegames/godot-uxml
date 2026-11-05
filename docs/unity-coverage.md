@@ -21,7 +21,7 @@ Status values:
 | `width`, `height`, `min-*`, `max-*` | done |
 | `margin*` (including `auto`), `padding*`, `border-*-width` | done |
 | `position`, `top`, `right`, `bottom`, `left` | done |
-| `aspect-ratio` | in progress (main) |
+| `aspect-ratio` | done (a Label cannot shrink below its Godot minimum height) |
 | `background-color`, `background-image`, `border-*-color`, `border-*-radius` | done |
 | `color`, `font-size`, `-unity-font`, `-unity-font-definition`, `-unity-font-style`, `-unity-text-align` | done |
 | `-unity-slice-left/right/top/bottom`, `-unity-background-image-tint-color` | done |

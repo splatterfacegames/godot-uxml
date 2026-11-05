@@ -204,14 +204,15 @@ const P_CGAP := 20
 const P_GROW := 21
 const P_SHRINK := 22
 const P_POS := 23     # 23..26 top,right,bottom,left (position offsets)
-const NP := 27
+const P_ASPECT := 27  # aspect-ratio: K_NUM width/height, K_AUTO, K_NAN invalid
+const NP := 28
 const PNAMES := [
 	"width", "height", "min-width", "min-height", "max-width", "max-height", "flex-basis",
 	"padding-top", "padding-right", "padding-bottom", "padding-left",
 	"margin-top", "margin-right", "margin-bottom", "margin-left",
 	"border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
 	"row-gap", "column-gap", "flex-grow", "flex-shrink",
-	"top", "right", "bottom", "left",
+	"top", "right", "bottom", "left", "aspect-ratio",
 ]
 const ENUM_NAMES := [
 	"display", "flex-direction", "flex-wrap", "justify-content",
@@ -242,6 +243,16 @@ static func _build_rec(st: Dictionary) -> Array:
 			continue
 		var raw = entry["value"]
 		raws[pid] = raw
+		if pid == P_ASPECT:
+			var ar := _parse_ratio(String(raw))
+			if is_nan(ar):
+				kinds[pid] = K_NAN
+			elif ar <= 0.0:
+				kinds[pid] = K_AUTO
+			else:
+				kinds[pid] = K_NUM
+				vals[pid] = ar
+			continue
 		if pid == P_GROW or pid == P_SHRINK:
 			var n := UssValues.parse_number(String(raw))
 			if is_nan(n):
@@ -273,6 +284,37 @@ static func _build_rec(st: Dictionary) -> Array:
 			enums[name] = String(entry["value"])
 	_rec_seq += 1
 	return [st, kinds, vals, raws, probs, enums, _rec_seq]
+
+
+## aspect-ratio text -> width/height ratio; 0 for auto, NAN when invalid.
+## Unity accepts `auto`, a number, or `<number> / <number>`.
+static func _parse_ratio(text: String) -> float:
+	var t := text.strip_edges()
+	if t == "auto":
+		return 0.0
+	var parts := t.split("/")
+	if parts.size() > 2:
+		return NAN
+	var a := UssValues.parse_number(parts[0].strip_edges())
+	if is_nan(a) or a < 0.0:
+		return NAN
+	if parts.size() == 1:
+		return a
+	var b := UssValues.parse_number(parts[1].strip_edges())
+	if is_nan(b) or b <= 0.0:
+		return NAN
+	return a / b
+
+
+## The element's aspect ratio (width / height), or 0 when none applies.
+func _ratio(el: UxmlElement) -> float:
+	var rec := _rec(el)
+	match rec[1][P_ASPECT]:
+		K_NUM:
+			return rec[2][P_ASPECT]
+		K_NAN:
+			_warn_once(el, "aspect-ratio", 'aspect-ratio: "%s" is not a valid ratio; auto used' % rec[3][P_ASPECT])
+	return 0.0
 
 
 func _rec(el: UxmlElement) -> Array:
@@ -613,6 +655,12 @@ func _measure(
 		var chrome := _measure_call(el, cw)
 		bw = w if w >= 0.0 else maxf(nat.x, chrome.x) + in_w
 		bh = h if h >= 0.0 else maxf(nat.y, chrome.y) + in_h
+	var ar := _ratio(el)
+	if ar > 0.0:
+		if h >= 0.0 and w < 0.0:
+			bw = h * ar
+		elif h < 0.0:
+			bh = bw / ar
 	# The border box can never be smaller than its own padding+border —
 	# the floor overrides explicit dims and max bounds alike (Yoga).
 	var out := Vector2(
@@ -1007,6 +1055,12 @@ func _layout_abs(el: UxmlElement, size: Vector2, pad: PackedFloat64Array, bor: P
 		var h := _dim(child, P_H, cbh)
 		if h < 0.0 and not is_nan(top) and not is_nan(bot):
 			h = maxf(0.0, cbh - top - bot - m[T] - m[B])
+		var aar := _ratio(child)
+		if aar > 0.0:
+			if w >= 0.0 and h < 0.0:
+				h = w / aar
+			elif h >= 0.0 and w < 0.0:
+				w = h * aar
 		if w < 0.0 or h < 0.0:
 			var nat := _measure(child, Vector2(cbw, cbh), w)
 			if w < 0.0:
@@ -1221,8 +1275,11 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 			var child: UxmlElement = kids[k]
 			var explicit := _dim(child, cross_prop, ac)
 			var nat: float
+			var car := _ratio(child)
 			if explicit >= 0.0:
 				nat = explicit
+			elif car > 0.0:
+				nat = it_main[k] / car if row else it_main[k] * car
 			else:
 				# For a row item the final main size is now known — measuring
 				# with it lets wrapped text report the height it really needs.
@@ -1377,7 +1434,7 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 				else:
 					it_cpos[k] = lp + mk3[cs_i]
 				continue
-			if al == "stretch" and _dim(child, cross_prop, ac) < 0.0:
+			if al == "stretch" and _dim(child, cross_prop, ac) < 0.0 and _ratio(child) <= 0.0:
 				# Stretch still honors min/max — a max-height:30 item in a
 				# 100-high line stretches to 30, not 100 — and the
 				# padding+border floor applies here too.
