@@ -643,6 +643,15 @@ func test_resolver_default_res_root() -> void:
 	check(String(res["text"]).find(".options-shell") >= 0, "resolve_text reads file contents")
 
 
+# Unity asset references written by UI Builder carry a query and a
+# sub-asset fragment; the file is the part before them.
+func test_resolver_strips_unity_asset_query() -> void:
+	var r := UxmlResourceResolver.new("res://tests/fixtures/options")
+	var res := r.resolve_text("project://database/Assets/UI/Options.uss?fileID=7433441132597879392&guid=0123456789abcdef&type=3#Options")
+	check(res["ok"], "query and fragment are stripped: %s" % [res.get("diagnostic")])
+	check(r.resolve("Assets/UI/Options.uss#Options")["ok"], "a fragment alone is stripped")
+
+
 func test_resolver_user_scheme() -> void:
 	var dir := "user://uxml_test_tmp"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))

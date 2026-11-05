@@ -44,6 +44,15 @@ func _init(root: String = "res://") -> void:
 ## {ok: bool, path: String, diagnostic: Dictionary}.
 func resolve(reference: String, from: String = "") -> Dictionary:
 	var ref := reference.strip_edges().replace("\\", "/")
+	# Unity asset references carry a query and a sub-asset fragment
+	# (UI Builder: `x.uss?fileID=7433441132597879392&guid=...&type=3#x`).
+	# The file is the part before them.
+	var cut := ref.find("?")
+	var frag := ref.find("#")
+	if frag >= 0 and (cut < 0 or frag < cut):
+		cut = frag
+	if cut >= 0:
+		ref = ref.substr(0, cut)
 	if ref.is_empty():
 		return _fail("malformed-reference", reference, "empty file reference")
 
