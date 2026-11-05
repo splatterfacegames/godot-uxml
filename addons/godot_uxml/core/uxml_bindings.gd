@@ -76,7 +76,16 @@ static func extract(doc: UxmlDocumentModel, root: UxmlElement = null) -> Array:
 			stack.append(child)
 		if removed:
 			el.children = kept
-	return warnings
+	# Clones (pooled ListView rows, template instances) repeat one authored
+	# binding: report each problem once.
+	var seen := {}
+	var unique: Array = []
+	for d in warnings:
+		var key := "%s|%s|%d" % [d["kind"], d["message"], d["offset"]]
+		if not seen.has(key):
+			seen[key] = true
+			unique.append(d)
+	return unique
 
 
 static func _read(doc: UxmlDocumentModel, owner: UxmlElement, b: UxmlElement, warnings: Array) -> void:

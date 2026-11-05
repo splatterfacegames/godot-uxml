@@ -509,6 +509,10 @@ func test_list_view_items_source_auto_assign() -> void:
 	h.check((rows[3] as UxmlListRow).index < 0, "rows past the count are unused")
 	h.eq(_kinds(doc.diagnostics).count("unsupported-control"), 0, "no binding tag reaches the factory")
 	_close(doc)
+	doc = _open("list2", '<ui:ListView name="list" fixed-item-height="20" item-template="row.uxml" style="height: 200px;"/>',
+		{"Assets/UI/row.uxml": '<ui:Label name="title"><Bindings><ui:DataBinding property="text" binding-mode="Bogus"/></Bindings></ui:Label>'})
+	h.eq(_kinds(doc.diagnostics).count("unsupported-value"), 1, "a bad binding in an item template reports once, not once per row")
+	_close(doc)
 
 
 func test_bindings_inside_templates() -> void:
