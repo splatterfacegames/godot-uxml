@@ -30,6 +30,15 @@ extends Control
 signal button_pressed(element_name)
 signal value_changed(element_name, value)
 signal loaded(success)
+## USS transition events (Unity's TransitionRunEvent / TransitionStartEvent /
+## TransitionEndEvent / TransitionCancelEvent). `element_name` is the
+## element's `name` attribute ("" when it has none), `property` the
+## animated longhand, `elapsed_time` the event's elapsedTime in seconds.
+## Emitted after the restyle that produced them.
+signal transition_run(element_name, property, elapsed_time)
+signal transition_start(element_name, property, elapsed_time)
+signal transition_end(element_name, property, elapsed_time)
+signal transition_cancel(element_name, property, elapsed_time)
 
 ## The UXML file to load. Setting it while the node is inside the tree
 ## reloads the document.
@@ -106,6 +115,12 @@ var _pooled: Dictionary = {}          # UxmlElement -> true (inside a pooled row
 ## Unity's default ListView fixed-item-height.
 const LIST_DEFAULT_ITEM_HEIGHT := 22.0
 var _scan_all := true                 # next restyle re-reads every element's attributes
+var _transitions: UssTransitions = null  # running USS transitions (per load)
+
+## When true, transitions advance only through advance_transitions() —
+## deterministic time for tests and tools. When false (default) they follow
+## the frame clock (_process delta).
+var transitions_manual := false
 
 ## Computed-style properties that can change neither the flex geometry nor
 ## any control's intrinsic measure: a restyle that only changes these
@@ -121,10 +136,14 @@ const PAINT_ONLY := {
 	"-unity-background-image-tint-color": true,
 	"-unity-text-outline-color": true,
 	"-unity-text-align": true, "visibility": true,
+	# Painted without affecting flex geometry or intrinsic measures.
+	"opacity": true, "translate": true, "rotate": true, "scale": true,
+	"transform-origin": true,
 }
 
 
 func _init() -> void:
+	set_process(false)
 	_root_box = UxmlBox.new()
 	_root_box.name = "uxml-root"
 	_root_box.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -254,6 +273,8 @@ func _clear() -> void:
 	_scan_all = true
 	_lists = {}
 	_pooled = {}
+	_transitions = null
+	set_process(false)
 	_doc = null
 	diagnostics = []
 
@@ -424,7 +445,11 @@ func _queue_restyle() -> void:
 ## frame produce one pass. The cascade is incremental (only elements whose
 ## inputs changed are recomputed), so the cost scales with what changed,
 ## not with the document.
-func _restyle_now() -> void:
+##
+## `only_transitions`: called by the transition clock when nothing but
+## running transitions changed — the cascade then visits only the animated
+## elements' subtrees.
+func _restyle_now(only_transitions: bool = false) -> void:
 	_restyle_queued = false
 	if _doc == null:
 		return
@@ -466,11 +491,22 @@ func _restyle_now() -> void:
 		dirty = dl
 	_attr_dirty.clear()
 	_scan_all = false
-	var changed := _cascade.update({
+	var options := {
 		"element_states": element_states,
 		"disabled_elements": runtime_disabled,
 		"enabled_elements": runtime_enabled,
-	}, false, dirty)
+	}
+	var changed := _cascade.update(options, false, dirty, only_transitions and dirty != null)
+	var olds: Array = _cascade.last_old
+	if _transitions == null:
+		_transitions = UssTransitions.new(_cascade)
+		_transitions.size_of = _percent_base
+	elif not changed.is_empty():
+		# Start / retarget / cancel transitions; their overrides are the
+		# animated computed values (extra cascade passes, merged here).
+		var merged: Array = _transitions.after_update(changed, olds, options)
+		changed = merged[0]
+		olds = merged[1]
 	_styles = _cascade.styles
 	var cels: Array = _cascade.els
 	# Effective disabled (attribute/runtime, descending — the document's
@@ -501,7 +537,6 @@ func _restyle_now() -> void:
 		fresh = applied.size()
 	else:
 		var els: Array = _cascade.els
-		var olds: Array = _cascade.last_old
 		var seen := {}
 		for k in changed.size():
 			var el: UxmlElement = els[changed[k]]
@@ -561,6 +596,88 @@ func _restyle_now() -> void:
 	# Runtime warnings accumulate during apply/layout — surface last so they
 	# are all included.
 	diagnostics = _doc.warnings + _cascade.collect_warnings() + _rt_warnings
+	if _transitions != null:
+		set_process(_transitions.active() and not transitions_manual)
+		_transitions.flush_events(_emit_transition_event)
+
+
+# ---------------------------------------------------------------------------
+# Transitions
+# ---------------------------------------------------------------------------
+
+func _process(delta: float) -> void:
+	if _transitions == null or not _transitions.active() or transitions_manual:
+		set_process(false)
+		return
+	_transitions.advance(delta * 1000.0)
+	if not _transitions.tick():
+		_transitions.flush_events(_emit_transition_event)
+	elif not _restyle_queued:
+		# Only the animated values changed: restyle them now. A restyle
+		# already queued this frame picks the new values up instead.
+		_restyle_now(_attr_dirty.is_empty())
+
+
+## Advance running USS transitions by `seconds` and restyle synchronously.
+## For deterministic stepping set `transitions_manual` first; the frame
+## clock then leaves transition time alone.
+func advance_transitions(seconds: float) -> void:
+	if _transitions == null or _doc == null:
+		return
+	_transitions.advance(seconds * 1000.0)
+	_transitions.tick()
+	_restyle_now(not _restyle_queued and _attr_dirty.is_empty())
+
+
+## True while a USS transition runs.
+func has_running_transitions() -> bool:
+	return _transitions != null and _transitions.active()
+
+
+func _emit_transition_event(kind: int, index: int, property: String, elapsed: float) -> void:
+	var el: UxmlElement = _cascade.els[index]
+	var nm: String = _el_names.get(el, "")
+	match kind:
+		UssTransitions.Event.RUN:
+			transition_run.emit(nm, property, elapsed)
+		UssTransitions.Event.START:
+			transition_start.emit(nm, property, elapsed)
+		UssTransitions.Event.END:
+			transition_end.emit(nm, property, elapsed)
+		UssTransitions.Event.CANCEL:
+			transition_cancel.emit(nm, property, elapsed)
+
+
+## Percentage base for converting a transition's px/% start value
+## (VisualElement.GetParentSizeForLengthConversion): the parent's laid-out
+## width or height, or the element's own size for radii, translate and
+## transform-origin. NAN when unknown.
+func _percent_base(index: int, property: String, sub: int) -> float:
+	var el: UxmlElement = _cascade.els[index]
+	var own: Control = _controls.get(el)
+	var par = _parents.get(el)
+	var pc: Control = null if par == null else _controls.get(par)
+	match property:
+		"top", "bottom", "height", "min-height", "max-height":
+			return NAN if pc == null else pc.size.y
+		"left", "right", "width", "min-width", "max-width", \
+		"margin-top", "margin-right", "margin-bottom", "margin-left", \
+		"padding-top", "padding-right", "padding-bottom", "padding-left":
+			return NAN if pc == null else pc.size.x
+		"flex-basis":
+			if pc == null:
+				return NAN
+			var dir = (_styles.get(par, {}) as Dictionary).get("flex-direction")
+			var d := "column" if dir == null else String(dir["value"])
+			return pc.size.y if d.begins_with("column") else pc.size.x
+		"border-top-left-radius", "border-top-right-radius", \
+		"border-bottom-right-radius", "border-bottom-left-radius":
+			return NAN if own == null else own.size.x
+		"translate", "transform-origin":
+			if own == null:
+				return NAN
+			return own.size.x if sub == 0 else own.size.y
+	return NAN
 
 
 ## True when two computed styles differ only in PAINT_ONLY properties.

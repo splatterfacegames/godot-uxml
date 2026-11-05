@@ -232,3 +232,74 @@ removable cost. With native scanners: UXML parse 62 -> 23 ms, USS parse
 (`bench/equiv_parse.gd`: 2,004 comparisons incl. fuzzed input, 0
 differences).
 
+
+## Transitions (`unity/transitions`)
+
+### Method
+
+- `bench/bench.gd` has two new steady-state ops on the big document
+  (1,531 elements). Each op sets one element's inline style to a 1000 s
+  linear transition, starts the transition, and then times
+  `advance_transitions(0.016)` (one frame: clock, interpolation, restyle,
+  apply, layout when needed):
+  - **transition frame (bg color)**: `background-color` on `card-7-ok`, a
+    paint-only property.
+  - **transition frame (width)**: `width` on `card-8`, a layout property.
+- Same machine as above. Other jobs ran on the machine at the same time,
+  so the absolute numbers are higher than in the tables above. The
+  baseline (`main` at `bcbb2de`) and the transitions branch ran
+  alternately, twice each, with `-- --quick`. Each row gives the lower
+  median of the two runs.
+
+### Results (native core, ms, median)
+
+| op (big document) | baseline | transitions |
+| --- | ---: | ---: |
+| hover toggle (button) | 1.07 | 1.22 |
+| idle restyle | 0.70 | 0.67 |
+| `set_class` churn (card) | 13.6 | 13.8 |
+| resize relayout | 12.1 | 10.9 |
+| **transition frame (bg color)** | — | **1.07** |
+| **transition frame (width)** | — | **11.0** |
+
+The `-- --quick` runs vary by up to ±15% between runs on the shared
+machine, also for code that the branch does not change (UXML parsing).
+Three alternating full runs of the restyle ops (`--only=to`) give the
+medians below. The differences are inside the run-to-run variation; no op
+is more than 5% slower.
+
+| op | baseline | transitions | change |
+| --- | ---: | ---: | ---: |
+| hover toggle (button) | 1.545 | 1.489 | -3.6% |
+| hover toggle (card, desc sel) | 1.873 | 1.894 | +1.1% |
+| focus toggle (list item) | 1.327 | 1.373 | +3.5% |
+| HUD hover toggle | 0.329 | 0.324 | -1.5% |
+
+The paint-only transition frame (1.07 ms) costs about the same as a
+hover toggle (1.07 to 1.5 ms in the same runs) and less than a hover
+toggle in every paired run. The layout transition frame costs about the
+same as a `set_class` change of geometry or a resize.
+
+### Per-frame cost
+
+- When no transition runs, `UxmlDocument` does not process frames
+  (`set_process(false)`). A document without transitions has no
+  per-frame cost.
+- A transition frame recomputes only the animated elements and their
+  subtrees (`UssCascade.update(..., only_forced = true)`). The frame does
+  not scan the 1,531 elements, so a paint-only transition frame costs less
+  than a hover toggle, which scans every element.
+- A paint-only property (for example `background-color`) re-applies one
+  control and places the control without a layout pass. A layout
+  property (for example `width`) runs the layout pass each frame, at
+  about the cost of a `set_class` that changes geometry.
+- GDScript fallback (no native binary), same document, same session:
+  a paint-only transition frame 2.8 ms, a hover toggle 6.9 ms
+  (one-off measurement with `UssCascade.use_native = false` and
+  `UxmlDocument.use_native_layout = false`, under the same machine load).
+
+### Start of a transition
+
+The restyle that starts a transition runs the cascade one more time
+(`only_forced`) to apply the start values. The extra pass visits only the
+subtrees of the elements whose transitions started.

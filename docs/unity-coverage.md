@@ -35,7 +35,7 @@ Status values:
 | `-unity-slice-type`, `-unity-slice-scale` | in progress (`unity/visual-props`) |
 | `-unity-text-generator`, `-unity-editor-text-rendering-mode` | in progress (`unity/visual-props`) |
 | `all` | in progress (`unity/visual-props`) |
-| `transition`, `transition-*` | in progress (`unity/transitions`) |
+| `transition`, `transition-*` | done |
 | `filter`, `-unity-material`, `-unity-text-auto-size` | planned |
 
 ## USS syntax

@@ -56,7 +56,7 @@ UxmlResourceResolver ──────────────▶│ follows <S
 | `uxml_loader.gd` | `UxmlLoader` | `load_file(path, project_root)`, `load_source(source, path, resolver, uss)` |
 | `uxml_templates.gd` | `UxmlTemplates` | template expansion (`<Template>`, `<Instance>`, `<AttributeOverrides>`, `content-container`, slots) before the sheets load |
 | `style_resolver.gd` | `UssStyleResolver` | `resolve(doc, options) -> {styles, warnings}` (a one-shot `UssCascade`); var() substitution |
-| `uss_cascade.gd` | `UssCascade` | compiled, bucketed, incremental cascade: `update(options, force) -> changed indices`, `styles`, `collect_warnings()` |
+| `uss_cascade.gd` | `UssCascade` | compiled, bucketed, incremental cascade: `update(options, force, dirty, only_forced) -> changed indices`, `styles`, `last_old`, `collect_warnings()`, computed overrides: `set_override(i, entries)`, `target_style(i)` |
 
 ## UXML subset
 
@@ -225,6 +225,15 @@ The semantics are Unity 6 (6000.0) semantics.
   `visibility`, `white-space`, `-unity-font*`, `-unity-paragraph-spacing`,
   `-unity-text-align`, `-unity-text-outline-*`, and all `--*` custom
   properties.
+- `transition` expands in the cascade into `transition-property`,
+  `transition-duration`, `transition-delay` and
+  `transition-timing-function` (comma-separated lists). The expansion
+  follows Unity's `ShorthandApplicator.CompileTransition`: in each item,
+  the first time is the duration and the second time is the delay. An
+  easing name is the timing function. Any other identifier is the
+  property. `none` is valid only as the single first item. An invalid
+  value sets the four longhands to their initial values (`all`, `0s`,
+  `0s`, `ease`). See "Transitions" below.
 - Cascade order: inline `style` attribute > rule specificity > source order.
   A `<Style src>` sheet only reaches elements inside the subtree it is
   attached to.
@@ -236,7 +245,7 @@ The semantics are Unity 6 (6000.0) semantics.
   absolute positioning (`position`/`left`/`top`/`right`/`bottom`),
   `overflow`, `opacity`, `cursor`, `picking-mode`,
   `letter-spacing`/`word-spacing`/`-unity-paragraph-spacing`,
-  transitions, transforms — warn
+  transforms — warn
   `unsupported-property` once per element/property; the value still
   cascades so the data is not lost.
 
@@ -312,6 +321,7 @@ UxmlDocument (Control)
 | `runtime/flex_layout.gd` | `UxmlFlexLayout` | pure geometry: `compute(root, styles, host_size, measurer, warnings, options)` → `{rects, content_sizes}` |
 | `runtime/control_factory.gd` | `UxmlControlFactory` | tag→native mapping, attribute wiring, image loading through the resolver |
 | `runtime/style_applier.gd` | `UxmlStyleApplier` | computed style → styleboxes/colors/fonts, display/visibility/disabled, base-state restore |
+| `runtime/uss_transitions.gd` | `UssTransitions` | USS transitions: start/retarget/cancel rules, easing, per-frame values as computed overrides, transition events |
 
 ### Control mapping
 
@@ -572,6 +582,9 @@ doc.set_enabled("advanced-panel", false)  # subtree disable + :disabled
 doc.set_class("item", "row selected")     # re-resolve with new classes
 doc.refresh()                             # after unseen mutations
 doc.relayout()                            # per-frame text updates (no re-apply)
+doc.transition_end.connect(_on_end)       # (name, property, elapsed_time)
+doc.transitions_manual = true             # tests: step transition time by hand
+doc.advance_transitions(0.25)             # +250 ms, restyle now
 doc.get_element_model("hint").set_attribute("class", "hint visible")  # observable
 
 # Virtualized list: <ui:ListView name="items" fixed-item-height="24"
@@ -606,7 +619,7 @@ rows that scrolled out; slots past the item count are `display: none`.
   stylesheet or a project-rooted path (`Assets/...`) for such references.
 - Unsupported at-rules (`@media`, `@supports`, other unknown at-rules) —
   `unsupported-feature`, contents never apply.
-- Transitions, transforms, animations — `unsupported-property` (cascade)
+- Transforms and animations — `unsupported-property` (cascade)
   and `unsupported-value` (runtime). So are absolute positioning
   (`position`/offsets), `overflow`, `opacity`, `cursor`, `picking-mode`,
   letter/word/paragraph spacing, `-unity-text-outline-*`, `order`,
@@ -705,6 +718,216 @@ rows that scrolled out; slots past the item count are `display: none`.
     `class` and `name` overrides are ignored like `style`, cycles are
     detected by resolved template path, and an unresolved `src` is
     reported at the Instance.
+
+## Transitions
+
+`UssTransitions` (`runtime/uss_transitions.gd`) implements USS
+transitions with Unity 6 (6000.0) semantics. The reference is the Unity C#
+source: `StylePropertyAnimationSystem`, `ComputedTransitions`,
+`VisualTreeStyleUpdater`, `StylePropertyAnimation` and `Easing`
+(UnityCsReference, branch `6000.0`).
+
+### Properties and lists
+
+- `transition-property`: `all` (initial), `none`, or a comma-separated
+  list. A list item is a longhand, a shorthand (`margin`, `padding`,
+  `border-width`, `border-color`, `border-radius`, `flex`,
+  `background-position`, `-unity-background-scale-mode`,
+  `-unity-text-outline`) or `all`. An unknown or non-animatable name keeps
+  its list position but starts nothing. `ignored` and `none` start nothing.
+- `transition-duration`, `transition-delay`: `s` or `ms` lists. A bare
+  number is seconds. The delay can be negative. Times round to whole
+  milliseconds (round half to even, as `Mathf.RoundToInt`).
+- `transition-timing-function`: `ease`, `ease-in`, `ease-out`,
+  `ease-in-out`, `linear`, and the `sine`, `cubic`, `circ`, `elastic`,
+  `back` and `bounce` families in `-in`, `-out` and `-in-out` forms. An
+  unknown name gives `ease`.
+- `transition-property` is the master list. A shorter duration, delay or
+  timing list repeats. A longer list is cut. An item with a combined
+  duration (duration + delay) of 0 or less is removed.
+- When the list names a property more than once, the last item wins.
+- Easing curves are Unity's curves, not exact CSS cubic-bezier curves.
+  `ease` is `t * (1.8 + t * (-0.6 - 0.2 t))`.
+
+### Animatability
+
+The table on the USS property reference page gives the categories.
+
+| category | properties | interpolation |
+| --- | --- | --- |
+| color | `color`, `background-color`, `border-*-color`, `-unity-background-image-tint-color`, `-unity-text-outline-color` | per channel, RGBA |
+| length | `width`, `height`, `min-*`, `max-*`, `flex-basis`, `margin-*`, `padding-*`, `top`, `right`, `bottom`, `left`, `border-*-radius`, `font-size`, `letter-spacing`, `word-spacing`, `-unity-paragraph-spacing` | value, in the end value's unit |
+| number | `border-*-width`, `flex-grow`, `flex-shrink`, `opacity`, `-unity-slice-scale`, `-unity-text-outline-width` | value |
+| integer | `-unity-slice-left/right/top/bottom` | value, rounded |
+| structured | `translate`, `rotate` (degrees), `scale`, `transform-origin`, `background-size`, `text-shadow` | per component |
+| discrete | `align-*`, `flex-direction`, `flex-wrap`, `justify-content`, `position`, `overflow`, `text-overflow`, `visibility`, `white-space`, `-unity-text-align`, `-unity-font-style`, `-unity-font`, `-unity-font-definition`, `background-image`, `background-position-x/y`, `background-repeat`, `-unity-overflow-clip-box`, `-unity-text-overflow-position`, `-unity-slice-type` | start value below an eased progress of 0.5, end value from 0.5 |
+
+Other properties (`display`, `cursor`, the `transition-*` properties,
+custom properties) do not animate. A change to such a property applies
+immediately.
+
+A length or a structured value interpolates only between `px` and `%`
+values. `auto`, `none` and other keywords do not interpolate: the change
+applies immediately. When the start unit and the end unit are different,
+the start value converts to the end unit (`TryConvertLengthUnits`). The
+percentage base is the parent's laid-out width or height. Border radii,
+`translate` and `transform-origin` use the element's own laid-out size. A
+start value of 0 converts to `0px` without a base.
+
+When the cascade sets no value, the start value or the end value is
+Unity's initial value (for example `rgba(0, 0, 0, 0)` for
+`background-color`, `0px` for margins). `color`, `font-size`, `-unity-font`
+and `-unity-font-definition` are exceptions: without a USS value, the
+runtime paints the Godot theme value. A change from or to an unset value
+of these four properties applies immediately.
+
+### Starting, retargeting, cancelling
+
+The rules are the CSS "starting of transitions" rules as Unity implements
+them in `StartTransition`:
+
+1. A style change on an element with a style before the change can start
+   a transition. The style that the first cascade pass computes has no
+   previous style, so a document load starts no transitions.
+2. A transition starts when the matching list item has a positive combined
+   duration, the value before the change and the value after the change
+   are different, and no completed transition already ended at the new
+   value.
+3. A change while a transition runs:
+   - The same end value: no change.
+   - The new value equals the current value: the transition is cancelled.
+   - A combined duration of 0 or less: the transition is cancelled.
+   - Otherwise a new transition starts from the current value. When the
+     new value equals the reversing-adjusted start value of the running
+     transition, the new transition is shortened. The shortening factor is
+     `clamp01(|1 - (1 - eased progress) * old factor|)`. The duration and
+     a negative delay are multiplied by the factor.
+4. When a property leaves the element's transition list, the running
+   transition is cancelled and the value jumps to the end value.
+
+During the delay the value stays at the start value. A negative delay
+starts the transition part of the way through. When the clock passes
+the end time, the value is the end value exactly (the authored string),
+and the transition moves to the completed set.
+
+### Computed overrides
+
+The animated value is the element's computed value. Inheritance, layout,
+the style applier and `get_computed_style()` all see the animated value.
+
+- `UssCascade.set_override(i, {property: {value, origin}})` stores
+  per-element entries. `_compute` writes the entries over the cascade
+  result as the last step, before the inherited values for the children
+  are built. Both cascades (GDScript and native) implement the same step
+  with the same Dictionary key order.
+- The cascade keeps the result before the overrides
+  (`target_style(i)`). A style change during a transition reads the new
+  end value from `target_style`, not from the overridden value.
+- An element whose overrides changed is recomputed on the next update,
+  even when the cascade inputs of the element did not change. An
+  overridden element whose own cascade result changed is reported as
+  changed, even when the overridden output did not change.
+- `update(..., only_forced = true)` visits only the subtrees of elements
+  whose overrides changed. The caller uses the flag only when nothing
+  else changed since the last update.
+- Interpolated values are written as USS strings: lengths and numbers
+  with up to 4 decimal places, colors as `rgba(r, g, b, a)` clamped to
+  the valid range. The internal current value is not clamped, so
+  `back` and `elastic` curves can overshoot and return.
+- A discrete value and the end value keep the authored string and its
+  origin, so `url()` resolution in `background-image` stays correct.
+
+### Runtime flow
+
+1. `_restyle_now()` runs `UssCascade.update()`. The changed indices and
+   `last_old` (the styles before the update, with the animated values)
+   go to `UssTransitions.after_update()`.
+2. `after_update` starts, retargets and cancels transitions for each
+   changed element, writes the new overrides, and runs the cascade again
+   (`only_forced`) until the overrides are stable. The changed lists of
+   all passes merge. The style before the first pass is the previous
+   style of each element.
+3. Each frame, `_process` advances the clock by `delta`. `tick()`
+   computes the new values and writes the changed overrides. A restyle
+   with `only_transitions` then recomputes only the animated elements and
+   their subtrees. A paint-only property (`PAINT_ONLY`, for example
+   `background-color`, `opacity`, `translate`) re-applies the control
+   without a layout pass. A layout property runs the layout pass.
+4. `_process` runs only while a transition runs. With no running
+   transition, `set_process(false)` removes all per-frame cost.
+5. When a transition completes, the end value is the value before the
+   next style change, as in Unity. The next change can start a new
+   transition from the end value.
+
+The multi-pass flow gives the same result as Unity's single top-down
+pass. Example: a parent starts a `color` transition, and a child has
+its own `color` transition. In the first pass the child inherits the end
+value and starts a transition. In the second pass the child inherits the
+start value from the parent's override, and the child's transition is
+cancelled. The run event and the cancel event of the child collapse, so
+the child sends no event, as in Unity.
+
+### Events
+
+`UxmlDocument` signals: `transition_run`, `transition_start`,
+`transition_end`, `transition_cancel`, each with `(element_name,
+property, elapsed_time)`. The signals match Unity's `TransitionRunEvent`,
+`TransitionStartEvent`, `TransitionEndEvent` and `TransitionCancelEvent`.
+`element_name` is the `name` attribute or `""`. `property` is the
+animated longhand. `elapsed_time` is in seconds and follows Unity:
+
+- run and start: `min(max(-delay, 0), duration)`;
+- end: the duration (the shortened duration for a reversal);
+- cancel: the time since the start (0 before the start), plus `-delay`
+  for a negative delay.
+
+The events of one restyle are queued per element and property and sent at
+the end of the restyle. A cancel after a run, start or end of the same
+transition in the same queue removes all of those events (Unity's
+`QueueTransitionCancelEvent` rule).
+
+### Time
+
+The clock is in milliseconds and advances by the frame `delta`. Set
+`transitions_manual = true` to stop the frame clock. Then
+`advance_transitions(seconds)` advances the clock and restyles at once.
+Tests and tools use these calls for deterministic time.
+`has_running_transitions()` tells when a transition runs.
+
+### Deviations from Unity
+
+- Event timing: Unity sends queued transition events in the next panel
+  update. godot-uxml sends the events at the end of the restyle that
+  queued the events. The collapse window is one restyle, not one panel
+  update.
+- `all` visits the properties in the order of `UssTransitions.ANIMATABLE`.
+  Unity visits the properties in the order of its style data groups. The
+  values are the same. The order of events for properties that start in
+  the same restyle can be different.
+- Unity skips transitions for values that C# code sets through
+  `VisualElement.style`. godot-uxml has no such API. The UXML `style`
+  attribute transitions as in Unity, because Unity applies the attribute
+  as an inline rule.
+- `color`, `font-size`, `-unity-font` and `-unity-font-definition` without a
+  USS value do not interpolate (see above). Unity uses the initial values
+  (black, 14px, no font).
+- Unity keeps a running transition when the new end value cannot convert
+  (for example `auto`), and the element keeps the old end value until the
+  next restyle of the element. godot-uxml also keeps the running
+  transition, but at completion the value becomes the cascade value at
+  once.
+- The percentage base for unit conversion is the size of the Godot
+  control. A plain native control (`Button`, `Label`) cannot be smaller
+  than its minimum size, so the base can be different from Unity's
+  `resolvedStyle` size.
+- `rotate` interpolates the angle only (Unity does the same). An axis form
+  (`rotate: x 10deg`) does not interpolate.
+- Unity's importer rejects an unreadable time in a list. godot-uxml reads
+  an unreadable time as `0s`.
+- The computed values of `opacity`, `translate`, `rotate`, `scale`,
+  `transform-origin`, `background-size`, `background-position-*` and
+  `text-shadow` animate. The style applier paints each property only when
+  the applier supports the property.
 
 ## Background slicing, image tint, text outline
 

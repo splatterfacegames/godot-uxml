@@ -23,6 +23,7 @@ func _initialize() -> void:
 		["res://tests/test_layout.gd", "layout"],
 		["res://tests/test_runtime.gd", "runtime"],
 		["res://tests/test_templates.gd", "templates"],
+		["res://tests/test_transitions.gd", "transitions"],
 	]:
 		var cls = load(entry[0])
 		if cls == null:
@@ -466,10 +467,10 @@ func test_shorthand_loses_to_later_longhand() -> void:
 
 
 func test_unsupported_property_warns_but_keeps() -> void:
-	var doc := _doc(ONE, '.x { transition: color 1s; color: red; }')
+	var doc := _doc(ONE, '.x { cursor: link; color: red; }')
 	var res := _resolved(doc)
-	eq(_count_kind(res["warnings"], "unsupported-property"), 1, "transition warns")
-	eq(_val(doc, 'a', 'transition'), 'color 1s', "value still computed")
+	eq(_count_kind(res["warnings"], "unsupported-property"), 1, "cursor warns")
+	eq(_val(doc, 'a', 'cursor'), 'link', "value still computed")
 	eq(_val(doc, 'a', 'color'), 'red', "supported property unaffected")
 
 
