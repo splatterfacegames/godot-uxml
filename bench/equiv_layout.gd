@@ -23,15 +23,21 @@ func _initialize() -> void:
 		d.size = Vector2(800, 600)
 		d.load_document(pair[1], pair[0])
 		await process_frame
-		for host in [Vector2(800, 600), Vector2(1280, 800), Vector2(333, 1000), Vector2(120, 90)]:
-			_compare(pair[1], d, host)
+		# Cold, then warm cross-pass caches over a size sequence with repeats
+		# and revisits (the document's own records/xcache options).
+		var records := {}
+		var xcache := {}
+		for host in [Vector2(800, 600), Vector2(1280, 800), Vector2(333, 1000), Vector2(120, 90),
+				Vector2(800, 600), Vector2(800, 600), Vector2(1280, 800), Vector2(801, 600)]:
+			_compare(pair[1], d, host, {}, {})
+			_compare(pair[1] + " (cached)", d, host, records, xcache)
 		root.remove_child(d)
 		d.free()
 	print("EQUIV_LAYOUT %s: %d checks, %d failures" % ["OK" if _fails == 0 else "FAIL", _checks, _fails])
 	quit(0 if _fails == 0 else 1)
 
 
-func _compare(name: String, d: UxmlDocument, host: Vector2) -> void:
+func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary, xcache: Dictionary) -> void:
 	var snap := {}
 	for el in d._controls:
 		snap[el] = d._controls[el].size
@@ -47,6 +53,10 @@ func _compare(name: String, d: UxmlDocument, host: Vector2) -> void:
 	opts2["warned"] = {}
 	opts2["volatile"] = d._volatile_measures()
 	opts2["volatile_width"] = d._volatile_width
+	if not records.is_empty() or not xcache.is_empty() or name.ends_with("(cached)"):
+		opts2["records"] = records
+		opts2["xcache"] = xcache
+		opts2["hint_free"] = true
 	var w2: Array = []
 	var b := UxmlFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w2, opts2)
 	_checks += 1

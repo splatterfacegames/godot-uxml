@@ -81,7 +81,7 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 		names = [""]
 	for step in steps:
 		var nm: String = names[rng.randi() % names.size()]
-		var op := rng.randi() % 9
+		var op := rng.randi() % 10
 		var args: Array = []
 		match op:
 			0, 1, 2:
@@ -116,6 +116,17 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 					if n is Label or n is Button:
 						n.text = t
 					d.refresh()
+			9:
+				# Text change the runtime cannot see (no refresh), then a
+				# resize — the relayout must pick the new text up.
+				var t2 := "x".repeat(1 + rng.randi() % 40)
+				var sz2 := Vector2(200 + rng.randi() % 900, 150 + rng.randi() % 700)
+				args = [nm, t2, sz2]
+				for d in [a, b]:
+					var n2 = d.get_native(nm)
+					if n2 is Label or n2 is Button:
+						n2.text = t2
+					d.size = sz2
 			8:
 				# Several changes coalesced into one flush.
 				var nm2: String = names[rng.randi() % names.size()]

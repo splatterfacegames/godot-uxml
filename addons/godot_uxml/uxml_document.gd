@@ -91,6 +91,7 @@ var _unsettled := true
 var _pending_fresh := false
 var _el_of: Dictionary = {}           # outer Control -> UxmlElement
 var _layout_records: Dictionary = {}  # flex layout's parsed-style cache
+var _layout_xcache: Dictionary = {}   # flex layout's validated cross-pass cache
 
 ## Computed-style properties that can change neither the flex geometry nor
 ## any control's intrinsic measure: a restyle that only changes these
@@ -235,6 +236,7 @@ func _clear() -> void:
 	_pending_fresh = false
 	_el_of = {}
 	_layout_records = {}
+	_layout_xcache = {}
 	_doc = null
 	diagnostics = []
 
@@ -605,7 +607,11 @@ func _do_layout() -> void:
 		 "warned": _layout_warned,
 		 "volatile": _volatile_measures(),
 		 "volatile_width": _volatile_width,
-		 "records": _layout_records}
+		 "records": _layout_records,
+		 "xcache": _layout_xcache,
+		 # _measure_leaf only reads its width hint for wrapping Labels
+		 # (the volatile set); every other measure is hint-independent.
+		 "hint_free": true}
 	)
 	_rects = res["rects"]
 	_insets = res["insets"]

@@ -95,6 +95,35 @@ var _vmemo := {}      # volatile el -> [set memo, read memo]
 var _volatile_width: Callable
 static var _no_list: Array = []
 static var _no_state := PackedFloat64Array()
+# Cross-pass cache (options["xcache"], caller-owned): el -> [measure
+# entries, layout entries]. Every entry carries the measurer calls its
+# result depended on; a candidate hit is only taken after replaying those
+# calls (once per element/argument per pass) returns identical results, so
+# a text change or a deferred theme update can never be served stale.
+var _xc = null
+var _hint_free := false      # options["hint_free"]: only volatile measures read the hint
+# Entries — measure: [kx, ky, kh, out, entry_state, exit_state, calls,
+# kids, ids, eid, el]; layout: [size, cb_width, scroll_bar_width,
+# entry_state, exit_state, sub, calls, kids, ids, eid, el, rects, insets,
+# content_sizes]. `calls` are the entry's OWN measurer calls, `kids` the
+# child entries its computation used, `ids` the layout-record ids of el and
+# its direct children (any change to a descendant's style changes some
+# entry's ids on the way up). Validity is checked recursively, memoized per
+# pass by eid.
+const E_CALLS := 6
+const E_KIDS := 7
+const E_IDS := 8
+const E_EID := 9
+const E_EL := 10
+var _frames: Array = []      # stack of [calls, kids] being recorded
+var _ids_m := {}             # el -> PackedInt64Array (this pass)
+var _ok_m := {}              # eid -> bool (this pass)
+var _val_m := {}             # el -> {arg -> result} replayed this pass
+static var _eid_seq := 0
+var _laid: Array = []        # elements laid out this pass, in order
+const XC_MAX := 6            # cached entries per element and kind
+static var _rec_seq := 0
+static var _no_ids := PackedInt64Array()
 
 
 ## Compute layout for `root` inside `host_size`. `options` may carry
@@ -124,6 +153,9 @@ static func compute(
 	l._volatile = options.get("volatile", {})
 	l._shared_recs = options.get("records")
 	l._volatile_width = options.get("volatile_width", Callable())
+	if l._shared_recs != null:
+		l._xc = options.get("xcache")
+	l._hint_free = bool(options.get("hint_free", false))
 	if options.has("warned"):
 		l._warned = options["warned"]
 	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
@@ -228,7 +260,8 @@ static func _build_rec(st: Dictionary) -> Array:
 		var entry = st.get(name)
 		if entry != null:
 			enums[name] = String(entry["value"])
-	return [st, kinds, vals, raws, probs, enums]
+	_rec_seq += 1
+	return [st, kinds, vals, raws, probs, enums, _rec_seq]
 
 
 func _rec(el: UxmlElement) -> Array:
@@ -516,10 +549,26 @@ func _measure(
 				var ex: PackedFloat64Array = e[5]
 				for k in vl.size():
 					_vw[vl[k]] = ex[k]
+				if not _frames.is_empty():
+					_frames.back()[1].append(e)
 				return e[3]
 	else:
 		memo = []
 		_meas_m[el] = memo
+	if _xc != null:
+		var xe = _xc.get(el)
+		if xe != null:
+			for e in xe[0]:
+				if (e[0] == kx and e[1] == ky and e[2] == kh and e[4] == entry
+						and _entry_ok(e)):
+					var ex2: PackedFloat64Array = e[5]
+					for k in vl.size():
+						_vw[vl[k]] = ex2[k]
+					memo.append(e)
+					if not _frames.is_empty():
+						_frames.back()[1].append(e)
+					return e[3]
+	_frames.append([[], []])
 	var w := _dim(el, P_W, avail.x)
 	var h := _dim(el, P_H, avail.y)
 	var pad := _padding(el, avail.x)
@@ -559,7 +608,23 @@ func _measure(
 			in_h
 		)
 	)
-	memo.append([kx, ky, kh, out, entry, _vstate(vl) if not vl.is_empty() else _no_state])
+	var fr: Array = _frames.pop_back()
+	_eid_seq += 1
+	var ent := [kx, ky, kh, out, entry, _vstate(vl) if not vl.is_empty() else _no_state,
+		fr[0], fr[1], _ids_of(el) if _xc != null else _no_ids, _eid_seq, el]
+	_ok_m[_eid_seq] = true
+	memo.append(ent)
+	if _xc != null:
+		var xe2 = _xc.get(el)
+		if xe2 == null:
+			xe2 = [[], []]
+			_xc[el] = xe2
+		var lst: Array = xe2[0]
+		if lst.size() >= XC_MAX:
+			lst.pop_front()
+		lst.append(ent)
+	if not _frames.is_empty():
+		_frames.back()[1].append(ent)
 	return out
 
 
@@ -572,34 +637,108 @@ func _measure(
 ## original call sequence would have measured at.
 func _measure_call(el: UxmlElement, hint: float) -> Vector2:
 	if not _volatile.has(el):
-		return _measurer.call(el, _style_for_measure(el), hint)
+		var r0: Vector2 = _measurer.call(el, _style_for_measure(el), hint)
+		if not _frames.is_empty():
+			_frames.back()[0].append([el, false, hint, r0])
+		return r0
 	var vm: Array = _vmemo.get(el, [])
 	if vm.is_empty():
 		vm = [{}, {}]  # [set-calls: hint -> [actual width, result], reads: width -> result]
 		_vmemo[el] = vm
 		if not _vw.has(el):
 			_vw[el] = float(_volatile[el])
+	var res: Vector2
+	var used: float
 	if hint >= 0.0:
 		var hit = vm[0].get(hint)
 		if hit != null:
 			_vw[el] = hit[0]
-			return hit[1]
-		var res: Vector2 = _measurer.call(el, _style_for_measure(el), hint)
-		var actual: float = _volatile_width.call(el) if _volatile_width.is_valid() else hint
-		vm[0][hint] = [actual, res]
-		vm[1][actual] = res
-		_vw[el] = actual
-		return res
-	var cur: float = _vw[el]
-	var hit2 = vm[1].get(cur)
-	if hit2 != null:
-		return hit2
-	# Measure at the tracked width: setting a width the control already
-	# reached is a no-op, so this reads exactly what a hint-less call at
-	# that point of the original sequence read.
-	var res2: Vector2 = _measurer.call(el, _style_for_measure(el), cur)
-	vm[1][cur] = res2
-	return res2
+			used = hit[0]
+			res = hit[1]
+		else:
+			res = _measurer.call(el, _style_for_measure(el), hint)
+			var actual: float = _volatile_width.call(el) if _volatile_width.is_valid() else hint
+			vm[0][hint] = [actual, res]
+			vm[1][actual] = res
+			_vw[el] = actual
+			used = actual
+	else:
+		used = _vw[el]
+		var hit2 = vm[1].get(used)
+		if hit2 != null:
+			res = hit2
+		else:
+			# Measure at the tracked width: setting a width the control
+			# already reached is a no-op, so this reads exactly what a
+			# hint-less call at that point of the original sequence read.
+			res = _measurer.call(el, _style_for_measure(el), used)
+			vm[1][used] = res
+	if not _frames.is_empty():
+		_frames.back()[0].append([el, true, used, res])
+	return res
+
+
+## True when a cached entry still holds this pass: its element's and direct
+## children's style records are the same objects, its own measurer calls
+## replay to identical results, and every child entry it used is valid.
+func _entry_ok(e: Array) -> bool:
+	var eid: int = e[E_EID]
+	var hit = _ok_m.get(eid)
+	if hit != null:
+		return hit
+	var ok: bool = _ids_of(e[E_EL]) == e[E_IDS] and _calls_ok(e[E_CALLS])
+	if ok:
+		for kid in e[E_KIDS]:
+			if not _entry_ok(kid):
+				ok = false
+				break
+	_ok_m[eid] = ok
+	return ok
+
+
+## Replays recorded measurer calls; true when every one still returns the
+## recorded result. Pure calls repeat with the same hint (side-effect
+## free); volatile calls measure at the recorded actual width, which must
+## still be reachable (the engine's clamp unchanged). Each element/argument
+## is replayed at most once per pass.
+func _calls_ok(calls: Array) -> bool:
+	for c in calls:
+		var el: UxmlElement = c[0]
+		var vol: bool = c[1]
+		if vol != _volatile.has(el):
+			return false
+		var arg: float = c[2]
+		if not vol and _hint_free:
+			# The caller guarantees non-volatile measures ignore the hint:
+			# one replay per element per pass covers every recorded call.
+			arg = -1.0
+		var vm = _val_m.get(el)
+		if vm == null:
+			vm = {}
+			_val_m[el] = vm
+		var r = vm.get(arg)
+		if r == null:
+			r = _measurer.call(el, _style_for_measure(el), arg)
+			if vol and _volatile_width.is_valid() and _volatile_width.call(el) != arg:
+				r = Vector2(NAN, NAN)
+			vm[arg] = r
+		if r != c[3]:
+			return false
+	return true
+
+
+## Layout-record ids of el and its direct children (all of them — a
+## display:none child turning visible changes its record).
+func _ids_of(el: UxmlElement) -> PackedInt64Array:
+	var hit = _ids_m.get(el)
+	if hit != null:
+		return hit
+	var out := PackedInt64Array()
+	out.append(_rec(el)[6])
+	for child in el.children:
+		out.append(_rec(child)[6])
+	_ids_m[el] = out
+	return out
 
 
 ## Volatile elements inside el's subtree (el included), document order.
@@ -703,7 +842,74 @@ func _measure_content(el: UxmlElement, cavail: Vector2) -> Vector2:
 ## relative to el's own border-box origin — so `content` starts at the
 ## padding+border inset, not at rect.position.
 func _layout(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
+	if _xc == null:
+		_layout_body(el, rect, cb_width)
+		return
+	var vl := _vlist(el)
+	var entry := _vstate(vl) if not vl.is_empty() else _no_state
+	var xe = _xc.get(el)
+	if xe != null:
+		for e in xe[1]:
+			if (e[0] == rect.size and e[1] == cb_width and e[2] == _scroll_bar_width
+					and e[3] == entry and _entry_ok(e)):
+				# Reuse: descendants' rects are relative to their parents, so
+				# only el's own rect comes from the caller.
+				var sub: Array = e[5]
+				var rs: Array = e[11]
+				var ins: Array = e[12]
+				var cs: Array = e[13]
+				_rects[el] = rect
+				_insets[el] = ins[0]
+				_content_sizes[el] = cs[0]
+				for k in range(1, sub.size()):
+					var x: UxmlElement = sub[k]
+					_rects[x] = rs[k]
+					_insets[x] = ins[k]
+					_content_sizes[x] = cs[k]
+				_laid.append_array(sub)
+				var ex: PackedFloat64Array = e[4]
+				for k in vl.size():
+					_vw[vl[k]] = ex[k]
+				if not _frames.is_empty():
+					_frames.back()[1].append(e)
+				return
+	_frames.append([[], []])
+	var start := _laid.size()
+	_layout_body(el, rect, cb_width)
+	var fr: Array = _frames.pop_back()
+	var sub2: Array = _laid.slice(start)
+	var n := sub2.size()
+	var rs2: Array = []
+	rs2.resize(n)
+	var ins2: Array = []
+	ins2.resize(n)
+	var cs2: Array = []
+	cs2.resize(n)
+	for k in n:
+		var x2: UxmlElement = sub2[k]
+		rs2[k] = _rects[x2]
+		ins2[k] = _insets[x2]
+		cs2[k] = _content_sizes.get(x2, Vector2.ZERO)
+	if xe == null:
+		xe = [[], []]
+		_xc[el] = xe
+	var lst: Array = xe[1]
+	if lst.size() >= XC_MAX:
+		lst.pop_front()
+	_eid_seq += 1
+	var ent := [rect.size, cb_width, _scroll_bar_width, entry,
+		_vstate(vl) if not vl.is_empty() else _no_state, sub2,
+		fr[0], fr[1], _ids_of(el), _eid_seq, el, rs2, ins2, cs2]
+	_ok_m[_eid_seq] = true
+	lst.append(ent)
+	if not _frames.is_empty():
+		_frames.back()[1].append(ent)
+
+
+func _layout_body(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 	_rects[el] = rect
+	if _xc != null:
+		_laid.append(el)
 	var pad := _padding(el, cb_width)
 	var bor := _borders(el)
 	# The resolved content-box insets — the runtime insets internal chrome
