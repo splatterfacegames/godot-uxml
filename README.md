@@ -147,9 +147,13 @@ godot --path . --script res://examples/minimal/minimal.gd
 
 ## Supported subset
 
-- **Controls:** `VisualElement`, `Label`, `Button`, `Image`, `Slider`,
-  `SliderInt`, `Toggle`, `TextField`, `DropdownField`, `ScrollView`,
-  `ListView`.
+- **Controls (Unity part trees and default theme):** `VisualElement`,
+  `TemplateContainer`, `Box`, `Label`, `TextElement`, `Image`, `Button`,
+  `RepeatButton`, `Toggle`, `RadioButton`, `RadioButtonGroup`,
+  `ToggleButtonGroup`, `GroupBox`, `HelpBox`, `PopupWindow`, `Foldout`,
+  `ProgressBar`.
+- **Controls (native Godot widgets):** `Slider`, `SliderInt`,
+  `TextField`, `DropdownField`, `ScrollView`, `ListView`.
 - **Selectors:** type, `.class`, `#name`, `*`, compounds, descendant and
   `>` child combinators, comma groups.
 - **Pseudo-classes:** `:hover`, `:active`, `:inactive`, `:focus`,
@@ -168,17 +172,18 @@ combinators and attribute selectors. The full list is in
 
 ## Fidelity
 
-godot-uxml layout agrees with the reference engine in 27 of 44 golden
-cases. In 4 more cases, layout agrees except for Unity internal control
-parts. All 13 differences have a known cause:
+godot-uxml compares itself with Unity 6000.3 directly:
+`tools/unity-dump` runs UXML/USS cases through Unity's default runtime
+theme and records every element, control parts included.
+`bench/parity.gd` compares structure, geometry and resolved style.
+Controls in the first part-tree set (Button, Toggle, RadioButton, Foldout,
+ProgressBar, HelpBox and more) build Unity's own part elements and use a
+default theme written from the measured values. Most remaining
+differences are Unity's pixel-grid rounding (at most half a pixel). The
+numbers and every known cause are in [docs/parity.md](docs/parity.md).
 
-- Absolute positioning is out of scope.
-- godot-uxml does not apply the Unity default Button theme margins.
-- In one case, the reference engine is incorrect and godot-uxml agrees
-  with Unity.
-
-Controls show native Godot chrome. USS overrides the chrome only where the
-author writes a rule. Details are in [docs/parity.md](docs/parity.md).
+Slider, TextField, DropdownField, ScrollView and ListView still use
+native Godot widgets.
 
 ## Tests and benchmarks
 

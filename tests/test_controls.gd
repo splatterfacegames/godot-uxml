@@ -467,3 +467,54 @@ func test_loose_radio_buttons_are_exclusive() -> void:
 	h.check(b.button_pressed and not a.button_pressed, "switching one loose radio on switches the other off")
 	h.check(c.button_pressed, "a radio inside a GroupBox is its own group")
 	_unload(doc)
+
+
+func _mouse(pos: Vector2, button := -1, pressed := false) -> void:
+	var ev: InputEvent
+	if button < 0:
+		var m := InputEventMouseMotion.new()
+		m.position = pos
+		m.global_position = pos
+		ev = m
+	else:
+		var b := InputEventMouseButton.new()
+		b.button_index = button
+		b.pressed = pressed
+		b.position = pos
+		b.global_position = pos
+		ev = b
+	Input.parse_input_event(ev)
+	await h.process_frame
+	await h.process_frame
+
+
+## Unity's placement, measured (ctl-pressed-toggle, ctl-foldout-click):
+## :hover on the picked element and its ancestors, :active only on the
+## pressed control, a click toggles.
+func test_toggle_mouse_states() -> void:
+	if not h.has_display():
+		h.check(true, "headless: synthetic mouse needs a window (display run covers)")
+		return
+	var doc := _load()
+	await h.process_frame
+	var el := doc.get_element_model("sound")
+	var input := UxmlParts.find_part(el, "input")
+	var check := UxmlParts.find_part(el, "checkmark")
+	var t := doc.get_native("sound") as UxmlToggle
+	var at: Vector2 = (doc._controls[check] as Control).get_global_rect().get_center()
+	await _mouse(at)
+	_flush(doc)
+	h.check(_states(doc, el).has("hover"), "pointer over the checkmark: Toggle is :hover")
+	h.check(_states(doc, input).has("hover"), "and its input (the picked part)")
+	h.check(not _states(doc, check).has("hover"), "the checkmark ignores the pointer, as in Unity")
+	var was := t.button_pressed
+	await _mouse(at, MOUSE_BUTTON_LEFT, true)
+	_flush(doc)
+	h.check(_states(doc, el).has("active"), "press: Toggle is :active")
+	h.check(not _states(doc, input).has("active"), "parts do not take :active")
+	await _mouse(at, MOUSE_BUTTON_LEFT, false)
+	_flush(doc)
+	h.check(t.button_pressed != was, "a click toggles")
+	h.check(not _states(doc, el).has("active"), "release clears :active")
+	await _mouse(Vector2(-50, -50))
+	_unload(doc)
