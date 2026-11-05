@@ -1,0 +1,1975 @@
+{
+ "source": "uxml-preview golden cases (vendor/uxml-preview/tests/golden)",
+ "commit": "819d9c8d11bd6c50e326797055b80fd8b0cf250d",
+ "panel": {
+  "width": 400,
+  "height": 300
+ },
+ "cases": [
+  {
+   "name": "default-direction",
+   "question": "Is flex-direction column when nothing declares it?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"a\" />\n  <ui:VisualElement name=\"b\" />\n  <ui:VisualElement name=\"c\" />\n</ui:UXML>\n",
+   "uss": "#a, #b, #c {\n  width: 60px;\n  height: 40px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "a": {
+      "x": 0,
+      "y": 0,
+      "width": 60,
+      "height": 40
+     },
+     "b": {
+      "x": 0,
+      "y": 40,
+      "width": 60,
+      "height": 40
+     },
+     "c": {
+      "x": 0,
+      "y": 80,
+      "width": 60,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "sibling-overlap",
+   "question": "Do later siblings sit on top, with no z-index anywhere?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"under\" />\n  <ui:VisualElement name=\"over\" />\n</ui:UXML>\n",
+   "uss": "#under, #over {\n  position: absolute;\n  width: 80px;\n  height: 80px;\n}\n#under {\n  left: 20px;\n  top: 20px;\n  background-color: rgb(200, 60, 60);\n}\n#over {\n  left: 60px;\n  top: 60px;\n  background-color: rgb(60, 120, 200);\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "under": {
+      "x": 20,
+      "y": 20,
+      "width": 80,
+      "height": 80
+     },
+     "over": {
+      "x": 60,
+      "y": 60,
+      "width": 80,
+      "height": 80
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "percent-without-parent-size",
+   "question": "Does a percentage resolve when the parent has no explicit size? (Unity: no, on both axes)",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"sized\">\n    <ui:VisualElement name=\"pct-in-sized\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"unsized\">\n    <ui:VisualElement name=\"pct-in-unsized\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#sized {\n  width: 200px;\n  height: 100px;\n}\n#unsized {\n  align-self: flex-start;\n}\n#pct-in-sized, #pct-in-unsized {\n  width: 50%;\n  height: 50%;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "sized": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 100
+     },
+     "pct-in-sized": {
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 50
+     },
+     "unsized": {
+      "x": 0,
+      "y": 100,
+      "width": 0,
+      "height": 150
+     },
+     "pct-in-unsized": {
+      "x": 0,
+      "y": 100,
+      "width": 0,
+      "height": 75
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "no-margin-collapse",
+   "question": "Are adjacent margins added rather than collapsed?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"top\" />\n  <ui:VisualElement name=\"bottom\" />\n</ui:UXML>\n",
+   "uss": "#top {\n  height: 40px;\n  margin-bottom: 20px;\n}\n#bottom {\n  height: 40px;\n  margin-top: 30px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "top": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 40
+     },
+     "bottom": {
+      "x": 0,
+      "y": 90,
+      "width": 400,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "relative-import-ambiguity",
+   "question": "Do target-a/target-b widths become 80/160 (each parent loads its own theme.uss), the same width (one theme.uss is reused), or another pair (a third behavior)?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"parent-a\">\n    <Style src=\"relative-import-ambiguity/a/main.uss\" />\n    <ui:VisualElement name=\"target-a\" class=\"target\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"parent-b\">\n    <Style src=\"relative-import-ambiguity/b/other.uss\" />\n    <ui:VisualElement name=\"target-b\" class=\"target\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#parent-a, #parent-b {\n  align-items: flex-start;\n  width: 200px;\n  height: 80px;\n}\n",
+   "files": {
+    "relative-import-ambiguity/a/main.uss": "@import url(\"theme.uss\");\n",
+    "relative-import-ambiguity/a/theme.uss": ".target {\n  width: 80px;\n  height: 40px;\n}\n",
+    "relative-import-ambiguity/b/other.uss": "@import url(\"theme.uss\");\n",
+    "relative-import-ambiguity/b/theme.uss": ".target {\n  width: 160px;\n  height: 40px;\n}\n"
+   },
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "parent-a": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 80
+     },
+     "target-a": {
+      "x": 0,
+      "y": 0,
+      "width": 80,
+      "height": 40
+     },
+     "parent-b": {
+      "x": 0,
+      "y": 80,
+      "width": 200,
+      "height": 80
+     },
+     "target-b": {
+      "x": 0,
+      "y": 80,
+      "width": 160,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "style-subtree-scope",
+   "question": "Do styled-target/plain-target widths become 120/40 (<Style> is subtree-scoped), 120/120 (document-global), 40/40 (not loaded), or another pair (a third behavior)?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"styled-parent\">\n    <Style src=\"style-subtree-scope/shared.uss\" />\n    <ui:VisualElement name=\"styled-target\" class=\"target\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"plain-parent\">\n    <ui:VisualElement name=\"plain-target\" class=\"target\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#styled-parent, #plain-parent {\n  align-items: flex-start;\n  width: 200px;\n  height: 80px;\n}\nVisualElement {\n  width: 40px;\n  height: 40px;\n}\n",
+   "files": {
+    "style-subtree-scope/shared.uss": ".target {\n  width: 120px;\n}\n"
+   },
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "styled-parent": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 80
+     },
+     "styled-target": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 40
+     },
+     "plain-parent": {
+      "x": 0,
+      "y": 80,
+      "width": 200,
+      "height": 80
+     },
+     "plain-target": {
+      "x": 0,
+      "y": 80,
+      "width": 40,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "absolute-import-assets",
+   "question": "Do target-a/target-b widths become 120/120 (/Assets is one global sheet), 80/160 (resolved from each parent), 40/40 (not loaded), or another pair?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"parent-a\">\n    <Style src=\"absolute-import-assets/a/main.uss\" />\n    <ui:VisualElement name=\"target-a\" class=\"target\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"parent-b\">\n    <Style src=\"absolute-import-assets/b/other.uss\" />\n    <ui:VisualElement name=\"target-b\" class=\"target\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#parent-a, #parent-b {\n  align-items: flex-start;\n  width: 200px;\n  height: 80px;\n}\nVisualElement {\n  width: 40px;\n  height: 40px;\n}\n",
+   "files": {
+    "absolute-import-assets/a/main.uss": "@import url(\"/Assets/GoldenCases/absolute-import-assets/shared.uss\");\n",
+    "absolute-import-assets/b/other.uss": "@import url(\"/Assets/GoldenCases/absolute-import-assets/shared.uss\");\n",
+    "absolute-import-assets/shared.uss": ".target {\n  width: 120px;\n}\n",
+    "absolute-import-assets/a/Assets/GoldenCases/absolute-import-assets/shared.uss": ".target {\n  width: 80px;\n}\n",
+    "absolute-import-assets/b/Assets/GoldenCases/absolute-import-assets/shared.uss": ".target {\n  width: 160px;\n}\n"
+   },
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "parent-a": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 80
+     },
+     "target-a": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 40
+     },
+     "parent-b": {
+      "x": 0,
+      "y": 80,
+      "width": 200,
+      "height": 80
+     },
+     "target-b": {
+      "x": 0,
+      "y": 80,
+      "width": 120,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "absolute-import-project",
+   "question": "Do target-a/target-b widths become 120/120 (project:// is one global sheet), 80/160 (resolved from each parent), 40/40 (not loaded), or another pair?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"parent-a\">\n    <Style src=\"absolute-import-project/a/main.uss\" />\n    <ui:VisualElement name=\"target-a\" class=\"target\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"parent-b\">\n    <Style src=\"absolute-import-project/b/other.uss\" />\n    <ui:VisualElement name=\"target-b\" class=\"target\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#parent-a, #parent-b {\n  align-items: flex-start;\n  width: 200px;\n  height: 80px;\n}\nVisualElement {\n  width: 40px;\n  height: 40px;\n}\n",
+   "files": {
+    "absolute-import-project/a/main.uss": "@import url(\"project://database/Assets/GoldenCases/absolute-import-project/shared.uss\");\n",
+    "absolute-import-project/b/other.uss": "@import url(\"project://database/Assets/GoldenCases/absolute-import-project/shared.uss\");\n",
+    "absolute-import-project/shared.uss": ".target {\n  width: 120px;\n}\n"
+   },
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "parent-a": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 80
+     },
+     "target-a": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 40
+     },
+     "parent-b": {
+      "x": 0,
+      "y": 80,
+      "width": 200,
+      "height": 80
+     },
+     "target-b": {
+      "x": 0,
+      "y": 80,
+      "width": 120,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "absolute-import-packages",
+   "question": "Do target-a/target-b widths become 120/120 (Packages is one global sheet), 80/160 (resolved from each parent), 40/40 (not loaded), or another pair?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"parent-a\">\n    <Style src=\"absolute-import-packages/a/main.uss\" />\n    <ui:VisualElement name=\"target-a\" class=\"target\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"parent-b\">\n    <Style src=\"absolute-import-packages/b/other.uss\" />\n    <ui:VisualElement name=\"target-b\" class=\"target\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#parent-a, #parent-b {\n  align-items: flex-start;\n  width: 200px;\n  height: 80px;\n}\nVisualElement {\n  width: 40px;\n  height: 40px;\n}\n",
+   "files": {
+    "absolute-import-packages/a/main.uss": "@import url(\"Packages/com.uxml-preview.golden/shared.uss\");\n",
+    "absolute-import-packages/b/other.uss": "@import url(\"Packages/com.uxml-preview.golden/shared.uss\");\n",
+    "absolute-import-packages/a/Packages/com.uxml-preview.golden/shared.uss": ".target {\n  width: 80px;\n}\n",
+    "absolute-import-packages/b/Packages/com.uxml-preview.golden/shared.uss": ".target {\n  width: 160px;\n}\n",
+    "Packages/com.uxml-preview.golden/package.json": "{\n  \"name\": \"com.uxml-preview.golden\",\n  \"version\": \"1.0.0\",\n  \"displayName\": \"uxml-preview Golden Fixture\"\n}\n",
+    "Packages/com.uxml-preview.golden/shared.uss": ".target {\n  width: 120px;\n}\n"
+   },
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "parent-a": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 80
+     },
+     "target-a": {
+      "x": 0,
+      "y": 0,
+      "width": 80,
+      "height": 40
+     },
+     "parent-b": {
+      "x": 0,
+      "y": 80,
+      "width": 200,
+      "height": 80
+     },
+     "target-b": {
+      "x": 0,
+      "y": 80,
+      "width": 160,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "absolute-import-package-project",
+   "question": "Do target-a/target-b widths become 120/120 (project:// Packages is one global sheet), 80/160 (resolved from each parent), 40/40 (not loaded), or another pair?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"parent-a\">\n    <Style src=\"absolute-import-package-project/a/main.uss\" />\n    <ui:VisualElement name=\"target-a\" class=\"target\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"parent-b\">\n    <Style src=\"absolute-import-package-project/b/other.uss\" />\n    <ui:VisualElement name=\"target-b\" class=\"target\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#parent-a, #parent-b {\n  align-items: flex-start;\n  width: 200px;\n  height: 80px;\n}\nVisualElement {\n  width: 40px;\n  height: 40px;\n}\n",
+   "files": {
+    "absolute-import-package-project/a/main.uss": "@import url(\"project://database/Packages/com.uxml-preview.golden/shared.uss\");\n",
+    "absolute-import-package-project/b/other.uss": "@import url(\"project://database/Packages/com.uxml-preview.golden/shared.uss\");\n",
+    "Packages/com.uxml-preview.golden/package.json": "{\n  \"name\": \"com.uxml-preview.golden\",\n  \"version\": \"1.0.0\",\n  \"displayName\": \"uxml-preview Golden Fixture\"\n}\n",
+    "Packages/com.uxml-preview.golden/shared.uss": ".target {\n  width: 120px;\n}\n"
+   },
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "parent-a": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 80
+     },
+     "target-a": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 40
+     },
+     "parent-b": {
+      "x": 0,
+      "y": 80,
+      "width": 200,
+      "height": 80
+     },
+     "target-b": {
+      "x": 0,
+      "y": 80,
+      "width": 120,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "absolute-import-rooted-packages",
+   "question": "Do target-a/target-b widths become 120/120 (/Packages is root-fixed), 80/160 (Packages is special-cased), 40/40 (not loaded), or another pair?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"parent-a\">\n    <Style src=\"absolute-import-rooted-packages/a/main.uss\" />\n    <ui:VisualElement name=\"target-a\" class=\"target\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"parent-b\">\n    <Style src=\"absolute-import-rooted-packages/b/other.uss\" />\n    <ui:VisualElement name=\"target-b\" class=\"target\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#parent-a, #parent-b {\n  align-items: flex-start;\n  width: 200px;\n  height: 80px;\n}\nVisualElement {\n  width: 40px;\n  height: 40px;\n}\n",
+   "files": {
+    "absolute-import-rooted-packages/a/main.uss": "@import url(\"/Packages/com.uxml-preview.golden/shared.uss\");\n",
+    "absolute-import-rooted-packages/b/other.uss": "@import url(\"/Packages/com.uxml-preview.golden/shared.uss\");\n",
+    "absolute-import-rooted-packages/a/Packages/com.uxml-preview.golden/shared.uss": ".target {\n  width: 80px;\n}\n",
+    "absolute-import-rooted-packages/b/Packages/com.uxml-preview.golden/shared.uss": ".target {\n  width: 160px;\n}\n",
+    "Packages/com.uxml-preview.golden/package.json": "{\n  \"name\": \"com.uxml-preview.golden\",\n  \"version\": \"1.0.0\",\n  \"displayName\": \"uxml-preview Golden Fixture\"\n}\n",
+    "Packages/com.uxml-preview.golden/shared.uss": ".target {\n  width: 120px;\n}\n"
+   },
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "parent-a": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 80
+     },
+     "target-a": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 40
+     },
+     "parent-b": {
+      "x": 0,
+      "y": 80,
+      "width": 200,
+      "height": 80
+     },
+     "target-b": {
+      "x": 0,
+      "y": 80,
+      "width": 120,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "resource-resolution",
+   "question": "Which Resources folders, extension spellings, duplicate, outside, and built-in resource() references resolve? See resource-resolution/README.md for the verdict branches.",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"resource-probe-root\" />\n  <ui:VisualElement name=\"resource-probe-nested\" />\n  <ui:VisualElement name=\"resource-probe-extensionless\" />\n  <ui:VisualElement name=\"resource-probe-extensionful\" />\n  <ui:VisualElement name=\"resource-probe-duplicate\" />\n  <ui:VisualElement name=\"resource-probe-outside\" />\n  <ui:VisualElement name=\"resource-probe-builtin\" />\n</ui:UXML>\n",
+   "uss": "#resource-probe-root, #resource-probe-nested, #resource-probe-extensionless,\n#resource-probe-extensionful, #resource-probe-duplicate, #resource-probe-outside,\n#resource-probe-builtin {\n  width: 40px;\n  height: 30px;\n}\n#resource-probe-root { background-image: resource(\"resource-root\"); }\n#resource-probe-nested { background-image: resource(\"resource-nested\"); }\n#resource-probe-extensionless { background-image: resource(\"resource-extension\"); }\n#resource-probe-extensionful { background-image: resource(\"resource-extension.png\"); }\n#resource-probe-duplicate { background-image: resource(\"resource-duplicate\"); }\n#resource-probe-outside { background-image: resource(\"GoldenCases/icon\"); }\n#resource-probe-builtin { background-image: resource(\"console.warnicon.png\"); }\n",
+   "files": {
+    "resource-resolution/README.md": "# resource() resolution measurement\n\nBefore dumping, copy `tests/golden/assets/icon.png` to all five project paths:\n\n- `Assets/Resources/resource-root.png`\n- `Assets/Sub/Resources/resource-nested.png`\n- `Assets/Resources/resource-extension.png`\n- `Assets/Resources/resource-duplicate.png`\n- `Assets/Sub/Resources/resource-duplicate.png`\n\n`pnpm golden:emit` already puts `icon.png` at `Assets/GoldenCases/icon.png`; leave it outside every Resources folder.\n\n## What separates the answers\n\n1. Folder location: the two `assetPath` values naming `Assets/Resources` and `Assets/Sub/Resources` mean both locations work. A missing or different path records the narrower or third behavior.\n2. Extension: compare `resource-probe-extensionless` with `resource-probe-extensionful`. Matching `assetPath` values mean both spellings work; one missing/different identifies the accepted spelling, and another pair is a third behavior.\n3. Duplicate: `resource-probe-duplicate.assetPath` names the winning Resources folder. Missing or any other path is a third behavior.\n4. Outside: an `assetPath` of `Assets/GoldenCases/icon.png` means the outside file loaded; an empty or different resolved background records failure or a third behavior.\n5. Built-in: `resource-probe-builtin` resolving to `Library/unity editor resources` means the editor built-in `console.warnicon.png` is accepted. That exact spelling is used by Unity 6000.0.40f1's built-in `com.unity.2d.sprite/Editor/UI/SpriteEditor/SpriteEditor.uss`. The dump preserves type, object name, and asset path for any third behavior.\n"
+   },
+   "measuresText": false,
+   "measuresResources": true,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "resource-probe-root": {
+      "x": 0,
+      "y": 0,
+      "width": 40,
+      "height": 30
+     },
+     "resource-probe-nested": {
+      "x": 0,
+      "y": 30,
+      "width": 40,
+      "height": 30
+     },
+     "resource-probe-extensionless": {
+      "x": 0,
+      "y": 60,
+      "width": 40,
+      "height": 30
+     },
+     "resource-probe-extensionful": {
+      "x": 0,
+      "y": 90,
+      "width": 40,
+      "height": 30
+     },
+     "resource-probe-duplicate": {
+      "x": 0,
+      "y": 120,
+      "width": 40,
+      "height": 30
+     },
+     "resource-probe-outside": {
+      "x": 0,
+      "y": 150,
+      "width": 40,
+      "height": 30
+     },
+     "resource-probe-builtin": {
+      "x": 0,
+      "y": 180,
+      "width": 40,
+      "height": 30
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "direction-row",
+   "question": "Does flex-direction: row lay out along x?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"row\">\n    <ui:VisualElement name=\"r1\" />\n    <ui:VisualElement name=\"r2\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#row {\n  flex-direction: row;\n  height: 50px;\n}\n#r1, #r2 {\n  width: 70px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "row": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 50
+     },
+     "r1": {
+      "x": 0,
+      "y": 0,
+      "width": 70,
+      "height": 50
+     },
+     "r2": {
+      "x": 70,
+      "y": 0,
+      "width": 70,
+      "height": 50
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "direction-reverse",
+   "question": "Do the reverse directions start from the far edge?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"col\">\n    <ui:VisualElement name=\"c1\" />\n    <ui:VisualElement name=\"c2\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#col {\n  flex-direction: column-reverse;\n  height: 200px;\n}\n#c1, #c2 {\n  height: 40px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "col": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 200
+     },
+     "c1": {
+      "x": 0,
+      "y": 160,
+      "width": 400,
+      "height": 40
+     },
+     "c2": {
+      "x": 0,
+      "y": 120,
+      "width": 400,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "justify-content",
+   "question": "Where does each justify-content value put the children?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"start\"><ui:VisualElement name=\"s1\" /></ui:VisualElement>\n  <ui:VisualElement name=\"center\"><ui:VisualElement name=\"m1\" /></ui:VisualElement>\n  <ui:VisualElement name=\"end\"><ui:VisualElement name=\"e1\" /></ui:VisualElement>\n  <ui:VisualElement name=\"between\">\n    <ui:VisualElement name=\"b1\" />\n    <ui:VisualElement name=\"b2\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#start, #center, #end, #between {\n  flex-direction: row;\n  height: 60px;\n}\n#start {\n  justify-content: flex-start;\n}\n#center {\n  justify-content: center;\n}\n#end {\n  justify-content: flex-end;\n}\n#between {\n  justify-content: space-between;\n}\n#s1, #m1, #e1, #b1, #b2 {\n  width: 50px;\n  height: 20px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "start": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 60
+     },
+     "s1": {
+      "x": 0,
+      "y": 0,
+      "width": 50,
+      "height": 20
+     },
+     "center": {
+      "x": 0,
+      "y": 60,
+      "width": 400,
+      "height": 60
+     },
+     "m1": {
+      "x": 175,
+      "y": 60,
+      "width": 50,
+      "height": 20
+     },
+     "end": {
+      "x": 0,
+      "y": 120,
+      "width": 400,
+      "height": 60
+     },
+     "e1": {
+      "x": 350,
+      "y": 120,
+      "width": 50,
+      "height": 20
+     },
+     "between": {
+      "x": 0,
+      "y": 180,
+      "width": 400,
+      "height": 60
+     },
+     "b1": {
+      "x": 0,
+      "y": 180,
+      "width": 50,
+      "height": 20
+     },
+     "b2": {
+      "x": 350,
+      "y": 180,
+      "width": 50,
+      "height": 20
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "align-items",
+   "question": "Where does each align-items value put the children on the cross axis?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"stretch\"><ui:VisualElement name=\"s1\" /></ui:VisualElement>\n  <ui:VisualElement name=\"center\"><ui:VisualElement name=\"m1\" /></ui:VisualElement>\n  <ui:VisualElement name=\"end\"><ui:VisualElement name=\"e1\" /></ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#stretch, #center, #end {\n  height: 60px;\n}\n#stretch {\n  align-items: stretch;\n}\n#center {\n  align-items: center;\n}\n#end {\n  align-items: flex-end;\n}\n#s1, #m1, #e1 {\n  height: 20px;\n  width: 80px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "stretch": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 60
+     },
+     "s1": {
+      "x": 0,
+      "y": 0,
+      "width": 80,
+      "height": 20
+     },
+     "center": {
+      "x": 0,
+      "y": 60,
+      "width": 400,
+      "height": 60
+     },
+     "m1": {
+      "x": 160,
+      "y": 60,
+      "width": 80,
+      "height": 20
+     },
+     "end": {
+      "x": 0,
+      "y": 120,
+      "width": 400,
+      "height": 60
+     },
+     "e1": {
+      "x": 320,
+      "y": 120,
+      "width": 80,
+      "height": 20
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "flex-wrap",
+   "question": "Where does the second line start when children wrap?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"wrap\">\n    <ui:VisualElement name=\"w1\" />\n    <ui:VisualElement name=\"w2\" />\n    <ui:VisualElement name=\"w3\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#wrap {\n  flex-direction: row;\n  flex-wrap: wrap;\n  width: 300px;\n  height: 200px;\n}\n#w1, #w2, #w3 {\n  width: 160px;\n  height: 50px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "wrap": {
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 200
+     },
+     "w1": {
+      "x": 0,
+      "y": 0,
+      "width": 160,
+      "height": 50
+     },
+     "w2": {
+      "x": 0,
+      "y": 50,
+      "width": 160,
+      "height": 50
+     },
+     "w3": {
+      "x": 0,
+      "y": 100,
+      "width": 160,
+      "height": 50
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "flex-grow-shrink",
+   "question": "How is free space shared, and is flex-shrink 1 or 0 by default?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"grow\">\n    <ui:VisualElement name=\"g1\" />\n    <ui:VisualElement name=\"g2\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"shrink\">\n    <ui:VisualElement name=\"k1\" />\n    <ui:VisualElement name=\"k2\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#grow, #shrink {\n  flex-direction: row;\n  width: 200px;\n  height: 60px;\n}\n#g1 {\n  flex-grow: 1;\n}\n#g2 {\n  flex-grow: 3;\n}\n#k1, #k2 {\n  width: 150px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "grow": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 60
+     },
+     "g1": {
+      "x": 0,
+      "y": 0,
+      "width": 50,
+      "height": 60
+     },
+     "g2": {
+      "x": 50,
+      "y": 0,
+      "width": 150,
+      "height": 60
+     },
+     "shrink": {
+      "x": 0,
+      "y": 60,
+      "width": 200,
+      "height": 60
+     },
+     "k1": {
+      "x": 0,
+      "y": 60,
+      "width": 100,
+      "height": 60
+     },
+     "k2": {
+      "x": 100,
+      "y": 60,
+      "width": 100,
+      "height": 60
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "min-max-conflict",
+   "question": "Which wins when width, min-width and max-width disagree?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"over-max\" />\n  <ui:VisualElement name=\"under-min\" />\n  <ui:VisualElement name=\"min-beats-max\" />\n</ui:UXML>\n",
+   "uss": "#over-max {\n  width: 300px;\n  max-width: 100px;\n  height: 30px;\n}\n#under-min {\n  width: 20px;\n  min-width: 120px;\n  height: 30px;\n}\n#min-beats-max {\n  width: 50px;\n  min-width: 200px;\n  max-width: 100px;\n  height: 30px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "over-max": {
+      "x": 0,
+      "y": 0,
+      "width": 100,
+      "height": 30
+     },
+     "under-min": {
+      "x": 0,
+      "y": 30,
+      "width": 120,
+      "height": 30
+     },
+     "min-beats-max": {
+      "x": 0,
+      "y": 60,
+      "width": 200,
+      "height": 30
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "border-box",
+   "question": "Does width include padding and border?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"outer\">\n    <ui:VisualElement name=\"inner\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#outer {\n  width: 200px;\n  height: 120px;\n  padding: 20px;\n  border-top-width: 10px;\n  border-right-width: 10px;\n  border-bottom-width: 10px;\n  border-left-width: 10px;\n}\n#inner {\n  height: 30px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "outer": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120
+     },
+     "inner": {
+      "x": 30,
+      "y": 30,
+      "width": 140,
+      "height": 30
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "absolute-offsets",
+   "question": "Where do top/left/right/bottom put an absolute element?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"frame\">\n    <ui:VisualElement name=\"tl\" />\n    <ui:VisualElement name=\"br\" />\n    <ui:VisualElement name=\"stretched\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#frame {\n  width: 200px;\n  height: 200px;\n}\n#tl {\n  position: absolute;\n  left: 10px;\n  top: 10px;\n  width: 40px;\n  height: 40px;\n}\n#br {\n  position: absolute;\n  right: 10px;\n  bottom: 10px;\n  width: 40px;\n  height: 40px;\n}\n#stretched {\n  position: absolute;\n  left: 20px;\n  right: 20px;\n  top: 80px;\n  height: 30px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "frame": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 200
+     },
+     "tl": {
+      "x": 10,
+      "y": 10,
+      "width": 40,
+      "height": 40
+     },
+     "br": {
+      "x": 150,
+      "y": 150,
+      "width": 40,
+      "height": 40
+     },
+     "stretched": {
+      "x": 20,
+      "y": 80,
+      "width": 160,
+      "height": 30
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "nested-absolute",
+   "question": "Does an absolute child position against its absolute parent?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"p\">\n    <ui:VisualElement name=\"c\">\n      <ui:VisualElement name=\"gc\" />\n    </ui:VisualElement>\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#p {\n  position: absolute;\n  left: 30px;\n  top: 30px;\n  width: 200px;\n  height: 200px;\n}\n#c {\n  position: absolute;\n  left: 20px;\n  top: 20px;\n  width: 100px;\n  height: 100px;\n}\n#gc {\n  position: absolute;\n  left: 10px;\n  top: 10px;\n  width: 30px;\n  height: 30px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "p": {
+      "x": 30,
+      "y": 30,
+      "width": 200,
+      "height": 200
+     },
+     "c": {
+      "x": 50,
+      "y": 50,
+      "width": 100,
+      "height": 100
+     },
+     "gc": {
+      "x": 60,
+      "y": 60,
+      "width": 30,
+      "height": 30
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "padding-and-position",
+   "question": "Is an absolute child placed inside the parent's padding box?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"padded\">\n    <ui:VisualElement name=\"abs\" />\n    <ui:VisualElement name=\"flow\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#padded {\n  width: 200px;\n  height: 200px;\n  padding: 25px;\n}\n#abs {\n  position: absolute;\n  left: 0;\n  top: 0;\n  width: 40px;\n  height: 40px;\n}\n#flow {\n  height: 40px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "padded": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 200
+     },
+     "abs": {
+      "x": 0,
+      "y": 0,
+      "width": 40,
+      "height": 40
+     },
+     "flow": {
+      "x": 25,
+      "y": 25,
+      "width": 150,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "specificity-tie",
+   "question": "On a tie, does the later rule win?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"tied\" class=\"first second\" />\n</ui:UXML>\n",
+   "uss": ".first {\n  width: 100px;\n  height: 40px;\n}\n.second {\n  width: 200px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "tied": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "inherit-vs-direct",
+   "question": "Does a weak direct match still beat an inherited value?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"parent\">\n    <ui:Label name=\"child\" text=\"x\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#parent {\n  font-size: 30px;\n  width: 200px;\n  height: 100px;\n}\n* {\n  font-size: 10px;\n}\n#child {\n  width: 50px;\n  height: 50px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "parent": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 100
+     },
+     "child": {
+      "x": 0,
+      "y": 0,
+      "width": 50,
+      "height": 50
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "inline-override",
+   "question": "Does an inline style beat a #name rule?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"target\" style=\"width: 150px;\" />\n</ui:UXML>\n",
+   "uss": "#target {\n  width: 60px;\n  height: 40px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "target": {
+      "x": 0,
+      "y": 0,
+      "width": 150,
+      "height": 40
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "text-size",
+   "question": "How large is a label that sizes itself to its text?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"holder\">\n    <ui:Label name=\"label\" text=\"Inventory\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#holder {\n  align-items: flex-start;\n  width: 300px;\n  height: 100px;\n}\n#label {\n  font-size: 20px;\n}\n",
+   "files": {},
+   "measuresText": true,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "holder": {
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 100
+     },
+     "label": {
+      "x": 0,
+      "y": 0,
+      "width": 90,
+      "height": 20
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "text-align",
+   "question": "Where does -unity-text-align put text inside a fixed box?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:Label name=\"upper-left\" text=\"A\" />\n  <ui:Label name=\"middle-center\" text=\"B\" />\n  <ui:Label name=\"lower-right\" text=\"C\" />\n</ui:UXML>\n",
+   "uss": "#upper-left, #middle-center, #lower-right {\n  width: 120px;\n  height: 60px;\n  font-size: 16px;\n}\n#upper-left {\n  -unity-text-align: upper-left;\n}\n#middle-center {\n  -unity-text-align: middle-center;\n}\n#lower-right {\n  -unity-text-align: lower-right;\n}\n",
+   "files": {},
+   "measuresText": true,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "upper-left": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 60
+     },
+     "middle-center": {
+      "x": 0,
+      "y": 60,
+      "width": 120,
+      "height": 60
+     },
+     "lower-right": {
+      "x": 0,
+      "y": 120,
+      "width": 120,
+      "height": 60
+     }
+    },
+    "warnings": []
+   }
+  },
+  {
+   "name": "button-border-box",
+   "question": "Does a Button (a TextElement, not a VisualElement) still size border-box?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:Button name=\"button-border-box-btn\" text=\"OK\" />\n</ui:UXML>\n",
+   "uss": "#button-border-box-btn {\n  width: 160px;\n  height: 80px;\n  padding: 20px;\n  border-top-width: 10px;\n  border-right-width: 10px;\n  border-bottom-width: 10px;\n  border-left-width: 10px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "button-border-box-btn": {
+      "x": 3,
+      "y": 1,
+      "width": 160,
+      "height": 80
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "button-row-margins",
+   "question": "Do margins between Buttons in a row add up the same way as between VisualElements?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"button-row-margins-row\">\n    <ui:Button name=\"button-row-margins-a\" text=\"A\" />\n    <ui:Button name=\"button-row-margins-b\" text=\"B\" />\n    <ui:Button name=\"button-row-margins-c\" text=\"C\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#button-row-margins-row {\n  flex-direction: row;\n  width: 400px;\n  height: 50px;\n}\n#button-row-margins-a, #button-row-margins-b, #button-row-margins-c {\n  width: 80px;\n  height: 40px;\n}\n#button-row-margins-a, #button-row-margins-b {\n  margin-right: 10px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "button-row-margins-row": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 50
+     },
+     "button-row-margins-a": {
+      "x": 3,
+      "y": 1,
+      "width": 80,
+      "height": 40
+     },
+     "button-row-margins-b": {
+      "x": 96,
+      "y": 1,
+      "width": 80,
+      "height": 40
+     },
+     "button-row-margins-c": {
+      "x": 189,
+      "y": 1,
+      "width": 80,
+      "height": 40
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "button-flex-grow",
+   "question": "Does flex-grow expand a Button to fill remaining row space the same as a VisualElement?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"button-flex-grow-row\">\n    <ui:Button name=\"button-flex-grow-fixed\" text=\"Fixed\" />\n    <ui:Button name=\"button-flex-grow-grow\" text=\"Grow\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#button-flex-grow-row {\n  flex-direction: row;\n  width: 300px;\n  height: 50px;\n}\n#button-flex-grow-fixed {\n  width: 100px;\n}\n#button-flex-grow-grow {\n  flex-grow: 1;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "button-flex-grow-row": {
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 50
+     },
+     "button-flex-grow-fixed": {
+      "x": 3,
+      "y": 1,
+      "width": 100,
+      "height": 48
+     },
+     "button-flex-grow-grow": {
+      "x": 109,
+      "y": 1,
+      "width": 188,
+      "height": 48
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "button-absolute-in-border",
+   "question": "Does an absolutely positioned Button sit inside its bordered parent's border box, the same as a VisualElement child would?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"button-absolute-in-border-frame\">\n    <ui:Button name=\"button-absolute-in-border-btn\" text=\"X\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#button-absolute-in-border-frame {\n  width: 200px;\n  height: 200px;\n  border-top-width: 10px;\n  border-right-width: 10px;\n  border-bottom-width: 10px;\n  border-left-width: 10px;\n}\n#button-absolute-in-border-btn {\n  position: absolute;\n  left: 0;\n  top: 0;\n  width: 50px;\n  height: 30px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "button-absolute-in-border-frame": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 200
+     },
+     "button-absolute-in-border-btn": {
+      "x": 13,
+      "y": 11,
+      "width": 50,
+      "height": 30
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "button-align-items",
+   "question": "Does align-items: center on the parent center a Button on the cross axis?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"button-align-items-row\">\n    <ui:Button name=\"button-align-items-btn\" text=\"Center\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#button-align-items-row {\n  flex-direction: row;\n  align-items: center;\n  width: 200px;\n  height: 100px;\n}\n#button-align-items-btn {\n  width: 60px;\n  height: 30px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "button-align-items-row": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 100
+     },
+     "button-align-items-btn": {
+      "x": 3,
+      "y": 35,
+      "width": 60,
+      "height": 30
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "theme-class-hook",
+   "question": "Does a `.unity-button` rule in author USS reach a plain <ui:Button>?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"theme-class-hook-holder\">\n    <ui:Button name=\"theme-class-hook-btn\" text=\"Hook\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#theme-class-hook-holder {\n  align-items: flex-start;\n  width: 300px;\n  height: 100px;\n}\n.unity-button {\n  width: 120px;\n  height: 40px;\n}\n#theme-class-hook-btn {\n  margin: 0;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "theme-class-hook-holder": {
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 100
+     },
+     "theme-class-hook-btn": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 40
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "scrollview-hierarchy",
+   "question": "What elements does a ScrollView actually create, and where do they sit inside it?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:ScrollView name=\"sv-plain\">\n    <ui:VisualElement name=\"sv-plain-child\" />\n  </ui:ScrollView>\n</ui:UXML>\n",
+   "uss": "#sv-plain {\n  width: 200px;\n  height: 120px;\n}\n#sv-plain-child {\n  width: 60px;\n  height: 40px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "sv-plain": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120
+     },
+     "unity-content-and-vertical-scroll-container": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120
+     },
+     "unity-content-viewport": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120
+     },
+     "unity-content-container": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 40
+     },
+     "sv-plain-child": {
+      "x": 0,
+      "y": 0,
+      "width": 60,
+      "height": 40
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts.",
+     "version-dependent: <ScrollView> is drawn with the implicit child elements Unity builds for it, and their geometry was measured on Unity 6000.0.40f1. Other versions may differ; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "scrollview-overflowing",
+   "question": "Where do children sit once the content is taller than the ScrollView, and how much room does the vertical scrollbar take from the viewport?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:ScrollView name=\"sv-over\">\n    <ui:VisualElement name=\"sv-over-a\" />\n    <ui:VisualElement name=\"sv-over-b\" />\n    <ui:VisualElement name=\"sv-over-c\" />\n  </ui:ScrollView>\n</ui:UXML>\n",
+   "uss": "#sv-over {\n  width: 200px;\n  height: 100px;\n}\n#sv-over-a, #sv-over-b, #sv-over-c {\n  height: 60px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "sv-over": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 100
+     },
+     "unity-content-and-vertical-scroll-container": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 100
+     },
+     "unity-content-viewport": {
+      "x": 0,
+      "y": 0,
+      "width": 187,
+      "height": 100
+     },
+     "unity-content-container": {
+      "x": 0,
+      "y": 0,
+      "width": 187,
+      "height": 180
+     },
+     "sv-over-a": {
+      "x": 0,
+      "y": 0,
+      "width": 187,
+      "height": 60
+     },
+     "sv-over-b": {
+      "x": 0,
+      "y": 60,
+      "width": 187,
+      "height": 60
+     },
+     "sv-over-c": {
+      "x": 0,
+      "y": 120,
+      "width": 187,
+      "height": 60
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts.",
+     "version-dependent: <ScrollView> is drawn with the implicit child elements Unity builds for it, and their geometry was measured on Unity 6000.0.40f1. Other versions may differ; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "scrollview-padding",
+   "question": "Does a ScrollView's own padding apply to it, to its viewport, or to its content container?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:ScrollView name=\"sv-pad\">\n    <ui:VisualElement name=\"sv-pad-child\" />\n  </ui:ScrollView>\n</ui:UXML>\n",
+   "uss": "#sv-pad {\n  width: 200px;\n  height: 120px;\n  padding: 15px;\n  border-top-width: 5px;\n  border-right-width: 5px;\n  border-bottom-width: 5px;\n  border-left-width: 5px;\n}\n#sv-pad-child {\n  width: 50px;\n  height: 30px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "sv-pad": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120
+     },
+     "unity-content-and-vertical-scroll-container": {
+      "x": 20,
+      "y": 20,
+      "width": 160,
+      "height": 80
+     },
+     "unity-content-viewport": {
+      "x": 20,
+      "y": 20,
+      "width": 160,
+      "height": 80
+     },
+     "unity-content-container": {
+      "x": 20,
+      "y": 20,
+      "width": 160,
+      "height": 30
+     },
+     "sv-pad-child": {
+      "x": 20,
+      "y": 20,
+      "width": 50,
+      "height": 30
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts.",
+     "version-dependent: <ScrollView> is drawn with the implicit child elements Unity builds for it, and their geometry was measured on Unity 6000.0.40f1. Other versions may differ; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "states-disabled",
+   "question": "Does Unity apply `:disabled` to an element marked enabled=\"false\", and does it beat the plain type rule the way our cascade says?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"states-disabled-holder\">\n    <ui:Button name=\"states-disabled-on\" text=\"Off\" enabled=\"false\" />\n    <ui:Button name=\"states-disabled-off\" text=\"On\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#states-disabled-holder {\n  align-items: flex-start;\n  width: 300px;\n  height: 120px;\n}\nButton {\n  width: 40px;\n  height: 30px;\n  margin: 0;\n}\nButton:disabled {\n  width: 120px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "states-disabled-holder": {
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 120
+     },
+     "states-disabled-on": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 30
+     },
+     "states-disabled-off": {
+      "x": 0,
+      "y": 30,
+      "width": 40,
+      "height": 30
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "child-combinator-through-parts",
+   "question": "Does `#Grid > .slot` reach a slot whose real parent is the ScrollView's content container?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:ScrollView name=\"cc-grid\">\n    <ui:VisualElement name=\"cc-slot\" class=\"cc-slot\" />\n  </ui:ScrollView>\n</ui:UXML>\n",
+   "uss": "#cc-grid {\n  width: 200px;\n  height: 120px;\n}\n.cc-slot {\n  width: 40px;\n  height: 40px;\n}\n#cc-grid > .cc-slot {\n  width: 99px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "cc-grid": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120
+     },
+     "unity-content-and-vertical-scroll-container": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120
+     },
+     "unity-content-viewport": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 120
+     },
+     "unity-content-container": {
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 40
+     },
+     "cc-slot": {
+      "x": 0,
+      "y": 0,
+      "width": 99,
+      "height": 40
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts.",
+     "version-dependent: <ScrollView> is drawn with the implicit child elements Unity builds for it, and their geometry was measured on Unity 6000.0.40f1. Other versions may differ; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "disabled-inherits",
+   "question": "Does enabled=\"false\" on a parent put its children into :disabled too?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"di-holder\" enabled=\"false\">\n    <ui:Button name=\"di-child\" text=\"In\" />\n  </ui:VisualElement>\n  <ui:VisualElement name=\"di-other\">\n    <ui:Button name=\"di-loose\" text=\"Out\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#di-holder, #di-other {\n  align-items: flex-start;\n  width: 300px;\n  height: 60px;\n}\nButton {\n  width: 40px;\n  height: 30px;\n  margin: 0;\n}\nButton:disabled {\n  width: 120px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "di-holder": {
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 60
+     },
+     "di-child": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 30
+     },
+     "di-other": {
+      "x": 0,
+      "y": 60,
+      "width": 300,
+      "height": 60
+     },
+     "di-loose": {
+      "x": 0,
+      "y": 60,
+      "width": 40,
+      "height": 30
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "state-vs-id",
+   "question": "Does a `:disabled` rule beat an `#id` rule, which outranks it in CSS?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"svi-holder\">\n    <ui:Button name=\"svi-btn\" text=\"A\" enabled=\"false\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#svi-holder {\n  align-items: flex-start;\n  width: 300px;\n  height: 80px;\n}\nButton {\n  height: 30px;\n  margin: 0;\n}\n#svi-btn {\n  width: 40px;\n}\nButton:disabled {\n  width: 120px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "svi-holder": {
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 80
+     },
+     "svi-btn": {
+      "x": 0,
+      "y": 0,
+      "width": 40,
+      "height": 30
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "state-vs-inline",
+   "question": "Does a `:disabled` rule beat an inline `style` attribute?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"svl-holder\">\n    <ui:Button name=\"svl-btn\" text=\"A\" enabled=\"false\" style=\"width: 40px;\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#svl-holder {\n  align-items: flex-start;\n  width: 300px;\n  height: 80px;\n}\nButton {\n  height: 30px;\n  margin: 0;\n}\nButton:disabled {\n  width: 120px;\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "svl-holder": {
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 80
+     },
+     "svl-btn": {
+      "x": 0,
+      "y": 0,
+      "width": 40,
+      "height": 30
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "inventory",
+   "question": "Does a screen that looks like real work land where Unity puts it?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"InventoryRoot\">\n    <ui:VisualElement name=\"Header\">\n      <ui:Label name=\"TitleLabel\" text=\"Inventory\" />\n      <ui:Button name=\"CloseButton\" text=\"X\" />\n    </ui:VisualElement>\n    <ui:ScrollView name=\"ItemGrid\">\n      <ui:VisualElement name=\"ItemSlot0\" class=\"slot\">\n        <ui:Image name=\"ItemIcon0\" class=\"icon\" />\n        <ui:Label name=\"ItemCount0\" class=\"count\" text=\"12\" />\n      </ui:VisualElement>\n      <ui:VisualElement name=\"ItemSlot1\" class=\"slot\">\n        <ui:Image name=\"ItemIcon1\" class=\"icon\" />\n        <ui:Label name=\"ItemCount1\" class=\"count\" text=\"12\" />\n      </ui:VisualElement>\n      <ui:VisualElement name=\"ItemSlot2\" class=\"slot\">\n        <ui:Image name=\"ItemIcon2\" class=\"icon\" />\n        <ui:Label name=\"ItemCount2\" class=\"count\" text=\"12\" />\n      </ui:VisualElement>\n      <ui:VisualElement name=\"ItemSlot3\" class=\"slot\">\n        <ui:Image name=\"ItemIcon3\" class=\"icon\" />\n        <ui:Label name=\"ItemCount3\" class=\"count\" text=\"12\" />\n      </ui:VisualElement>\n      <ui:VisualElement name=\"ItemSlot4\" class=\"slot\">\n        <ui:Image name=\"ItemIcon4\" class=\"icon\" />\n        <ui:Label name=\"ItemCount4\" class=\"count\" text=\"12\" />\n      </ui:VisualElement>\n      <ui:VisualElement name=\"ItemSlot5\" class=\"slot\">\n        <ui:Image name=\"ItemIcon5\" class=\"icon\" />\n        <ui:Label name=\"ItemCount5\" class=\"count\" text=\"12\" />\n      </ui:VisualElement>\n    </ui:ScrollView>\n    <ui:VisualElement name=\"Footer\">\n      <ui:VisualElement name=\"DetailPanel\">\n        <ui:Label name=\"ItemName\" text=\"Iron Sword\" />\n        <ui:Label name=\"ItemDesc\" text=\"A plain blade, notched from use. Sells for very little.\" />\n      </ui:VisualElement>\n      <ui:VisualElement name=\"ActionBar\">\n        <ui:Button name=\"UseButton\" text=\"Use\" />\n        <ui:Button name=\"DropButton\" text=\"Drop\" enabled=\"false\" />\n      </ui:VisualElement>\n    </ui:VisualElement>\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#InventoryRoot {\n  width: 400px;\n  height: 300px;\n  background-color: rgb(34, 36, 42);\n}\n#Header {\n  flex-direction: row;\n  height: 40px;\n  justify-content: space-between;\n  align-items: center;\n  padding-left: 12px;\n  padding-right: 12px;\n  background-color: rgb(24, 26, 31);\n}\n#TitleLabel {\n  width: 200px;\n  height: 20px;\n  color: rgb(232, 232, 236);\n  -unity-font-style: bold;\n}\n#CloseButton {\n  width: 28px;\n  height: 28px;\n  margin: 0;\n  background-color: rgb(58, 44, 44);\n  color: rgb(232, 200, 200);\n  border-top-left-radius: 4px;\n  border-top-right-radius: 4px;\n  border-bottom-left-radius: 4px;\n  border-bottom-right-radius: 4px;\n}\n#ItemGrid {\n  flex-grow: 1;\n}\n#unity-content-container {\n  flex-direction: row;\n  flex-wrap: wrap;\n  padding: 8px;\n}\n.slot {\n  width: 84px;\n  height: 84px;\n  margin: 4px;\n  background-color: rgb(48, 51, 59);\n  border-top-width: 1px;\n  border-right-width: 1px;\n  border-bottom-width: 1px;\n  border-left-width: 1px;\n  border-top-color: rgb(70, 74, 84);\n  border-right-color: rgb(70, 74, 84);\n  border-bottom-color: rgb(70, 74, 84);\n  border-left-color: rgb(70, 74, 84);\n}\n.icon {\n  width: 64px;\n  height: 64px;\n  background-image: url(\"project://database/Assets/GoldenCases/icon.png\");\n}\n.count {\n  position: absolute;\n  right: 4px;\n  bottom: 2px;\n  width: 24px;\n  height: 16px;\n  color: rgb(255, 236, 180);\n  -unity-text-align: middle-right;\n}\n#Footer {\n  flex-direction: row;\n  height: 100px;\n  padding: 8px;\n  background-color: rgb(24, 26, 31);\n}\n#DetailPanel {\n  flex-grow: 1;\n  padding-right: 8px;\n}\n#ItemName {\n  height: 20px;\n  color: rgb(232, 232, 236);\n  -unity-font-style: bold;\n}\n#ItemDesc {\n  height: 56px;\n  color: rgb(160, 164, 174);\n  white-space: normal;\n}\n#ActionBar {\n  width: 96px;\n}\nButton {\n  height: 30px;\n}\n#UseButton, #DropButton {\n  margin: 0;\n  margin-bottom: 6px;\n  background-color: rgb(58, 74, 104);\n  color: rgb(226, 232, 244);\n}\n#UseButton:hover {\n  background-color: rgb(84, 108, 150);\n}\nButton:disabled {\n  background-color: rgb(40, 42, 48);\n  color: rgb(104, 108, 118);\n}\n",
+   "files": {},
+   "measuresText": false,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "InventoryRoot": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 300
+     },
+     "Header": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 35
+     },
+     "TitleLabel": {
+      "x": 12,
+      "y": 7,
+      "width": 200,
+      "height": 20
+     },
+     "CloseButton": {
+      "x": 360,
+      "y": 3,
+      "width": 28,
+      "height": 28
+     },
+     "ItemGrid": {
+      "x": 0,
+      "y": 35,
+      "width": 400,
+      "height": 177
+     },
+     "unity-content-and-vertical-scroll-container": {
+      "x": 0,
+      "y": 35,
+      "width": 400,
+      "height": 177
+     },
+     "unity-content-viewport": {
+      "x": 0,
+      "y": 35,
+      "width": 387,
+      "height": 177
+     },
+     "unity-content-container": {
+      "x": 0,
+      "y": 35,
+      "width": 387,
+      "height": 200
+     },
+     "ItemSlot0": {
+      "x": 12,
+      "y": 47,
+      "width": 84,
+      "height": 84
+     },
+     "ItemIcon0": {
+      "x": 13,
+      "y": 48,
+      "width": 64,
+      "height": 64
+     },
+     "ItemCount0": {
+      "x": 67,
+      "y": 112,
+      "width": 24,
+      "height": 16
+     },
+     "ItemSlot1": {
+      "x": 104,
+      "y": 47,
+      "width": 84,
+      "height": 84
+     },
+     "ItemIcon1": {
+      "x": 105,
+      "y": 48,
+      "width": 64,
+      "height": 64
+     },
+     "ItemCount1": {
+      "x": 159,
+      "y": 112,
+      "width": 24,
+      "height": 16
+     },
+     "ItemSlot2": {
+      "x": 196,
+      "y": 47,
+      "width": 84,
+      "height": 84
+     },
+     "ItemIcon2": {
+      "x": 197,
+      "y": 48,
+      "width": 64,
+      "height": 64
+     },
+     "ItemCount2": {
+      "x": 251,
+      "y": 112,
+      "width": 24,
+      "height": 16
+     },
+     "ItemSlot3": {
+      "x": 288,
+      "y": 47,
+      "width": 84,
+      "height": 84
+     },
+     "ItemIcon3": {
+      "x": 289,
+      "y": 48,
+      "width": 64,
+      "height": 64
+     },
+     "ItemCount3": {
+      "x": 343,
+      "y": 112,
+      "width": 24,
+      "height": 16
+     },
+     "ItemSlot4": {
+      "x": 12,
+      "y": 139,
+      "width": 84,
+      "height": 84
+     },
+     "ItemIcon4": {
+      "x": 13,
+      "y": 140,
+      "width": 64,
+      "height": 64
+     },
+     "ItemCount4": {
+      "x": 67,
+      "y": 204,
+      "width": 24,
+      "height": 16
+     },
+     "ItemSlot5": {
+      "x": 104,
+      "y": 139,
+      "width": 84,
+      "height": 84
+     },
+     "ItemIcon5": {
+      "x": 105,
+      "y": 140,
+      "width": 64,
+      "height": 64
+     },
+     "ItemCount5": {
+      "x": 159,
+      "y": 204,
+      "width": 24,
+      "height": 16
+     },
+     "Footer": {
+      "x": 0,
+      "y": 212,
+      "width": 400,
+      "height": 88
+     },
+     "DetailPanel": {
+      "x": 8,
+      "y": 220,
+      "width": 299,
+      "height": 72
+     },
+     "ItemName": {
+      "x": 8,
+      "y": 220,
+      "width": 292,
+      "height": 20
+     },
+     "ItemDesc": {
+      "x": 8,
+      "y": 239,
+      "width": 292,
+      "height": 54
+     },
+     "ActionBar": {
+      "x": 307,
+      "y": 220,
+      "width": 85,
+      "height": 72
+     },
+     "UseButton": {
+      "x": 307,
+      "y": 220,
+      "width": 85,
+      "height": 30
+     },
+     "DropButton": {
+      "x": 307,
+      "y": 256,
+      "width": 85,
+      "height": 30
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts.",
+     "version-dependent: <ScrollView> is drawn with the implicit child elements Unity builds for it, and their geometry was measured on Unity 6000.0.40f1. Other versions may differ; see src/controls/theme.ts."
+    ]
+   }
+  },
+  {
+   "name": "button-sizes-to-text",
+   "question": "Does a Button with no declared size size itself to its text, the way a Label does?",
+   "uxml": "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n  <ui:VisualElement name=\"button-sizes-to-text-holder\">\n    <ui:Button name=\"button-sizes-to-text-btn\" text=\"Confirm\" />\n  </ui:VisualElement>\n</ui:UXML>\n",
+   "uss": "#button-sizes-to-text-holder {\n  align-items: flex-start;\n  width: 300px;\n  height: 100px;\n}\n#button-sizes-to-text-btn {\n  font-size: 20px;\n}\n",
+   "files": {},
+   "measuresText": true,
+   "measuresResources": false,
+   "expected": {
+    "panel": {
+     "width": 400,
+     "height": 300
+    },
+    "elements": {
+     "button-sizes-to-text-holder": {
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 100
+     },
+     "button-sizes-to-text-btn": {
+      "x": 3,
+      "y": 1,
+      "width": 70,
+      "height": 20
+     }
+    },
+    "warnings": [
+     "version-dependent: Unity's control defaults were applied, as measured on 6000.0.40f1 (Unity ships these as a theme stylesheet). Other versions may use different values; see src/controls/theme.ts."
+    ]
+   }
+  }
+ ]
+}
