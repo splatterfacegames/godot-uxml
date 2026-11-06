@@ -558,3 +558,168 @@ Harness changes in this branch:
   (`bounds_of`), as the ScrollView does.
 - `tests/run_tests.gd` takes `-- --only=<text>` to run the tests whose
   `suite.test` name contains the text.
+
+## Cost of Unity parity, recovered (`perf/parity-cost`)
+
+Goal: take back as much as possible of what the default theme, the part
+trees and the Unity-fidelity layout cost, without changing any output.
+Parity (`bench/parity.gd`: 123/127 Unity cases, 31 match / 13 differ
+against the references), the equivalence harnesses and the test suite give
+the same results before and after.
+
+Method: `bench/bench.gd -- --quick` and `bench/workloads.gd`, each with and
+without `-- --no-theme`, for `main` (603e6e5, a detached worktree) and this
+branch. Each round runs every script and mode for base and then branch;
+three rounds, the table gives the median of the three medians (ms, native
+core). Other Godot and Unity processes ran on the machine: ops this branch
+does not touch (`parse_uxml`, `parse_uss`, `loader`) moved by up to 10 %
+between sides, so a ratio within about ±0.08 of 1 is noise.
+
+| `bench` op | main, theme | branch, theme | ratio | main, no theme | branch, no theme | ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| parse_uxml(big) | 23.880 | 21.374 | 0.90 | 22.538 | 22.557 | 1.00 |
+| parse_uss(3 sheets) | 5.553 | 5.375 | 0.97 | 5.399 | 5.396 | 1.00 |
+| loader(big) | 44.825 | 42.792 | 0.95 | 41.794 | 44.323 | 1.06 |
+| cascade resolve(big) | 89.103 | 85.636 | 0.96 | 89.231 | 88.192 | 0.99 |
+| cascade resolve(big, hover) | 97.046 | 92.817 | 0.96 | 99.693 | 93.576 | 0.94 |
+| load_document(big) full | 640.100 | 623.884 | 0.97 | 559.970 | 569.688 | 1.02 |
+| load_document(runtime.uxml) | 30.151 | 20.217 | 0.67 | 19.566 | 16.287 | 0.83 |
+| load_document(review.uxml) | 36.466 | 31.410 | 0.86 | 26.773 | 26.900 | 1.00 |
+| load_document(Options.uxml) | 27.429 | 17.038 | 0.62 | 12.390 | 12.259 | 0.99 |
+| load_document(Menu.uxml) | 6.753 | 3.288 | 0.49 | 2.466 | 2.498 | 1.01 |
+| hover toggle (button) | 1.263 | 1.099 | 0.87 | 1.152 | 1.094 | 0.95 |
+| hover toggle (card, desc sel) | 2.157 | 2.008 | 0.93 | 1.821 | 1.736 | 0.95 |
+| hover move (card i -> i+1) | 2.008 | 1.833 | 0.91 | 1.714 | 1.639 | 0.96 |
+| focus toggle (list item) | 1.696 | 1.494 | 0.88 | 1.363 | 1.399 | 1.03 |
+| set_class churn (card) | 20.567 | 14.092 | 0.69 | 18.739 | 14.313 | 0.76 |
+| set_text + refresh | 309.016 | 177.722 | 0.58 | 230.936 | 157.070 | 0.68 |
+| set_text + relayout | 18.432 | 12.220 | 0.66 | 17.767 | 13.195 | 0.74 |
+| resize relayout | 19.330 | 12.246 | 0.63 | 17.904 | 14.067 | 0.79 |
+| idle restyle (no change) | 0.787 | 0.835 | 1.06 | 0.788 | 0.823 | 1.04 |
+| transition frame (bg color) | 1.138 | 0.780 | 0.69 | 1.057 | 0.849 | 0.80 |
+| transition frame (width) | 18.288 | 10.959 | 0.60 | 16.490 | 12.067 | 0.73 |
+| hud frame (8 labels + refresh) | 4.393 | 2.718 | 0.62 | 2.521 | 2.450 | 0.97 |
+| hud frame (8 labels + relayout) | 0.556 | 0.518 | 0.93 | 0.548 | 0.517 | 0.94 |
+| hud frame (8 labels, no refresh) | 0.036 | 0.040 | 1.11 | 0.038 | 0.041 | 1.08 |
+| hud hover toggle | 0.265 | 0.267 | 1.01 | 0.254 | 0.270 | 1.06 |
+| geomean ratio | | | 0.801 | | | 0.926 |
+
+| `workloads` op | main, theme | branch, theme | ratio | main, no theme | branch, no theme | ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| settings: load + first layout | 72.427 | 66.527 | 0.92 | 59.966 | 59.511 | 0.99 |
+| settings: switch tab (display none/flex) | 9.583 | 7.706 | 0.80 | 6.749 | 6.491 | 0.96 |
+| settings: hover row | 0.339 | 0.331 | 0.98 | 0.343 | 0.318 | 0.93 |
+| inventory: load + first layout | 110.766 | 90.442 | 0.82 | 83.662 | 85.092 | 1.02 |
+| inventory: hover slot | 0.671 | 0.616 | 0.92 | 0.605 | 0.589 | 0.97 |
+| inventory: select slot (set_class) | 1.705 | 1.343 | 0.79 | 1.636 | 1.269 | 0.78 |
+| inventory: count change + relayout | 1.395 | 1.070 | 0.77 | 1.277 | 1.000 | 0.78 |
+| dialog: load + first layout | 15.585 | 9.623 | 0.62 | 8.584 | 8.632 | 1.01 |
+| dialog: typewriter char + relayout | 0.403 | 0.371 | 0.92 | 0.405 | 0.392 | 0.97 |
+| dialog: hover choice | 0.129 | 0.126 | 0.98 | 0.119 | 0.108 | 0.91 |
+| list1k: load + first layout | 2102.084 | 1574.987 | 0.75 | 1236.417 | 1289.862 | 1.04 |
+| list1k: hover row | 1.193 | 1.159 | 0.97 | 1.234 | 1.152 | 0.93 |
+| list1k: update one row + relayout | 25.580 | 18.548 | 0.73 | 19.371 | 13.653 | 0.70 |
+| listview10k: load + 10k items + first layout | 89.065 | 71.055 | 0.80 | 63.419 | 63.545 | 1.00 |
+| listview10k: scroll 3 rows (rebind + relayout) | 3.349 | 2.777 | 0.83 | 2.770 | 2.447 | 0.88 |
+| listview10k: hover row | 0.231 | 0.196 | 0.85 | 0.196 | 0.201 | 1.03 |
+| listview10k: update all visible items (refresh_list) | 2.688 | 2.168 | 0.81 | 2.285 | 2.072 | 0.91 |
+| geomean ratio | | | 0.831 | | | 0.925 |
+
+Same process, after the main loop started (`load_document` of one fixture
+40 times, median; three runs each, alternating):
+
+| `load_document` (ms) | main, theme | branch, theme | main, no theme | branch, no theme |
+| --- | ---: | ---: | ---: | ---: |
+| `Menu.uxml` | 8.3 | 3.9 | 3.2 | 3.1 |
+| `Options.uxml` | 31.4 | 20.4 | 14.6 | 14.3 |
+| `runtime.uxml` | 35.4 | 24.4 | 22.3 | 20.3 |
+
+Note on measuring loads: in a `SceneTree` script's `_initialize`, before
+the first frame, controls added to the tree do not enter it yet, so a load
+there costs about half of what it costs once the main loop runs (a Label
+enters the tree in about 80 us after the first frame, a Button in 125 us,
+a Control in 12 us; before it, under 1 us). `bench.gd` and
+`workloads.gd` await frames, so their load rows include it.
+
+What changed:
+
+- Theme rules are compiled once (both cascades). `UssCascade` keeps the
+  compiled rules of each theme sheet as a block (`_theme_block`, per sheet
+  origin, valid while the parsed items are the same Array) and splices it
+  in with array appends; `UssCascade._blocks` names the blocks and their
+  ranges. The native cascade converts each block once against shared base
+  string and property tables (`BaseTables`, cleared when the extension
+  unloads) and reads only the per-load fields from the GDScript tables;
+  buckets and ancestor features are derived from the selectors. The
+  origin Dictionaries and shared entries of a block's selectors are kept
+  per sheet index. `UssCascade.new` with the theme: Menu 3.3 → 0.5 ms,
+  Options 7.5 → 1.4 ms, runtime 8.8 → 2.0 ms; first update of Options
+  2.4 → 1.4 ms.
+- Theme textures stay loaded (`UxmlStyleApplier._theme_tex`, only the
+  addon's read-only theme folder). The applier's texture cache lives per
+  load, so the last document holding a theme texture freed it and the
+  next load decoded it again: 2.5 ms of a 19 ms Options load.
+- `apply_resolved_insets` writes only the content margins that differ.
+  Every write emits the stylebox's `changed`, so each themed Label updated
+  its theme four times per placement: about 160 ms of the 1,000-row list
+  load.
+- Native placement sets position and size only when they differ from the
+  control's (1.3 us each; on a resize of the big document about 300 of
+  3,800 controls move), and keeps each control's `uxml_margins` across
+  layouts (1.4 us per measured element per pass), dropped when the control
+  is re-applied or its inset hook runs. The measure memo compares its
+  entry widths in place instead of collecting them per lookup. Resize
+  relayout 19.3 → 12.2 ms (theme), 17.9 → 14.1 ms (no theme).
+- Native cascade `compute()` holds candidate declarations and origins by
+  reference (rule's shared list and an index) instead of copying two
+  strings and an origin per candidate; the winners read value, origin and
+  entry once.
+- The applier keeps the style entries a stylebox was built from. A
+  re-apply with the same entry objects (cascade entries are shared and
+  read-only) keeps the installed box when it still has the margins it was
+  built with, without building a new one (about 25 us per themed Label on
+  the re-apply that follows every load and on restyles). The theme
+  notification still runs (see below).
+- `with_spacing` keeps the content key of the FontVariation it makes on
+  it; `fit_label` formatted the key of the line font for every fit.
+
+Tried and dropped: skipping the bulk theme notification when a re-apply
+changes no override (an empty bulk costs a Label about 20 us). The
+notification also makes the control update its minimum size, and without
+it `bench/equiv_runtime.gd` found Labels whose size lagged a text change
+(full restyle against incremental: 5 of 1,400 checks). Also checked and
+left: a fast path for `Label.get_line_count()` in `fit_label` (the
+shaping it saved moved to the next size change).
+
+What remains, and why:
+
+- Entering the tree is the engine's (see the note above) and is most of
+  a small document's load: in Options.uxml the factory step is about 4 ms
+  of 20 ms, nearly all of it Labels and Buttons entering the tree. Part
+  trees cost through it: more controls enter the tree.
+- With the theme, a Label has a stylebox, a line font and a font size, so
+  the first apply builds more and the first restyle matches more rules:
+  Options still loads about 6 ms slower with the theme than without
+  (cascade update +0.8 ms, stylebox and apply +1.5 ms, layout +0.7 ms,
+  part-tree layout of themed controls).
+- `list1k` first load: the theme's line is taller than the 24px rows, so
+  2,000 Labels are fitted (a FontVariation override each, then the Label
+  shapes its text again: about 70 us per Label, 145 ms). This is Unity's
+  behaviour (text larger than its box), and the fit cannot be known before
+  the layout.
+- Typewriter (0.37 ms per character): a new text is shaped once for its
+  max-content width and once by the Label. The max-content width is cached
+  per text; a cache across texts does not help a growing text, and the
+  Label's own shaped line is not exposed.
+- Pass setup and teardown of the native layout (`Pass::new`, about 0.5 ms
+  per pass on the big document, mostly per-control engine reads) and the
+  re-apply pass after every load (the settling design re-applies and lays
+  out once more) are unchanged.
+
+Correctness after the change (same counts as on `main`):
+`tests/run_tests.py` 2077 checks across 326 tests; `bench/parity.gd`
+UNITY PARITY 123/127 (structure 3261/3261, geometry 10609/10616, style
+69004/69004), PARITY 31 match / 13 differ; `bench/equiv.gd` 1530 (native)
+/ 1295 (`--gdscript`), `bench/equiv_layout.gd` 216 / 216,
+`bench/equiv_runtime.gd` 1400 / 1400, `bench/equiv_parse.gd` 2701 / 2701,
+0 failures.
