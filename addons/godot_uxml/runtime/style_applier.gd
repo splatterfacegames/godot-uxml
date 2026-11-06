@@ -42,6 +42,12 @@ var _warned: Dictionary = {}
 # restyles must not re-hit the filesystem for the same reference, missing
 # or not.
 var _tex_cache: Dictionary = {}
+## Textures of the default theme (the addon's read-only theme folder,
+## UxmlResourceResolver.TRUSTED_DIRS) stay loaded across documents. Without
+## this the last document holding a theme texture frees it, and the next
+## load reads and decodes it from disk again (about 2.5 ms per load of a
+## settings screen). Only successful loads are kept.
+static var _theme_tex: Dictionary = {}
 var _font_cache: Dictionary = {}
 ## Last insets apply_resolved_insets wrote per control; cleared whenever
 ## _apply_themed swaps the control's styleboxes. A repeat call with the same
@@ -795,6 +801,13 @@ func _texture(style: Dictionary, name: String, el: UxmlElement) -> Texture2D:
 	return _texture_ref(String(e["value"]), e, name, el)
 
 
+static func _is_theme_path(path: String) -> bool:
+	for d in UxmlResourceResolver.TRUSTED_DIRS:
+		if path.begins_with(d):
+			return true
+	return false
+
+
 ## Load the url() `ref` written in style entry `e` (for diagnostics and the
 ## origin file relative references resolve against).
 func _texture_ref(ref: String, e: Dictionary, name: String, el: UxmlElement) -> Texture2D:
@@ -809,7 +822,10 @@ func _texture_ref(ref: String, e: Dictionary, name: String, el: UxmlElement) -> 
 	var path: String = r["path"]
 	if _tex_cache.has(path):
 		return _tex_cache[path]
-	var tex: Texture2D = null
+	var tex: Texture2D = _theme_tex.get(path)
+	if tex != null:
+		_tex_cache[path] = tex
+		return tex
 	if ResourceLoader.exists(path):
 		var res := ResourceLoader.load(path)
 		if res is Texture2D:
@@ -822,6 +838,8 @@ func _texture_ref(ref: String, e: Dictionary, name: String, el: UxmlElement) -> 
 		if img.load(path) == OK:
 			tex = ImageTexture.create_from_image(img)
 	_tex_cache[path] = tex
+	if tex != null and _is_theme_path(path):
+		_theme_tex[path] = tex
 	if tex == null:
 		_warn_diag(
 			"missing-file", "texture:%s:%s" % [path, el.get_instance_id()], el,
