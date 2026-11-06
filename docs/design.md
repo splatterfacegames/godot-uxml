@@ -1582,10 +1582,21 @@ rows keep `fixed-item-height`.
   bottom spacing as large as the deficit (whole pixels). The control then
   has the laid-out size and the text keeps its baseline. The deficit is in
   the `uxml_fit` meta; both measurers add it back, so the measure does not
-  change. A font override from a restyle ends the fit; the next placement
-  fits again. Not fitted: wrapping Labels, Labels with LabelSettings,
-  multi-line text, and a Label narrower than its text (Godot floors the
-  width too; Unity lets the text overflow).
+  change. The unfitted height is kept in the `uxml_unfit` meta (and, in
+  the native layout, per control) until an apply, new insets or a
+  best-fit font size drop it. A font override from a restyle ends the
+  fit; the next placement fits again. Some Labels stay taller than the
+  box after the fit (Godot does not shrink a line below the glyph
+  extent). When that floor holds a fitted Label and a new box needs a
+  larger deficit, the fit stays: a larger deficit does not change the
+  size or the text, and the font does not change for each small box.
+  The placement records the box height and the control height
+  after each fit (`UxmlStyleApplier.fit_seen`); a placement that finds
+  the same two heights does not fit again. The text changes the fit only
+  through its line count, and a new line count changes the control
+  height. An apply drops the record. Not fitted: wrapping Labels,
+  Labels with LabelSettings, multi-line text, and a Label narrower than
+  its text (Godot floors the width too; Unity lets the text overflow).
 - Godot `Control.size` clamps to `get_combined_minimum_size()` — a hard
   engine rule, not something styles can override. For our own wrappers
   this is neutralized: `UxmlBox`/`UxmlField` keep their intrinsic measure

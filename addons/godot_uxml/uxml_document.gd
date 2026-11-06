@@ -1053,11 +1053,16 @@ func _place_control(el: UxmlElement) -> void:
 		# Godot floors a Label at one text line; Unity's box can be shorter.
 		# A one-line Label taller than its box is fitted; a fitted Label is
 		# fitted again for a new height (the native placement does the same).
+		# A Label fitted for the same box height that kept its height since
+		# (UxmlStyleApplier.fit_seen) is not fitted again.
 		var fit_h = _applier.fitted.get(c)
 		var floored: bool = c.size.y > r.size.y + 0.01
 		if ((floored and (fit_h != null or c.autowrap_mode == TextServer.AUTOWRAP_OFF))
 				or (fit_h != null and fit_h != r.size.y)):
-			_applier.fit_label(c, r.size)
+			var seen = _applier.fit_seen.get(c)
+			if seen == null or seen[0] != r.size.y or seen[1] != c.size.y:
+				_applier.fit_label(c, r.size)
+				_applier.fit_seen[c] = [r.size.y, c.size.y]
 	# Internal chrome the flex pass does not position lives inside the
 	# element's content box: field caption+native shift by the resolved
 	# padding/border insets, and an Image's anchored TextureRect gets

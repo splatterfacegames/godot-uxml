@@ -79,6 +79,13 @@ const UNITY_ASCENT_EM := 0.96875
 ## Labels fitted into a box shorter than their text line (fit_label):
 ## control -> the height fitted for.
 var fitted: Dictionary = {}
+## Labels the placement handed to fit_label: control -> [box height,
+## control height after the fit]. A placement with the same box height
+## that leaves the control at the same height skips fit_label, so a Label
+## that stays taller than its box is not fitted again on every layout. The
+## text changes the fit only through its line count, which changes the
+## height of the control. apply() drops the entry.
+var fit_seen: Dictionary = {}
 static var _fit_fonts: Dictionary = {}
 ## How many controls carry clip_text for overflow: hidden text. While zero
 ## the measurers skip the clip-text check entirely.
@@ -321,10 +328,13 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 	if c.has_meta(&"uxml_maxc"):
 		# The font, size or stylebox may change: measure the width again.
 		c.remove_meta(&"uxml_maxc")
+	if c.has_meta(&"uxml_unfit"):
+		c.remove_meta(&"uxml_unfit")
 	if unity_line_metrics and (c is Label or c is Button or c is LineEdit or c is TextEdit
 			or c is RichTextLabel) and not _has_url_font(style):
 		font = _line_font(c, font, style, el)
 	var keep_fit := false
+	fit_seen.erase(c)
 	if fitted.has(c):
 		var fb: Array = c.get_meta(&"uxml_fit_base")
 		if fb[0] == (font != null) and fb[1] == (font if font != null else fb[1]):
@@ -449,6 +459,8 @@ static func autosize_place(c: Control, content: Vector2) -> void:
 	var name := _font_size_name(c)
 	if c.get_theme_font_size(name) != s or not c.has_theme_font_size_override(name):
 		c.add_theme_font_size_override(name, s)
+		if c.has_meta(&"uxml_unfit"):
+			c.remove_meta(&"uxml_unfit")
 
 
 ## The largest whole font size in [min, max] at which the text fits the
@@ -938,6 +950,12 @@ func fit_label(c: Label, want: Vector2) -> void:
 	var need := 0
 	if c.autowrap_mode == TextServer.AUTOWRAP_OFF and c.label_settings == null and c.get_line_count() <= 1:
 		need = maxi(0, int(ceilf(unfitted_height(c) - want.y - 0.01)))
+	if fit > 0 and need > fit and c.size.y > unfitted_height(c) - fit + 0.01:
+		# Godot does not shrink the line below a floor (the glyph extent),
+		# and the fitted Label is held at that floor already: a larger
+		# deficit leaves its size and text as they are. The fit stays, so
+		# boxes of changing small heights do not swap fonts.
+		need = fit
 	if need == fit:
 		if need > 0:
 			fitted[c] = want.y
@@ -983,14 +1001,19 @@ func fit_label(c: Label, want: Vector2) -> void:
 ## one line of that font plus the stylebox margins. fit_label and both
 ## measurers use it, so neither depends on when Godot updates the minimum
 ## size of the Label after a font change. The native measurer computes the
-## same value (layout.rs, unfitted_height).
+## same value (layout.rs, unfitted_height). The value is kept on the Label
+## (`uxml_unfit`) until apply(), new insets or a best-fit font size drop it.
 static func unfitted_height(c: Label) -> float:
+	if c.has_meta(&"uxml_unfit"):
+		return c.get_meta(&"uxml_unfit")
 	var base: Font = c.get_theme_font(&"font")
 	if c.has_meta(&"uxml_fit_base"):
 		base = (c.get_meta(&"uxml_fit_base") as Array)[1]
 	var fh := 0.0 if base == null else base.get_height(c.get_theme_font_size(&"font_size"))
 	var sb := c.get_theme_stylebox(&"normal")
-	return fh + (0.0 if sb == null else sb.get_minimum_size().y)
+	var out := fh + (0.0 if sb == null else sb.get_minimum_size().y)
+	c.set_meta(&"uxml_unfit", out)
+	return out
 
 
 ## Records the control's pre-override theme font once, at apply() entry —
@@ -1275,6 +1298,8 @@ func apply_resolved_insets(c: Control, start: Vector2, end: Vector2) -> void:
 	_inset_memo[c] = [start, end]
 	if c.has_meta(&"uxml_maxc"):
 		c.remove_meta(&"uxml_maxc")
+	if c.has_meta(&"uxml_unfit"):
+		c.remove_meta(&"uxml_unfit")
 	if _clip_content.has(c):
 		var clip = (c.get_meta("uxml_clip") if c.has_meta("uxml_clip") else null)
 		if clip != null:

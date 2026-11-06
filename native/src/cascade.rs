@@ -1564,6 +1564,7 @@ impl UxmlNativeCascade {
             texrects,
             maxc: std::cell::RefCell::new(vec![None; ks.len()]),
             maxc_on: std::cell::Cell::new(false),
+            unfit: std::cell::RefCell::new(vec![None; ks.len()]),
         });
         self.placement = crate::layout::Placement::default();
     }
@@ -1616,12 +1617,15 @@ impl UxmlNativeCascade {
         // max-content widths are measured again.
         {
             let mut mc = io.maxc.borrow_mut();
+            let mut uf = io.unfit.borrow_mut();
             if force_all {
                 mc.iter_mut().for_each(|e| *e = None);
+                uf.iter_mut().for_each(|e| *e = None);
             } else {
                 for &k in force.as_slice() {
                     if k >= 0 && (k as usize) < mc.len() {
                         mc[k as usize] = None;
+                        uf[k as usize] = None;
                     }
                 }
             }

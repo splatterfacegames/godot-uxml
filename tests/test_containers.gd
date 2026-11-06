@@ -814,6 +814,35 @@ func test_list_view_rows_for_viewport() -> void:
 	_unload(doc)
 
 
+## A Label in a box shorter than Godot's line floor keeps its fit for other
+## small boxes (a larger deficit changes nothing), and a placement at the
+## same box height does not fit it again (UxmlStyleApplier.fit_seen). Both
+## layout paths.
+func test_label_fit_stays_at_floor() -> void:
+	var saved := UxmlDocument.use_native_layout
+	for native in [true, false]:
+		UxmlDocument.use_native_layout = native
+		var tag := "native" if native else "gdscript"
+		var doc := _doc('<ui:Label name="l" text="Status" style="height: 1px;"/>')
+		_settle(doc)
+		var c := doc.get_element("l") as Label
+		var fit: int = c.get_meta(&"uxml_fit", 0)
+		var font := c.get_theme_font(&"font")
+		h.eq(fit > 0, true, "%s: the Label is fitted" % tag)
+		h.eq(c.size.y > 1.0, true, "%s: Godot's floor holds the Label above the 1px box" % tag)
+		doc.get_element_model("l").set_attribute("style", "height: 0px;")
+		_settle(doc)
+		h.eq(c.get_meta(&"uxml_fit", 0), fit, "%s: a larger deficit keeps the fit" % tag)
+		h.eq(c.get_theme_font(&"font"), font, "%s: the font does not change" % tag)
+		# fit_label writes `fitted`: a marker there shows whether it ran.
+		doc._applier.fitted[c] = -5.0
+		doc.relayout()
+		_settle(doc)
+		h.eq(doc._applier.fitted.get(c), -5.0, "%s: the same box height does not fit again" % tag)
+		_unload(doc)
+	UxmlDocument.use_native_layout = saved
+
+
 ## virtualization-method="DynamicHeight" (Unity's DynamicHeightVirtualization-
 ## Controller): rows take the height of their item, the content is as tall
 ## as the measured heights plus the expected height of the other items,

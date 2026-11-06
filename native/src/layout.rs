@@ -305,6 +305,11 @@ pub struct LayoutIn {
     /// `maxc_on` (the placing layout).
     pub maxc: std::cell::RefCell<Vec<Option<(GString, f64)>>>,
     pub maxc_on: std::cell::Cell<bool>,
+    /// The unfitted height of a fitted Label (-1: not fitted) across
+    /// layouts, as the measure reads it from `uxml_fit` and `uxml_unfit`.
+    /// Dropped like `maxc`, and when the placement fits the Label or sets a
+    /// best-fit font size. Used only while `maxc_on`.
+    pub unfit: std::cell::RefCell<Vec<Option<f64>>>,
 }
 
 /// Native placement state: the last layout and the insets last handed to
@@ -316,6 +321,10 @@ pub struct Placement {
     sn_fit: Option<StringName>,
     /// The height each Label was last fitted for (NaN: not fitted).
     fit_h: Vec<f32>,
+    /// UxmlStyleApplier.fit_seen: the box height of the last fit_label
+    /// call and the control height after it; a forced (re-applied)
+    /// placement drops it.
+    fit_seen: Vec<Option<(f32, f32)>>,
 }
 
 impl Placement {
@@ -340,6 +349,7 @@ impl Placement {
                 };
                 let mut a = a.clone();
                 a.call("autosize_place", &[c.to_variant(), cs.to_variant()]);
+                io.unfit.borrow_mut()[i] = None;
             }
         }
         c.set_position(r.position);
@@ -350,21 +360,36 @@ impl Placement {
             // A fitted Label is fitted again only for a new height.
             if self.fit_h.len() != io.controls.len() {
                 self.fit_h = vec![f32::NAN; io.controls.len()];
+                self.fit_seen = vec![None; io.controls.len()];
+            }
+            if force {
+                self.fit_seen[i] = None;
+                io.unfit.borrow_mut()[i] = None;
+                // apply() drops the fit of a Label whose font changed.
+                if !self.fit_h[i].is_nan() && !lbl.has_meta(&*self.sn_fit.get_or_insert_with(|| StringName::from("uxml_fit"))) {
+                    self.fit_h[i] = f32::NAN;
+                }
             }
             // fit_h: the height a Label was fitted for (NaN: not fitted). A
             // one-line Label taller than its box is fitted; a fitted Label
-            // is fitted again for a new height, or when a restyle dropped
-            // its fit (UxmlDocument._place_control does the same).
+            // is fitted again for a new height (UxmlDocument._place_control
+            // does the same).
             let sn_fit = self.sn_fit.get_or_insert_with(|| StringName::from("uxml_fit"));
             let fh = self.fit_h[i];
             let fitted = !fh.is_nan();
-            let floored = d(c.get_size().y) > d(r.size.y) + 0.01;
-            let call = (floored && (fitted || lbl.get_autowrap_mode() == godot::classes::text_server::AutowrapMode::OFF))
-                || (fitted && (fh != r.size.y || !lbl.has_meta(&*sn_fit)));
+            let now_h = c.get_size().y;
+            let floored = d(now_h) > d(r.size.y) + 0.01;
+            let mut call = (floored && (fitted || lbl.get_autowrap_mode() == godot::classes::text_server::AutowrapMode::OFF))
+                || (fitted && fh != r.size.y);
+            if call && self.fit_seen[i] == Some((r.size.y, now_h)) {
+                call = false;
+            }
             if call {
                 let mut a = a.clone();
                 a.call("fit_label", &[c.to_variant(), r.size.to_variant()]);
                 self.fit_h[i] = if lbl.has_meta(&*sn_fit) { r.size.y } else { f32::NAN };
+                self.fit_seen[i] = Some((r.size.y, c.get_size().y));
+                io.unfit.borrow_mut()[i] = None;
             }
         }
         let Some((start, end)) = out.insets[i] else { return };
@@ -375,6 +400,9 @@ impl Placement {
         if changed && !force {
             // New insets give the Label new stylebox margins.
             if let Some(e) = io.maxc.borrow_mut().get_mut(i) {
+                *e = None;
+            }
+            if let Some(e) = io.unfit.borrow_mut().get_mut(i) {
                 *e = None;
             }
         }
@@ -497,6 +525,7 @@ pub struct Pass<'a> {
     sn_cliptext: StringName,
     sn_clip: StringName,
     sn_fit: StringName,
+    sn_unfit: StringName,
 }
 
 impl<'a> Pass<'a> {
@@ -565,6 +594,7 @@ impl<'a> Pass<'a> {
             sn_cliptext: StringName::from("uxml_clip_text"),
             sn_clip: StringName::from("clip_text"),
             sn_fit: StringName::from("uxml_fit"),
+            sn_unfit: StringName::from("uxml_unfit"),
         }
     }
 
@@ -1047,14 +1077,23 @@ impl<'a> Pass<'a> {
                 };
                 ms.x = mc;
             }
-            let sn_fit = &self.sn_fit;
-            let fit_h = *self.fit_m[i].get_or_insert_with(|| {
-                if lbl.has_meta(sn_fit) {
-                    unfitted_height(&lbl)
-                } else {
-                    -1.0
+            let fit_h = match self.fit_m[i] {
+                Some(v) => v,
+                None => {
+                    let on = self.io.maxc_on.get();
+                    let kept = if on { self.io.unfit.borrow()[i] } else { None };
+                    let v = match kept {
+                        Some(v) => v,
+                        None if lbl.has_meta(&self.sn_fit) => unfitted_height(&lbl, &self.sn_unfit),
+                        None => -1.0,
+                    };
+                    if on {
+                        self.io.unfit.borrow_mut()[i] = Some(v);
+                    }
+                    self.fit_m[i] = Some(v);
+                    v
                 }
-            });
+            };
             if fit_h >= 0.0 {
                 ms.y = f(fit_h);
             }
@@ -1965,8 +2004,14 @@ fn label_max_content(l: &Gd<Label>, sn: &[StringName; 4]) -> f64 {
 }
 
 /// UxmlStyleApplier.unfitted_height: one line of the font a fitted Label has
-/// without the fit, plus its stylebox margins.
-fn unfitted_height(l: &Gd<Label>) -> f64 {
+/// without the fit, plus its stylebox margins; kept in the same
+/// `uxml_unfit` meta.
+fn unfitted_height(l: &Gd<Label>, sn_unfit: &StringName) -> f64 {
+    if l.has_meta(sn_unfit) {
+        if let Ok(v) = l.get_meta(sn_unfit).try_to::<f64>() {
+            return v;
+        }
+    }
     let mut base: Option<Gd<Font>> = l.get_theme_font("font");
     if l.has_meta("uxml_fit_base") {
         let keep = l.get_meta("uxml_fit_base").try_to::<VarArray>().ok();
@@ -1975,7 +2020,10 @@ fn unfitted_height(l: &Gd<Label>) -> f64 {
     let fs = l.get_theme_font_size("font_size");
     let fh = base.map(|b| d(b.get_height_ex().font_size(fs).done())).unwrap_or(0.0);
     let sb = l.get_theme_stylebox("normal");
-    fh + sb.map(|s| d(s.get_minimum_size().y)).unwrap_or(0.0)
+    let out = fh + sb.map(|s| d(s.get_minimum_size().y)).unwrap_or(0.0);
+    let mut lm = l.clone();
+    lm.set_meta(sn_unfit, &out.to_variant());
+    out
 }
 
 /// UxmlDocument._hpad: the horizontal `uxml_margins` of the control's
