@@ -5,13 +5,33 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-06T12:42:57.4872095Z"
+  "dumpedAtUtc": "2026-11-06T16:01:02.9966045Z"
  },
  "panel": {
   "width": 400,
   "height": 500
  },
  "actions": [],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  },
+  {
+   "type": "UIDocumentRootElement",
+   "name": "uxml-dump-container",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "PanelRootElement",
+   "name": "",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
+ ],
  "focused": null,
  "elements": [
   {
@@ -799,6 +819,11 @@
     "width": 12,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 366,
+    "width": 366,
+    "height": 17
+   },
    "props": {
     "text": "In",
     "viewDataKey": null,
@@ -994,6 +1019,11 @@
    "atMostMeasure": {
     "at": 400,
     "width": 19,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 366,
+    "width": 366,
     "height": 17
    },
    "props": {
@@ -1193,6 +1223,11 @@
     "width": 25,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 366,
+    "width": 366,
+    "height": 17
+   },
    "props": {
     "text": "Tab",
     "viewDataKey": null,
@@ -1388,6 +1423,11 @@
    "atMostMeasure": {
     "at": 400,
     "width": 26,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 391,
+    "width": 391,
     "height": 17
    },
    "props": {
@@ -1959,6 +1999,11 @@
     "width": 8,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "L",
     "viewDataKey": null,
@@ -2526,6 +2571,11 @@
    },
    "atMostMeasure": {
     "at": 236,
+    "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 9,
     "width": 9,
     "height": 17
    },
@@ -3489,6 +3539,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 9,
+    "width": 9,
+    "height": 17
+   },
    "props": {
     "text": "F",
     "viewDataKey": null,
@@ -3868,6 +3923,11 @@
     "width": 88,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 391,
+    "width": 391,
+    "height": 17
+   },
    "props": {
     "text": "<b>Bold</b> and <color=red>red</color>",
     "viewDataKey": null,
@@ -4063,6 +4123,11 @@
    "atMostMeasure": {
     "at": 400,
     "width": 89,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 391,
+    "width": 391,
     "height": 17
    },
    "props": {
@@ -4262,6 +4327,11 @@
     "width": 229,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 57,
+    "width": 57,
+    "height": 17
+   },
    "props": {
     "text": "A very long label text that is elided",
     "viewDataKey": null,
@@ -4459,6 +4529,11 @@
     "width": 28,
     "height": 34
    },
+   "contentMeasure": {
+    "at": 391,
+    "width": 391,
+    "height": 34
+   },
    "props": {
     "text": "Line\\nTwo",
     "viewDataKey": null,
@@ -4654,6 +4729,11 @@
    "atMostMeasure": {
     "at": 400,
     "width": 68,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 391,
+    "width": 391,
     "height": 17
    },
    "props": {

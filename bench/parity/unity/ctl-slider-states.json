@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-06T12:43:00.2704680Z"
+  "dumpedAtUtc": "2026-11-06T16:01:05.9809992Z"
  },
  "panel": {
   "width": 400,
@@ -15,6 +15,26 @@
   "focus 0",
   "pointer-move (278.00, 53.00)",
   "pointer-down (278.00, 88.00)"
+ ],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "Hover",
+   "styleSheets": 0
+  },
+  {
+   "type": "UIDocumentRootElement",
+   "name": "uxml-dump-container",
+   "pseudoStates": "Hover",
+   "styleSheets": 0
+  },
+  {
+   "type": "PanelRootElement",
+   "name": "",
+   "pseudoStates": "Hover",
+   "styleSheets": 1
+  }
  ],
  "focused": "2",
  "elements": [
@@ -275,6 +295,11 @@
    "atMostMeasure": {
     "at": 392,
     "width": 40,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -1600,6 +1625,11 @@
    "atMostMeasure": {
     "at": 392,
     "width": 40,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -2928,6 +2958,11 @@
    "atMostMeasure": {
     "at": 392,
     "width": 37,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -4265,6 +4300,11 @@
    "atMostMeasure": {
     "at": 392,
     "width": 58,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -5789,6 +5829,11 @@
    "atMostMeasure": {
     "at": 392,
     "width": 34,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -7324,6 +7369,11 @@
    "atMostMeasure": {
     "at": 33,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 29,
+    "width": 29,
     "height": 17
    },
    "props": {

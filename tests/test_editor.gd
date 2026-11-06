@@ -441,7 +441,9 @@ func test_toolbar_controls() -> void:
 		pm.hide()
 	await _layout(doc)
 	h.eq(_val(doc, doc.get_element_model("tb"), "height"), "21px", "toolbar height (ed-toolbar)")
-	h.eq(_val(doc, doc.get_element_model("s"), "width"), "6px", "spacer width")
+	# "s" became flexible above: Unity's flexible spacer has no width
+	# (flex-basis 0%; measured: ed-toolbar).
+	h.eq(_val(doc, doc.get_element_model("s"), "width"), "auto", "flexible spacer width")
 	_unload(doc)
 
 

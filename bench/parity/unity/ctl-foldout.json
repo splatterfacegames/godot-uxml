@@ -5,13 +5,33 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-06T12:42:58.1006410Z"
+  "dumpedAtUtc": "2026-11-06T16:01:03.6359127Z"
  },
  "panel": {
   "width": 400,
   "height": 300
  },
  "actions": [],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "UIDocumentRootElement",
+   "name": "uxml-dump-container",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "PanelRootElement",
+   "name": "",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
+ ],
  "focused": null,
  "elements": [
   {
@@ -833,6 +853,11 @@
     "width": 46,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 46,
+    "width": 46,
+    "height": 17
+   },
    "props": {
     "text": "Details",
     "viewDataKey": null,
@@ -1216,6 +1241,11 @@
    "atMostMeasure": {
     "at": 370,
     "width": 40,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 361,
+    "width": 361,
     "height": 17
    },
    "props": {
@@ -2189,6 +2219,11 @@
     "width": 48,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 48,
+    "width": 48,
+    "height": 17
+   },
    "props": {
     "text": "Nested",
     "viewDataKey": null,
@@ -2575,6 +2610,11 @@
    "atMostMeasure": {
     "at": 340,
     "width": 35,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 331,
+    "width": 331,
     "height": 17
    },
    "props": {
@@ -3531,6 +3571,11 @@
     "width": 47,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 47,
+    "width": 47,
+    "height": 17
+   },
    "props": {
     "text": "Closed",
     "viewDataKey": null,
@@ -3911,6 +3956,11 @@
     "height": 17
    },
    "atMostMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 17
+   },
+   "contentMeasure": {
     "at": 0,
     "width": 0,
     "height": 17

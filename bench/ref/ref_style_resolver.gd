@@ -33,6 +33,9 @@ extends RefCounted
 
 ## Inline styles outrank every selector, so they get an unreachable score.
 const INLINE_SPECIFICITY := [1073741824, 0, 0]
+## `all: initial` outranks every other declaration, inline ones included
+## (Unity; measured: uss-all, uss-all-2).
+const ALL_SPECIFICITY := [1073741825, 0, 0]
 
 ## Maximum var() recursion depth — bounded so pathological nesting cannot
 ## hang the resolver; exceeding it resolves the declaration as failed.
@@ -308,7 +311,7 @@ static func _collect_candidates(
 				"property": decl["property"],
 				"value": decl["value"],
 				"origin": origin,
-				"specificity": specificity,
+				"specificity": ALL_SPECIFICITY if decl["property"] == "all" else specificity,
 				"order": order,
 			})
 			order += 1
@@ -323,7 +326,7 @@ static func _collect_candidates(
 				"property": decl["property"],
 				"value": decl["value"],
 				"origin": {"kind": "inline", "decl_index": decl_index},
-				"specificity": INLINE_SPECIFICITY,
+				"specificity": ALL_SPECIFICITY if decl["property"] == "all" else INLINE_SPECIFICITY,
 				"order": order,
 			})
 			order += 1
@@ -399,7 +402,15 @@ static func _compute_for(
 		var substituted = _substitute_vars(candidate["value"], customs, seed)
 		var failed: bool = substituted == null or _is_cycle(substituted)
 		var raw: String = candidate["value"] if failed else String(substituted)
-		var pairs: Array = UssProperties.expand_shorthand(property, raw)
+		var pairs: Array
+		if property.begins_with("--"):
+			pairs = UssProperties.expand_shorthand(property, raw)
+		else:
+			# Unity ignores `!important` and reads an unreadable longhand
+			# as its type's zero value.
+			pairs = []
+			for pr in UssProperties.expand_shorthand(property, UssProperties.strip_important(raw)):
+				pairs.append([pr[0], UssProperties.unity_value(pr[0], pr[1])])
 		if pairs.is_empty():
 			# Arity outside the shorthand grammar (e.g. `gap: 1px 2px 3px`):
 			# the declaration is invalid at parse time and contributes no
@@ -435,7 +446,6 @@ static func _compute_for(
 				doc.source, node.open_tag_start, doc.path
 			))
 			continue
-		computed[property] = {"value": candidate["value"], "origin": candidate["origin"]}
 		if not UssProperties.is_supported(property) and not unsupported.has(property):
 			unsupported[property] = true
 			warnings.append(UxmlDiagnostic.make(
@@ -443,6 +453,26 @@ static func _compute_for(
 				'"%s" is not a supported USS property; the value is kept but has no effect' % property,
 				doc.source, node.open_tag_start, doc.path
 			))
+		# `initial` drops the property, `unset` keeps an inherited value.
+		if candidate["value"] == "initial":
+			computed.erase(property)
+			continue
+		if candidate["value"] == "unset":
+			if not UssProperties.is_inherited(property):
+				computed.erase(property)
+			continue
+		computed[property] = {"value": candidate["value"], "origin": candidate["origin"]}
+
+	# font-size: a percentage of the inherited size, computed here.
+	var fse = computed.get("font-size")
+	if fse != null and String(fse["value"]).ends_with("%"):
+		var pe = inherited.get("font-size")
+		if pe != null:
+			var pl := UssValues.parse_length(String(pe["value"]))
+			var own := UssValues.parse_length(String(fse["value"]))
+			if pl["kind"] == "px" and own["kind"] == "percent":
+				computed["font-size"] = {"value": UssValues.fmt_number(float(pl["value"]) * float(own["value"]) / 100.0) + "px",
+					"origin": fse["origin"]}
 
 	# A direct declaration always beats an inherited one, so children are
 	# handed these final values rather than a merge of anything else.

@@ -5,13 +5,33 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-06T12:43:00.6522614Z"
+  "dumpedAtUtc": "2026-11-06T16:01:06.3864770Z"
  },
  "panel": {
   "width": 400,
   "height": 300
  },
  "actions": [],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "UIDocumentRootElement",
+   "name": "uxml-dump-container",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "PanelRootElement",
+   "name": "",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
+ ],
  "focused": null,
  "elements": [
   {
@@ -474,6 +494,11 @@
     "width": 34,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 366,
+    "width": 366,
+    "height": 17
+   },
    "props": {
     "text": "Hello",
     "viewDataKey": null,
@@ -882,6 +907,11 @@
     "width": 39,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Name",
     "viewDataKey": null,
@@ -1275,6 +1305,11 @@
    "atMostMeasure": {
     "at": 214,
     "width": 27,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 210,
+    "width": 210,
     "height": 17
    },
    "props": {
@@ -1685,6 +1720,11 @@
     "width": 42,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Empty",
     "viewDataKey": null,
@@ -2078,6 +2118,11 @@
    "atMostMeasure": {
     "at": 214,
     "width": 0,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 210,
+    "width": 210,
     "height": 17
    },
    "props": {
@@ -2488,6 +2533,11 @@
     "width": 27,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Hint",
     "viewDataKey": null,
@@ -2882,6 +2932,11 @@
    "atMostMeasure": {
     "at": 214,
     "width": 67,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 210,
+    "width": 210,
     "height": 17
    },
    "props": {
@@ -3292,6 +3347,11 @@
     "width": 65,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Password",
     "viewDataKey": null,
@@ -3685,6 +3745,11 @@
    "atMostMeasure": {
     "at": 214,
     "width": 53,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 210,
+    "width": 210,
     "height": 17
    },
    "props": {
@@ -4095,6 +4160,11 @@
     "width": 66,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Read only",
     "viewDataKey": null,
@@ -4488,6 +4558,11 @@
    "atMostMeasure": {
     "at": 214,
     "width": 33,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 210,
+    "width": 210,
     "height": 17
    },
    "props": {
@@ -4898,6 +4973,11 @@
     "width": 28,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Max",
     "viewDataKey": null,
@@ -5291,6 +5371,11 @@
    "atMostMeasure": {
     "at": 214,
     "width": 25,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 210,
+    "width": 210,
     "height": 17
    },
    "props": {

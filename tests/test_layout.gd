@@ -469,20 +469,75 @@ func test_uss_value_strictness() -> void:
 # Diagnostics: bad units and unsupported values are reported once, never
 # silently applied.
 func test_value_diagnostics() -> void:
+	# Unity reads an unreadable keyword as the enum's first value and an
+	# `auto` padding as 0 (diagnosed); the declarations still win.
 	var r := _layout(
 		'<ui:VisualElement name="row" class="row">'
 		+ '<ui:VisualElement name="a" class="c"><ui:VisualElement name="a2"/></ui:VisualElement>'
 		+ '</ui:VisualElement>',
 		'.row { flex-direction: row; width: 100px; }'
-		+ '.c { width: 10em; padding-left: auto; flex-direction: diagonal; height: 5px; }',
+		+ '.c { padding-left: auto; flex-direction: diagonal; height: 5px; }',
 		Vector2(100, 100)
 	)
 	var kinds := _warn_kinds(r)
-	h.check(kinds.count("unsupported-value") >= 3,
-		"em/auto-padding/bad-direction diagnosed once each, got %s" % [kinds])
-	# The em width fell back (auto -> intrinsic 0) rather than becoming 10px.
-	var a = _rect(r, "a")
-	h.check(a is Rect2 and a.size.x < 1.0, "em width not treated as px: %s" % a)
+	h.check(kinds.count("unsupported-value") >= 1, "auto padding diagnosed, got %s" % [kinds])
+	var doc: UxmlDocumentModel = r["doc"]
+	var invalid := 0
+	for w in doc.warnings:
+		if w["kind"] == "invalid-value" and String(w["message"]).contains("flex-direction"):
+			invalid += 1
+	h.eq(invalid, 1, "an unreadable flex-direction is diagnosed at load")
+	h.eq((r["doc"] as UxmlDocumentModel).root.find_by_name("a") != null, true, "a exists")
+	# An unsupported unit fails the whole sheet, as Unity's importer does
+	# (measured: uss-invalid-unit): no rule of the sheet applies.
+	var r2 := _layout(
+		'<ui:VisualElement name="row" class="row">'
+		+ '<ui:VisualElement name="a" class="c"><ui:VisualElement name="a2"/></ui:VisualElement>'
+		+ '</ui:VisualElement>',
+		'.row { flex-direction: row; width: 60px; }'
+		+ '.c { width: 10em; height: 5px; }',
+		Vector2(100, 100)
+	)
+	var malformed := 0
+	for w in (r2["doc"] as UxmlDocumentModel).warnings:
+		if w["kind"] == "malformed" and String(w["message"]).contains("10em"):
+			malformed += 1
+	h.eq(malformed, 1, "the unsupported unit is diagnosed")
+	var a = _rect(r2, "a")
+	h.check(a is Rect2 and is_equal_approx(a.size.x, 100.0) and a.size.y < 1.0,
+		"no rule of the failed sheet applies: %s" % a)
+
+
+# Unity lays out margins and padding on the pixel grid and a nonzero
+# border at least one pixel wide (measured: lay-fraction).
+func test_pixel_grid_box_lengths() -> void:
+	var doc: UxmlDocumentModel = h._doc(
+		'<ui:VisualElement name="row" class="row">'
+		+ '<ui:VisualElement name="m" class="b" /><ui:VisualElement name="bo" class="b"><ui:VisualElement name="in" class="in" /></ui:VisualElement>'
+		+ '</ui:VisualElement>',
+		'.row { flex-direction: row; } .b { width: 20px; height: 20px; } .in { flex-grow: 1; }'
+		+ ' #m { margin-left: 2.5px; } #bo { border-left-width: 0.4px; border-top-width: 1.5px; }')
+	var res := UssStyleResolver.resolve(doc, {})
+	var out := UxmlFlexLayout.compute(doc.root, res["styles"], Vector2(200, 50),
+		func(_e, _s, _h): return Vector2.ZERO, [], {"pixel_grid": true})
+	var rects: Dictionary = out["rects"]
+	h.eq((rects[doc.find_by_name("m")] as Rect2).position.x, 3.0, "a 2.5px margin lays out as 3px")
+	var inner: Rect2 = rects[doc.find_by_name("in")]
+	h.eq(inner.position, Vector2(1, 2), "borders 0.4px and 1.5px lay out as 1px and 2px")
+	h.eq(UxmlFlexLayout.grid_box(0.4, false), 0.0, "0.4px padding is 0")
+	h.eq(UxmlFlexLayout.grid_box(0.4, true), 1.0, "a 0.4px border is 1px")
+
+
+# Yoga: an aspect ratio sets the cross size from the main size, over an
+# explicit cross dimension (measured: lay-minmax).
+func test_aspect_ratio_cross_after_min() -> void:
+	var r := _layout(
+		'<ui:VisualElement name="row" class="row"><ui:VisualElement name="a" /></ui:VisualElement>',
+		'.row { flex-direction: row; width: 300px; height: 30px; }'
+		+ ' #a { aspect-ratio: 0.5; height: 30px; min-width: 20px; }',
+		Vector2(300, 100)
+	)
+	_vec_eq(_rect(r, "a"), Rect2(0, 0, 20, 40), "min-width 20 -> height 20 / 0.5")
 
 
 # gap takes 1 or 2 values; 3+ is invalid at parse time — the declaration

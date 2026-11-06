@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-06T12:43:00.9439019Z"
+  "dumpedAtUtc": "2026-11-06T16:01:06.7038678Z"
  },
  "panel": {
   "width": 400,
@@ -14,6 +14,26 @@
  "actions": [
   "tree-items 0 2",
   "select 0 1"
+ ],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "UIDocumentRootElement",
+   "name": "uxml-dump-container",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "PanelRootElement",
+   "name": "",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
  ],
  "focused": null,
  "elements": [
@@ -2188,6 +2208,11 @@
     "width": 45,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 161,
+    "width": 161,
+    "height": 17
+   },
    "props": {
     "text": "Root A",
     "viewDataKey": null,
@@ -3546,6 +3571,11 @@
     "width": 54,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 131,
+    "width": 131,
+    "height": 17
+   },
    "props": {
     "text": "Child A1",
     "viewDataKey": null,
@@ -4899,6 +4929,11 @@
    "atMostMeasure": {
     "at": 110,
     "width": 29,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 101,
+    "width": 101,
     "height": 17
    },
    "props": {
@@ -6256,6 +6291,11 @@
     "width": 56,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 131,
+    "width": 131,
+    "height": 17
+   },
    "props": {
     "text": "Child A2",
     "viewDataKey": null,
@@ -7609,6 +7649,11 @@
     "width": 44,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 161,
+    "width": 161,
+    "height": 17
+   },
    "props": {
     "text": "Root B",
     "viewDataKey": null,
@@ -8011,6 +8056,11 @@
     "width": 0,
     "height": 0
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 0
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -8212,6 +8262,11 @@
     "height": 0
    },
    "atMostMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 0
+   },
+   "contentMeasure": {
     "at": 0,
     "width": 0,
     "height": 0
@@ -9776,6 +9831,11 @@
     "width": 0,
     "height": 0
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 0
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -9976,6 +10036,11 @@
     "height": 0
    },
    "atMostMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 0
+   },
+   "contentMeasure": {
     "at": 0,
     "width": 0,
     "height": 0

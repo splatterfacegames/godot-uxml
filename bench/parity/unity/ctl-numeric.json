@@ -5,7 +5,7 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-06T14:34:39.5983012Z"
+  "dumpedAtUtc": "2026-11-06T16:01:04.9576626Z"
  },
  "panel": {
   "width": 400,
@@ -3186,7 +3186,7 @@
     "color": "rgba(27, 27, 27, 1)",
     "display": "flex",
     "filter": [],
-    "flex-basis": 41,
+    "flex-basis": 40,
     "flex-direction": "column",
     "flex-grow": 1,
     "flex-shrink": 0,

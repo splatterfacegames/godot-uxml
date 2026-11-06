@@ -726,7 +726,12 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		else:
 			for el in applied:
 				_place_control(el)
-		_update_elision()
+		# No layout: only the re-applied controls can elide differently.
+		if _applier != null and not _applier.elide.is_empty() and not applied.is_empty():
+			var cs: Array = []
+			for el in applied:
+				cs.append(_controls[el])
+			_applier.update_elision(cs)
 	# Runtime warnings accumulate during apply/layout — surface last so they
 	# are all included.
 	diagnostics = _doc.warnings + _cascade.collect_warnings() + _rt_warnings

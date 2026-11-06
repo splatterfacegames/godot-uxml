@@ -592,6 +592,16 @@ static func unity_problem(prop: String, value: String) -> String:
 	var v := value.strip_edges()
 	if v.find("var(") >= 0:
 		return ""
+	var lv := v.to_lower()
+	# Values Unity's importer warns about but still reads (measured:
+	# uss-slice, uss-text-inherit).
+	if prop.begins_with("-unity-slice-") and prop != "-unity-slice-scale" and prop != "-unity-slice-type":
+		if lv != "initial" and lv != "unset" and not v.is_valid_int():
+			return '%s: Unity expects an integer, found "%s"; it reads %d' % [prop, v, int(UssValues.parse_length(v).get("value", 0.0))]
+	if NUMBER_LENGTH_PROPS.has(prop) and lv != "initial" and lv != "unset":
+		var l := UssValues.parse_length(v)
+		if l["kind"] == "percent" or (l["kind"] == "px" and not v.ends_with("px") and float(l["value"]) != 0.0):
+			return '%s: Unity expects a length, found "%s"; it reads %s px' % [prop, v, UssValues.fmt_number(float(l["value"]))]
 	var out := unity_value(prop, v)
 	if out == v or out == v.to_lower():
 		return ""

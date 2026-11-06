@@ -75,6 +75,10 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 	for d in all:
 		root.add_child(d)
 		d.size = Vector2(640, 480)
+		# Outside the viewport: a cursor-shape change makes Godot pick the
+		# control under the mouse again, which would hover only the
+		# topmost of the stacked documents.
+		d.position = Vector2(20000, 20000)
 		var was := UssCascade.use_native
 		if d == c:
 			UssCascade.use_native = false  # GDScript cascade => GDScript layout

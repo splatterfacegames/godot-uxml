@@ -64,6 +64,11 @@ var _scroll_bar_width: float = 0.0
 ## "insets": {element: [Vector2 start, Vector2 end]}} — start/end are the
 ## resolved padding+border edges (the content-box insets) the runtime uses
 ## to inset wrapped natives the flex pass does not position itself.
+## options["pixel_grid"]: margins, padding and borders on the pixel grid
+## (UxmlFlexLayout.grid_box), as the runtime lays them out.
+var _grid := false
+
+
 static func compute(
 	root: UxmlElement,
 	styles: Dictionary,
@@ -81,6 +86,7 @@ static func compute(
 	l._scroll_bar_width = float(options.get("scroll_bar_width", 0.0))
 	if options.has("warned"):
 		l._warned = options["warned"]
+	l._grid = bool(options.get("pixel_grid", false))
 	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
 	return {
 		"rects": l._rects,
@@ -187,7 +193,7 @@ func _edges(
 			_warn_once(el, name, "%s: negative values are invalid; 0 used" % name)
 			out[side[0]] = 0.0
 		else:
-			out[side[0]] = r["v"]
+			out[side[0]] = UxmlFlexLayout.grid_box(r["v"], false) if _grid else r["v"]
 	return out
 
 
@@ -203,7 +209,7 @@ func _borders(el: UxmlElement, cb_width: float) -> Dictionary:
 			continue
 		var p := RefUssValues.parse_length(String(raw))
 		if p["kind"] == "px":
-			out[side[0]] = maxf(0.0, p["value"])
+			out[side[0]] = UxmlFlexLayout.grid_box(p["value"], true) if _grid else maxf(0.0, p["value"])
 		else:
 			if p["kind"] == "invalid":
 				_warn_once(el, name, "%s: %s" % [name, p["problem"]])

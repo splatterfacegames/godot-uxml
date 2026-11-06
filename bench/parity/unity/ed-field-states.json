@@ -5,7 +5,7 @@
   "theme": "unity-editor (dark)",
   "pixelsPerPoint": 1,
   "contextType": "Editor",
-  "dumpedAtUtc": "2026-11-06T12:43:01.7612780Z"
+  "dumpedAtUtc": "2026-11-06T16:01:07.5310881Z"
  },
  "panel": {
   "width": 400,
@@ -22,6 +22,20 @@
   "force-state 5",
   "focus 6",
   "force-state 7"
+ ],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "EditorPanelRootElement",
+   "name": "unity-panel-container97",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
  ],
  "focused": "6",
  "elements": [
@@ -275,6 +289,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 34,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -2515,6 +2534,11 @@
     "width": 21,
     "height": 13
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 13
+   },
    "props": {
     "text": "HDR",
     "viewDataKey": null,
@@ -2716,6 +2740,11 @@
    "atMostMeasure": {
     "at": 252,
     "width": 13,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
     "height": 15
    },
    "props": {
@@ -3867,6 +3896,11 @@
     "width": 0,
     "height": 0
    },
+   "contentMeasure": {
+    "at": 249,
+    "width": 249,
+    "height": 0
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -4440,6 +4474,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 34,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -5203,6 +5242,11 @@
     "width": 80,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
+    "height": 15
+   },
    "props": {
     "text": "None (Object)",
     "viewDataKey": null,
@@ -5784,6 +5828,11 @@
     "width": 34,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
+    "height": 15
+   },
    "props": {
     "text": "Hover",
     "viewDataKey": null,
@@ -6169,6 +6218,11 @@
    "atMostMeasure": {
     "at": 264,
     "width": 9,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 252,
+    "width": 252,
     "height": 15
    },
    "props": {
@@ -6744,6 +6798,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 34,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -7518,6 +7577,11 @@
     "width": 34,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
+    "height": 15
+   },
    "props": {
     "text": "Focus",
     "viewDataKey": null,
@@ -8271,6 +8335,11 @@
     "width": 34,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 380,
+    "width": 380,
+    "height": 15
+   },
    "props": {
     "text": "Hover",
     "viewDataKey": null,
@@ -8681,6 +8750,11 @@
     "width": 34,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
+    "height": 15
+   },
    "props": {
     "text": "Focus",
     "viewDataKey": null,
@@ -9078,6 +9152,11 @@
     "width": 7,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 262,
+    "width": 262,
+    "height": 15
+   },
    "props": {
     "text": "x",
     "viewDataKey": null,
@@ -9467,6 +9546,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 34,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {

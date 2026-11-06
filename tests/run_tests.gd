@@ -1002,12 +1002,102 @@ func test_all_initial() -> void:
 	check(not st.has("width"), "all: initial drops an earlier declaration")
 	check(not st.has("opacity"), "all: initial drops opacity")
 	check(not st.has("color"), "all: initial stops inheritance")
-	eq(st.get("height", {}).get("value"), "3px", "a later declaration in the rule still wins")
-	eq(st.get("padding-left", {}).get("value"), "4px", "custom properties are untouched")
+	# Unity applies `all: initial` over every other declaration of the
+	# element, later ones and inline ones included (measured: uss-all,
+	# uss-all-2).
+	check(not st.has("height"), "a later declaration in the rule loses to all: initial")
+	check(not st.has("padding-left"), "a later rule loses to all: initial")
+	eq(st.get("--tok", {}).get("value"), "4px", "custom properties are untouched")
 	eq(_count_kind(res["warnings"], "unsupported-property"), 0, "all expands to supported longhands only")
 	var initial := _doc(ONE, '.x { color: red; } #a { color: initial; }')
 	check(not (_resolved(initial)["styles"][initial.find_by_name("a")] as Dictionary).has("color"),
 		"a single initial keyword drops the property")
+
+
+## Unity's reading of declarations, measured in Unity 6000.3
+## (bench/parity/unity/uss-*.json, sel-*.json).
+func test_unity_value_reading() -> void:
+	# !important is parsed and ignored: no precedence, the value applies.
+	var d1 := _doc('<ui:VisualElement name="a" class="a b" /><ui:VisualElement name="c" class="a" style="width: 80px;" />',
+		'.a { width: 50px !important; } #a { width: 70px; } .b { height: 20px !important; }')
+	eq(_val(d1, "a", "width"), "70px", "!important does not outrank an id rule")
+	eq(_val(d1, "a", "height"), "20px", "!important is stripped from the value")
+	eq(_val(d1, "c", "width"), "80px", "!important does not outrank inline")
+	# An unreadable value wins the cascade as the type's zero value.
+	var d2 := _doc('<ui:VisualElement name="a" class="b" />',
+		'.b { flex-direction: row; align-items: center; width: 20px; opacity: 0.5; background-color: red; }'
+		+ ' #a { flex-direction: bogus; align-items: inherit; width: abc; opacity: abc; background-color: inherit; }')
+	eq(_val(d2, "a", "flex-direction"), "column", "a bogus keyword reads as enum index 0")
+	eq(_val(d2, "a", "align-items"), "auto", "inherit is not a Unity keyword: align-items auto")
+	eq(_val(d2, "a", "width"), "0px", "an unreadable length is 0px")
+	eq(_val(d2, "a", "opacity"), "0", "an unreadable number is 0")
+	eq(_val(d2, "a", "background-color"), "rgba(0, 0, 0, 0)", "an unreadable color is transparent")
+	check(_count_kind(d2.warnings, "invalid-value") >= 5, "each unreadable value is diagnosed at load")
+	# unset: inherited properties inherit, others take the initial value.
+	var d3 := _doc('<ui:VisualElement name="p" class="p"><ui:VisualElement name="a" class="c" /></ui:VisualElement>',
+		'.p { color: rgb(0, 128, 0); } .c { color: red; margin-left: 3px; } #a { color: unset; margin-left: unset; }')
+	eq(_val(d3, "a", "color"), "rgb(0, 128, 0)", "unset inherits an inherited property")
+	eq(_val(d3, "a", "margin-left"), null, "unset drops a non-inherited property")
+	# letter-spacing: Unity keeps a percentage as written (resolved: the number).
+	var d4 := _doc(ONE, '.x { letter-spacing: 10%; }')
+	eq(_val(d4, "a", "letter-spacing"), "10%", "letter-spacing keeps its percentage")
+	eq(UssValues.spacing_px("10%", 100.0), 10.0, "a spacing percentage reads as px")
+
+
+func test_all_initial_precedence() -> void:
+	var d := _doc('<ui:VisualElement name="i" class="r" style="width: 33px;" /><ui:VisualElement name="id" class="r" />',
+		'.r { all: initial; } #id { width: 70px; height: 11px; }')
+	eq(_val(d, "i", "width"), null, "all: initial beats an inline declaration")
+	eq(_val(d, "id", "width"), null, "all: initial beats an id rule")
+	eq(_val(d, "id", "height"), null, "all: initial beats every property of the rule")
+
+
+func test_font_size_percent_computed() -> void:
+	var d := _doc('<ui:VisualElement name="o" class="o"><ui:VisualElement name="m" class="m"><ui:Label name="l" text="t" /></ui:VisualElement></ui:VisualElement>',
+		'.o { font-size: 18px; } .m { font-size: 150%; }')
+	eq(_val(d, "m", "font-size"), "27px", "a font-size percentage is computed against the parent")
+	eq(_val(d, "l", "font-size"), "27px", "children inherit the computed px value")
+
+
+func test_pseudo_class_aliases() -> void:
+	var d := _doc('<ui:VisualElement name="a" class="p" /><ui:VisualElement name="b" class="p" />',
+		'.p:selected { width: 9px; } .p:inactive { height: 4px; }')
+	var a := d.find_by_name("a")
+	var b := d.find_by_name("b")
+	var st: Dictionary = _resolved(d, {"element_states": {a: ["checked"], b: ["active"]}})["styles"]
+	eq(st[a].get("width", {}).get("value"), "9px", ":selected matches a checked element")
+	eq(st[a].get("height", {}).get("value"), "4px", ":inactive matches an element that is not active")
+	check(not st[b].has("height"), ":inactive does not match an active element")
+
+
+func test_root_only_as_subject() -> void:
+	var d := _doc('<ui:VisualElement name="a" class="q" />',
+		':root { margin-top: 2px; } :root > .q { margin-left: 3px; } :root .q { margin-right: 4px; }')
+	eq(_val(d, "a", "margin-left"), null, ":root as an ancestor matches nothing (child)")
+	eq(_val(d, "a", "margin-right"), null, ":root as an ancestor matches nothing (descendant)")
+
+
+func test_flex_basis_shorthand() -> void:
+	var d := _doc(ONE, '.x { flex: 25px; }')
+	eq(_val(d, "a", "flex-grow"), "0", "flex: <basis> leaves flex-grow 0 (Unity)")
+	eq(_val(d, "a", "flex-basis"), "25px", "flex: <basis>")
+
+
+func test_unslashed_project_paths_are_relative() -> void:
+	var tmp := "user://unslashed_paths"
+	DirAccess.make_dir_recursive_absolute(tmp + "/a/Assets")
+	DirAccess.make_dir_recursive_absolute(tmp + "/Assets")
+	for path in [tmp + "/a/Assets/x.uss", tmp + "/Assets/y.uss"]:
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		f.store_string(".t { width: 1px; }")
+		f.close()
+	var res := UxmlResourceResolver.new(tmp)
+	eq(res.resolve("Assets/x.uss", tmp + "/a/main.uss")["path"], tmp + "/a/Assets/x.uss",
+		"Assets/... without a slash resolves beside the referencing sheet (Unity)")
+	eq(res.resolve("Assets/y.uss", tmp + "/a/main.uss")["path"], tmp + "/Assets/y.uss",
+		"no such file beside the sheet: project-rooted")
+	eq(res.resolve("/Assets/x.uss", tmp + "/a/main.uss")["path"], tmp + "/Assets/x.uss",
+		"/Assets/... is project-rooted")
 
 
 func test_recognized_but_unmapped_controls_warn() -> void:

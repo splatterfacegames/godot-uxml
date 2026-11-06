@@ -5,13 +5,33 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-06T12:43:01.0416908Z"
+  "dumpedAtUtc": "2026-11-06T16:01:06.8050766Z"
  },
  "panel": {
   "width": 600,
   "height": 400
  },
  "actions": [],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "UIDocumentRootElement",
+   "name": "uxml-dump-container",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "PanelRootElement",
+   "name": "",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
+ ],
  "focused": null,
  "elements": [
   {
@@ -262,6 +282,11 @@
    "atMostMeasure": {
     "at": 592,
     "width": 52,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -868,6 +893,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "X",
     "viewDataKey": null,
@@ -1266,6 +1296,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 7,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -1683,6 +1718,11 @@
     "width": 10,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Y",
     "viewDataKey": null,
@@ -2081,6 +2121,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -2655,6 +2700,11 @@
    "atMostMeasure": {
     "at": 592,
     "width": 69,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -3261,6 +3311,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "X",
     "viewDataKey": null,
@@ -3659,6 +3714,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -4076,6 +4136,11 @@
     "width": 10,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Y",
     "viewDataKey": null,
@@ -4474,6 +4539,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -5048,6 +5118,11 @@
    "atMostMeasure": {
     "at": 592,
     "width": 53,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -5654,6 +5729,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "X",
     "viewDataKey": null,
@@ -6052,6 +6132,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 7,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -6469,6 +6554,11 @@
     "width": 10,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Y",
     "viewDataKey": null,
@@ -6867,6 +6957,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -7284,6 +7379,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Z",
     "viewDataKey": null,
@@ -7684,6 +7784,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
+    "height": 17
+   },
    "props": {
     "text": "3",
     "viewDataKey": null,
@@ -8073,6 +8178,11 @@
    "atMostMeasure": {
     "at": 592,
     "width": 70,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -8679,6 +8789,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "X",
     "viewDataKey": null,
@@ -9077,6 +9192,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -9494,6 +9614,11 @@
     "width": 10,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Y",
     "viewDataKey": null,
@@ -9892,6 +10017,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -10309,6 +10439,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Z",
     "viewDataKey": null,
@@ -10709,6 +10844,11 @@
     "width": 8,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
+    "height": 17
+   },
    "props": {
     "text": "7",
     "viewDataKey": null,
@@ -11098,6 +11238,11 @@
    "atMostMeasure": {
     "at": 592,
     "width": 53,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
     "height": 17
    },
    "props": {
@@ -11705,6 +11850,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "X",
     "viewDataKey": null,
@@ -12103,6 +12253,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 7,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -12520,6 +12675,11 @@
     "width": 10,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Y",
     "viewDataKey": null,
@@ -12918,6 +13078,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -13335,6 +13500,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Z",
     "viewDataKey": null,
@@ -13733,6 +13903,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -14150,6 +14325,11 @@
     "width": 14,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "W",
     "viewDataKey": null,
@@ -14548,6 +14728,11 @@
    "atMostMeasure": {
     "at": 250,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
     "height": 17
    },
    "props": {
@@ -15343,6 +15528,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "X",
     "viewDataKey": null,
@@ -15741,6 +15931,11 @@
    "atMostMeasure": {
     "at": 406,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 402,
+    "width": 402,
     "height": 17
    },
    "props": {
@@ -16158,6 +16353,11 @@
     "width": 10,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Y",
     "viewDataKey": null,
@@ -16556,6 +16756,11 @@
    "atMostMeasure": {
     "at": 406,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 402,
+    "width": 402,
     "height": 17
    },
    "props": {
@@ -16973,6 +17178,11 @@
     "width": 9,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 147,
+    "width": 147,
+    "height": 17
+   },
    "props": {
     "text": "Z",
     "viewDataKey": null,
@@ -17371,6 +17581,11 @@
    "atMostMeasure": {
     "at": 406,
     "width": 9,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 402,
+    "width": 402,
     "height": 17
    },
    "props": {

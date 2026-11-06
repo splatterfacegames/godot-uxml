@@ -5,7 +5,7 @@
   "theme": "unity-editor (dark)",
   "pixelsPerPoint": 1,
   "contextType": "Editor",
-  "dumpedAtUtc": "2026-11-06T12:43:02.5979208Z"
+  "dumpedAtUtc": "2026-11-06T16:01:08.3775517Z"
  },
  "panel": {
   "width": 400,
@@ -13,6 +13,20 @@
  },
  "editor": "dark",
  "actions": [],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "EditorPanelRootElement",
+   "name": "unity-panel-container105",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
+ ],
  "focused": null,
  "elements": [
   {
@@ -69,6 +83,11 @@
    "atMostMeasure": {
     "at": 400,
     "width": 39,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 397,
+    "width": 397,
     "height": 15
    },
    "props": {
@@ -266,6 +285,11 @@
    "atMostMeasure": {
     "at": 400,
     "width": 38,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 380,
+    "width": 380,
     "height": 15
    },
    "props": {
@@ -657,6 +681,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 39,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -1437,6 +1466,11 @@
     "width": 25,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
+    "height": 15
+   },
    "props": {
     "text": "Text",
     "viewDataKey": null,
@@ -1830,6 +1864,11 @@
    "atMostMeasure": {
     "at": 266,
     "width": 21,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 262,
+    "width": 262,
     "height": 15
    },
    "props": {
@@ -2241,6 +2280,11 @@
     "width": 41,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
+    "height": 15
+   },
    "props": {
     "text": "Integer",
     "viewDataKey": null,
@@ -2635,6 +2679,11 @@
    "atMostMeasure": {
     "at": 266,
     "width": 7,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 262,
+    "width": 262,
     "height": 15
    },
    "props": {
@@ -3046,6 +3095,11 @@
     "width": 29,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
+    "height": 15
+   },
    "props": {
     "text": "Float",
     "viewDataKey": null,
@@ -3440,6 +3494,11 @@
    "atMostMeasure": {
     "at": 266,
     "width": 16,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 262,
+    "width": 262,
     "height": 15
    },
    "props": {
@@ -3838,6 +3897,11 @@
     "width": 59,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
+    "height": 15
+   },
    "props": {
     "text": "Dropdown",
     "viewDataKey": null,
@@ -4223,6 +4287,11 @@
    "atMostMeasure": {
     "at": 264,
     "width": 8,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 252,
+    "width": 252,
     "height": 15
    },
    "props": {
@@ -4797,6 +4866,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 45,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -5403,6 +5477,11 @@
     "width": 8,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 14,
+    "width": 14,
+    "height": 15
+   },
    "props": {
     "text": "X",
     "viewDataKey": null,
@@ -5801,6 +5880,11 @@
    "atMostMeasure": {
     "at": 65,
     "width": 6,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 61,
+    "width": 61,
     "height": 15
    },
    "props": {
@@ -6218,6 +6302,11 @@
     "width": 8,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 14,
+    "width": 14,
+    "height": 15
+   },
    "props": {
     "text": "Y",
     "viewDataKey": null,
@@ -6616,6 +6705,11 @@
    "atMostMeasure": {
     "at": 65,
     "width": 8,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 61,
+    "width": 61,
     "height": 15
    },
    "props": {
@@ -7033,6 +7127,11 @@
     "width": 8,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 14,
+    "width": 14,
+    "height": 15
+   },
    "props": {
     "text": "Z",
     "viewDataKey": null,
@@ -7431,6 +7530,11 @@
    "atMostMeasure": {
     "at": 65,
     "width": 8,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 61,
+    "width": 61,
     "height": 15
    },
    "props": {
@@ -8393,6 +8497,11 @@
     "width": 43,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 376,
+    "width": 376,
+    "height": 15
+   },
    "props": {
     "text": "Foldout",
     "viewDataKey": null,
@@ -8775,6 +8884,11 @@
    "atMostMeasure": {
     "at": 385,
     "width": 34,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 382,
+    "width": 382,
     "height": 15
    },
    "props": {
@@ -9175,6 +9289,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 33,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -10493,6 +10612,11 @@
     "width": 32,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
+    "height": 15
+   },
    "props": {
     "text": "Radio",
     "viewDataKey": null,
@@ -11615,6 +11739,11 @@
    },
    "atMostMeasure": {
     "at": 388,
+    "width": 22,
+    "height": 13
+   },
+   "contentMeasure": {
+    "at": 22,
     "width": 22,
     "height": 13
    },
@@ -12746,6 +12875,11 @@
    "atMostMeasure": {
     "at": 392,
     "width": 51,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 389,
+    "width": 389,
     "height": 15
    },
    "props": {

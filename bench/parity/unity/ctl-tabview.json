@@ -5,13 +5,33 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-06T12:43:00.5583189Z"
+  "dumpedAtUtc": "2026-11-06T16:01:06.2949158Z"
  },
  "panel": {
   "width": 400,
   "height": 300
  },
  "actions": [],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "UIDocumentRootElement",
+   "name": "uxml-dump-container",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "PanelRootElement",
+   "name": "",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
+ ],
  "focused": null,
  "elements": [
   {
@@ -1011,6 +1031,11 @@
     "width": 30,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 30,
+    "width": 30,
+    "height": 17
+   },
    "props": {
     "text": "First",
     "viewDataKey": null,
@@ -1773,6 +1798,11 @@
    },
    "atMostMeasure": {
     "at": 71,
+    "width": 51,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 51,
     "width": 51,
     "height": 17
    },
@@ -2724,6 +2754,11 @@
     "width": 35,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 35,
+    "width": 35,
+    "height": 17
+   },
    "props": {
     "text": "Third",
     "viewDataKey": null,
@@ -3110,6 +3145,11 @@
     "width": 0,
     "height": 0
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 0
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -3308,6 +3348,11 @@
    },
    "atMostMeasure": {
     "at": 300,
+    "width": 0,
+    "height": 0
+   },
+   "contentMeasure": {
+    "at": 0,
     "width": 0,
     "height": 0
    },
@@ -4074,6 +4119,11 @@
     "width": 38,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 291,
+    "width": 291,
+    "height": 17
+   },
    "props": {
     "text": "Alpha",
     "viewDataKey": null,
@@ -4645,6 +4695,11 @@
     "height": 17
    },
    "atMostMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 17
+   },
+   "contentMeasure": {
     "at": 0,
     "width": 0,
     "height": 17
@@ -5773,6 +5828,11 @@
     "height": 17
    },
    "atMostMeasure": {
+    "at": 41,
+    "width": 41,
+    "height": 17
+   },
+   "contentMeasure": {
     "at": 41,
     "width": 41,
     "height": 17

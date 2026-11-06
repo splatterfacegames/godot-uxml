@@ -74,6 +74,10 @@ static func _match_compound(part: Dictionary, element: UxmlElement, ctx: Diction
 static func _match_from(parts: Array, index: int, element: UxmlElement, ctx: Dictionary) -> bool:
 	if not _match_compound(parts[index], element, ctx):
 		return false
+	if index < parts.size() - 1 and _has_root(parts[index]):
+		# Unity matches `:root` on the selector's subject only (measured:
+		# sel-root): `:root > .a` and `:root .a` match nothing.
+		return false
 	if index == 0:
 		return true
 
@@ -88,6 +92,13 @@ static func _match_from(parts: Array, index: int, element: UxmlElement, ctx: Dic
 		if _match_from(parts, index - 1, ancestor, ctx):
 			return true
 		ancestor = ctx["parents"].get(ancestor)
+	return false
+
+
+static func _has_root(part: Dictionary) -> bool:
+	for simple in part["simple"]:
+		if simple["kind"] == "pseudo" and simple["name"] == "root":
+			return true
 	return false
 
 

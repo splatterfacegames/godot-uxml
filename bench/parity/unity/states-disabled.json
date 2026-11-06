@@ -5,13 +5,33 @@
   "theme": "unity-theme://default (runtime)",
   "pixelsPerPoint": 1,
   "contextType": "Player",
-  "dumpedAtUtc": "2026-11-06T12:43:03.7412871Z"
+  "dumpedAtUtc": "2026-11-06T16:01:09.5785687Z"
  },
  "panel": {
   "width": 400,
   "height": 300
  },
  "actions": [],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  },
+  {
+   "type": "UIDocumentRootElement",
+   "name": "uxml-dump-container",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "PanelRootElement",
+   "name": "",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
+ ],
  "focused": null,
  "elements": [
   {
@@ -256,6 +276,11 @@
     "width": 21,
     "height": 17
    },
+   "contentMeasure": {
+    "at": 94,
+    "width": 94,
+    "height": 17
+   },
    "props": {
     "text": "Off",
     "viewDataKey": null,
@@ -453,6 +478,11 @@
    "atMostMeasure": {
     "at": 300,
     "width": 19,
+    "height": 17
+   },
+   "contentMeasure": {
+    "at": 14,
+    "width": 14,
     "height": 17
    },
    "props": {

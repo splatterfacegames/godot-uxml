@@ -5,7 +5,7 @@
   "theme": "unity-editor (light)",
   "pixelsPerPoint": 1,
   "contextType": "Editor",
-  "dumpedAtUtc": "2026-11-06T12:43:01.4406382Z"
+  "dumpedAtUtc": "2026-11-06T16:01:07.2223742Z"
  },
  "panel": {
   "width": 400,
@@ -13,6 +13,20 @@
  },
  "editor": "light",
  "actions": [],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "EditorPanelRootElement",
+   "name": "unity-panel-container94",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
+ ],
  "focused": null,
  "elements": [
   {
@@ -263,6 +277,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 31,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -2501,6 +2520,11 @@
     "width": 21,
     "height": 13
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 13
+   },
    "props": {
     "text": "HDR",
     "viewDataKey": null,
@@ -2702,6 +2726,11 @@
    "atMostMeasure": {
     "at": 252,
     "width": 13,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
     "height": 15
    },
    "props": {
@@ -3853,6 +3882,11 @@
     "width": 0,
     "height": 0
    },
+   "contentMeasure": {
+    "at": 249,
+    "width": 249,
+    "height": 0
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -4425,6 +4459,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 45,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -6663,6 +6702,11 @@
     "width": 21,
     "height": 13
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 13
+   },
    "props": {
     "text": "HDR",
     "viewDataKey": null,
@@ -6864,6 +6908,11 @@
    "atMostMeasure": {
     "at": 252,
     "width": 13,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
     "height": 15
    },
    "props": {
@@ -8015,6 +8064,11 @@
     "width": 0,
     "height": 0
    },
+   "contentMeasure": {
+    "at": 249,
+    "width": 249,
+    "height": 0
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -8587,6 +8641,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 51,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -10825,6 +10884,11 @@
     "width": 21,
     "height": 13
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 13
+   },
    "props": {
     "text": "HDR",
     "viewDataKey": null,
@@ -11026,6 +11090,11 @@
    "atMostMeasure": {
     "at": 252,
     "width": 13,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
     "height": 15
    },
    "props": {
@@ -12177,6 +12246,11 @@
     "width": 0,
     "height": 0
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 0
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -12749,6 +12823,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 26,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -14987,6 +15066,11 @@
     "width": 21,
     "height": 13
    },
+   "contentMeasure": {
+    "at": 249,
+    "width": 249,
+    "height": 13
+   },
    "props": {
     "text": "HDR",
     "viewDataKey": null,
@@ -15188,6 +15272,11 @@
    "atMostMeasure": {
     "at": 252,
     "width": 13,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
     "height": 15
    },
    "props": {
@@ -16337,6 +16426,11 @@
    "atMostMeasure": {
     "at": 252,
     "width": 0,
+    "height": 0
+   },
+   "contentMeasure": {
+    "at": 249,
+    "width": 249,
     "height": 0
    },
    "props": {
@@ -18948,6 +19042,11 @@
     "width": 21,
     "height": 13
    },
+   "contentMeasure": {
+    "at": 371,
+    "width": 371,
+    "height": 13
+   },
    "props": {
     "text": "HDR",
     "viewDataKey": null,
@@ -19149,6 +19248,11 @@
    "atMostMeasure": {
     "at": 374,
     "width": 13,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
     "height": 15
    },
    "props": {
@@ -20300,6 +20404,11 @@
     "width": 0,
     "height": 0
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 0
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -20872,6 +20981,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 65,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -23110,6 +23224,11 @@
     "width": 21,
     "height": 13
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 13
+   },
    "props": {
     "text": "HDR",
     "viewDataKey": null,
@@ -23311,6 +23430,11 @@
    "atMostMeasure": {
     "at": 270,
     "width": 13,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
     "height": 15
    },
    "props": {
@@ -24462,6 +24586,11 @@
     "width": 0,
     "height": 0
    },
+   "contentMeasure": {
+    "at": 267,
+    "width": 267,
+    "height": 0
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -25039,6 +25168,11 @@
    "atMostMeasure": {
     "at": 394,
     "width": 50,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 117,
+    "width": 117,
     "height": 15
    },
    "props": {
@@ -27301,6 +27435,11 @@
     "width": 21,
     "height": 13
    },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
+    "height": 13
+   },
    "props": {
     "text": "HDR",
     "viewDataKey": null,
@@ -27504,6 +27643,11 @@
    "atMostMeasure": {
     "at": 252,
     "width": 13,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 0,
+    "width": 0,
     "height": 15
    },
    "props": {
@@ -28665,6 +28809,11 @@
    "atMostMeasure": {
     "at": 252,
     "width": 0,
+    "height": 0
+   },
+   "contentMeasure": {
+    "at": 249,
+    "width": 249,
     "height": 0
    },
    "props": {

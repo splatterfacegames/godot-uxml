@@ -5,7 +5,7 @@
   "theme": "unity-editor (dark)",
   "pixelsPerPoint": 1,
   "contextType": "Editor",
-  "dumpedAtUtc": "2026-11-06T12:43:03.1151886Z"
+  "dumpedAtUtc": "2026-11-06T16:01:08.8859109Z"
  },
  "panel": {
   "width": 700,
@@ -17,6 +17,20 @@
   "force-state 0/1",
   "force-state 0/2",
   "force-state 0/3"
+ ],
+ "ancestors": [
+  {
+   "type": "VisualElement",
+   "name": "uxml-dump-host",
+   "pseudoStates": "None",
+   "styleSheets": 0
+  },
+  {
+   "type": "EditorPanelRootElement",
+   "name": "unity-panel-container110",
+   "pseudoStates": "None",
+   "styleSheets": 1
+  }
  ],
  "focused": null,
  "elements": [
@@ -266,6 +280,11 @@
     "width": 34,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 34,
+    "width": 34,
+    "height": 15
+   },
    "props": {
     "text": "Hover",
     "viewDataKey": null,
@@ -465,6 +484,11 @@
    },
    "atMostMeasure": {
     "at": 700,
+    "width": 36,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 36,
     "width": 36,
     "height": 15
    },
@@ -1236,6 +1260,11 @@
     "width": 34,
     "height": 15
    },
+   "contentMeasure": {
+    "at": 34,
+    "width": 34,
+    "height": 15
+   },
    "props": {
     "text": "Hover",
     "viewDataKey": null,
@@ -1435,6 +1464,11 @@
    "atMostMeasure": {
     "at": 700,
     "width": 32,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 44,
+    "width": 44,
     "height": 15
    },
    "props": {
@@ -1637,6 +1671,11 @@
    },
    "atMostMeasure": {
     "at": 44,
+    "width": 32,
+    "height": 15
+   },
+   "contentMeasure": {
+    "at": 32,
     "width": 32,
     "height": 15
    },
@@ -2210,6 +2249,11 @@
    "atMostMeasure": {
     "at": 293,
     "width": 0,
+    "height": 0
+   },
+   "contentMeasure": {
+    "at": 8,
+    "width": 8,
     "height": 0
    },
    "props": {
@@ -2822,6 +2866,11 @@
     "width": 0,
     "height": 14
    },
+   "contentMeasure": {
+    "at": 246,
+    "width": 246,
+    "height": 14
+   },
    "props": {
     "text": "",
     "viewDataKey": null,
@@ -3022,6 +3071,11 @@
    "atMostMeasure": {
     "at": 293,
     "width": 0,
+    "height": 0
+   },
+   "contentMeasure": {
+    "at": 14,
+    "width": 14,
     "height": 0
    },
    "props": {
