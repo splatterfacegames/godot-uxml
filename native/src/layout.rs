@@ -357,7 +357,7 @@ impl Placement {
             // its fit (UxmlDocument._place_control does the same).
             let sn_fit = self.sn_fit.get_or_insert_with(|| StringName::from("uxml_fit"));
             let fh = self.fit_h[i];
-            let fitted = fh > 0.0;
+            let fitted = !fh.is_nan();
             let floored = d(c.get_size().y) > d(r.size.y) + 0.01;
             let call = (floored && (fitted || lbl.get_autowrap_mode() == godot::classes::text_server::AutowrapMode::OFF))
                 || (fitted && (fh != r.size.y || !lbl.has_meta(&*sn_fit)));
