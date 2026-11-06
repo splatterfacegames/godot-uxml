@@ -33,9 +33,10 @@ loads in 72 ms and scrolls in 2.9 ms.
 
 **Verified against Unity.** A dump tool runs each test case in Unity
 6000.3 and records every element, every rectangle and every resolved
-style value. godot-uxml matches Unity exactly in 123 of 127 cases. Over
-all cases, 3,261 of 3,261 elements, 69,004 of 69,004 style values and
-10,609 of 10,616 geometry values match. See [Fidelity](#fidelity).
+style value. godot-uxml matches Unity exactly in 169 of 170 cases. Over
+all cases, 4,188 of 4,188 elements, 281,164 of 281,165 style values,
+13,955 of 13,956 geometry values and 86 of 86 import diagnostics match.
+See [Fidelity](#fidelity).
 
 **Optimizations verified.** The optimizations do not change behaviour.
 Equivalence checks compare each optimized path with the original
@@ -223,14 +224,18 @@ style.
 
 | Measure | Match |
 | --- | ---: |
-| Cases, exact | 123 of 127 |
-| Elements | 3,261 of 3,261 |
-| Resolved style values | 69,004 of 69,004 |
-| Geometry values | 10,609 of 10,616 |
+| Cases, exact | 169 of 170 |
+| Elements | 4,188 of 4,188 |
+| Resolved style values | 281,164 of 281,165 |
+| Geometry values | 13,955 of 13,956 |
+| Import diagnostics | 86 of 86 |
 
-Of the 4 cases that differ, 1 differs only by pixel-grid rounding
-(0.2 px). [docs/parity.md](docs/parity.md) gives each difference and the
-cause.
+The cases cover the controls and every USS property, value form, keyword,
+selector and pseudo-class, layout edge cases, templates and transitions
+sampled at fixed times. The case that differs is a 1px text width that
+Unity itself does not lay out the same way in every run.
+[docs/parity.md](docs/parity.md) gives the cases, the differences found
+and the cause of the remaining one.
 
 ## Tests and benchmarks
 

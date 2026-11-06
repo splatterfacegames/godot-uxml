@@ -236,9 +236,16 @@ Unity UXML declares a binding as a UxmlObject child of the bound element:
   `checked`, `disabled`, `enabled`, `selected`, `root`. `enabled="false"`
   activates `:disabled` on the element and its subtree; other elements get
   `:enabled`. Runtime states (hover/focus/active/checked/selected) are
-  supplied per resolve via `options`.
+  supplied per resolve via `options`. As in Unity (measured:
+  `sel-pseudo`), `:selected` is the old name of `:checked` (one state: a
+  checked element matches both, and the runtime state `selected` is
+  `checked`), and `:inactive` matches every element that is not
+  `:active`.
 - `:root` names the element the stylesheet is attached to (sheet scope),
-  not the document root — warned once as `version-dependent`.
+  not the document root — warned once as `version-dependent`. Unity
+  matches `:root` only on the selector's subject: `:root > .a` and
+  `:root .a` match nothing (measured: `sel-root`), so the cascade drops
+  such selectors when it compiles the rules.
 - Dropped-with-warning (never a silent universal match): `[attr]`,
   `::pseudo-element`, `:functional()`, `+`/`~`, malformed combinator
   sequences, empty group members, and pseudo names outside the supported
@@ -285,6 +292,52 @@ Unity UXML declares a binding as a UxmlObject child of the bound element:
   missing property as the initial value, and children do not inherit a
   removed property. `all: initial` expands to `initial` for every
   supported longhand. Custom properties keep their values, as in Unity.
+  Unity applies `all: initial` over every other declaration of the
+  element: later rules, rules of higher specificity and the inline style
+  all lose to it (measured: `uss-all`, `uss-all-2`); the cascade ranks
+  its longhands above the inline style (`UssCascade.ALL_SPEC`). Unity
+  accepts only `all: initial` (`all: unset` is dropped with a
+  diagnostic).
+- `unset`: an inherited property keeps the inherited value, any other
+  property takes its initial value (measured: `uss-keywords`,
+  `uss-keywords-2`). Unity's importer warns about the keyword and still
+  applies it; godot-uxml gives the same diagnostic.
+- Unity's reading of values (`UssProperties.unity_value`, applied to each
+  longhand in `UssCascade._expand`, so both cascade backends and every
+  path through `var()` agree). Measured: `uss-invalid`, `uss-keywords-3`,
+  `uss-important`:
+  - `!important` is parsed and ignored: the value applies with no
+    precedence boost.
+  - A value Unity cannot read for its property still wins the cascade,
+    as the zero value of the property's type: enum index 0 for keywords
+    (`align-items: bogus` is `auto`, `flex-direction: bogus` is
+    `column`, `-unity-text-align: bogus` is `upper-left`; the enum orders
+    are in `UssProperties.ENUM_VALUES`), `0px` for lengths (`width: abc`),
+    `0` for numbers (`opacity: abc`, `flex-grow: abc`), transparent for
+    colors, `0px 0px` for `translate`.
+  - `inherit` is not a Unity keyword: it reads as that zero value
+    (`width: inherit` is 0, `color: inherit` is transparent,
+    `flex-direction: inherit` is `column`).
+  - `align-content` has no `space-between` / `space-around` in Unity
+    6000.3: those read as `auto` (laid out as `flex-start`).
+  - A slice value with a unit or a fraction reads as its integer
+    (`-unity-slice-left: 3px` is 3, `1.6` is 1), a unitless
+    `-unity-slice-scale` as that number, and a percentage spacing
+    (`letter-spacing: 10%`) as that number of px (the computed value
+    keeps `10%`).
+  Each such value is an `invalid-value` diagnostic at load, on the line
+  of the declaration, where Unity's importer warns
+  (`UxmlLoader._check_values`; `bench/parity.gd` checks every Unity
+  import warning against these, 86 of 86).
+- A dimension with a unit USS does not have (`em`, `rem`, `vh`, `vw`,
+  `pt`, ...) is an import error in Unity, and Unity drops the whole sheet
+  (measured: `uss-invalid-unit`). The loader does the same: a `malformed`
+  diagnostic, and none of the sheet's rules apply.
+- `font-size` percentages are computed in the cascade against the
+  inherited size (`150%` under `18px` is `27px`), and children inherit the
+  px value, as Unity's computed style does (measured: `uss-text-inherit`).
+- `flex: <basis>` sets `flex-grow: 0` (Unity; CSS would grow 1):
+  `flex: 25px` is `0 1 25px` (measured: `uss-shorthand`).
 - `transition` expands in the cascade into `transition-property`,
   `transition-duration`, `transition-delay` and
   `transition-timing-function` (comma-separated lists). The expansion
@@ -316,6 +369,10 @@ Unity UXML declares a binding as a UxmlObject child of the bound element:
 | `Assets/x`, `Packages/x` (no leading `/`) | relative to `from`'s directory, as Unity reads them (measured: `absolute-import-packages`, `imp-assets-noslash`, `imp-style-noslash`); `<root>/<same>` when that file does not exist or `from` is empty |
 | `res://`, `user://`, absolute FS path | as written, must stay under root |
 | relative | `from`'s directory, or root when `from` is empty |
+
+A missing `url()` file in a sheet is a `missing-file` diagnostic at load,
+as Unity's importer reports it; the runtime reports it again where the
+value applies.
 
 Canonicalization (`collapse_path`) runs before containment checks and
 file reads: `\` normalizes to `/`, URI schemes (`res://`, `user://`),
@@ -1102,7 +1159,7 @@ Behavior (`UxmlContainerBehaviors`):
 | Scroller | low and high RepeatButtons step by the page size (`*-page-size` of the ScrollView, else a tenth of the dragger, Unity's `k_ScrollPageOverlapFactor`; 20 for a standalone Scroller) after 250 ms and every 30 ms while held; a press on the track pages toward the pointer; the dragger follows the pointer; the focused ScrollerSlider takes `ui_*`, page, Home and End. A standalone Scroller sends `value_changed` |
 | ListView, TreeView, multi-column | selection by click (Ctrl adds, Shift extends for `selection-type="Multiple"`), `set_selection`, keys and controller (`ui_up`/`ui_down`, page, Home, End, Shift); the selected row gets `unity-collection-view__item--selected`, `:checked` (Unity 6000.3) and `:selected` (Unity's alias of `:checked`). Enter, controller A and a double click send `items_chosen`. The footer adds and removes items, the size field sets the count, `reorderable` rows move by drag (`item_index_changed`). TreeView: the toggle, `ui_right` and `ui_left` open and close items. Multi-column: a click on a sortable header sorts (`column_sorting_changed`; `sorting-mode="Default"` sorts the items source), the resize handles change a column width |
 | TabView | a click or `ui_accept` on a header selects its Tab (`value_changed` with the index); the other Tabs are `display: none`; the close button of a `closeable` Tab closes it (`tab_closed`); in a `reorderable` TabView a drag of a header moves its Tab (`tab_reordered`, `move_tab`). Headers are focusable so a controller can reach them |
-| TwoPaneSplitView | a drag on the dragline sets the fixed pane size (`set_split_dimension`), between 0 and the view size |
+| TwoPaneSplitView | a drag on the dragline sets the fixed pane size (`set_split_dimension`), between 0 and the view size; the dragline anchor sits past the fixed pane's margins, as Unity's PostDisplaySetup places it (measured: `ctl-more-2`, Label panes with theme margins) |
 | IMGUIContainer | `set_imgui_handler(name, draw, input)`: `draw.call(box, rect)` runs in the control's `_draw`, `input.call(box, event)` in its `gui_input`. Unity's `onGUIHandler` is C# IMGUI code, which Godot cannot run |
 
 ### Editor controls
@@ -1396,6 +1453,18 @@ no space), `visibility:hidden` (space kept, no input). Percentages
 resolve against the containing-block content box; percentages on an
 indefinite axis degrade to auto rather than exploding. Margins never
 enlarge the border box.
+
+With `pixel_grid` (the runtime default), margins and padding lay out on
+the pixel grid (rounded, halves up) and a nonzero border width is at
+least one pixel (`UxmlFlexLayout.grid_box`, `layout.rs grid_box`), as
+Unity lays them out: a 0.4px margin is 0, 2.5px is 3, a 0.4px border is
+1 (measured: `lay-fraction`; Unity also resolves those values). Sizes
+keep their fractions until the rect rounding.
+
+An aspect ratio sets a flex item's cross size from its main size, also
+over an explicit cross dimension, after the min/max bounds of the main
+axis (Yoga): `aspect-ratio: 0.5; height: 30px; min-width: 20px` in a
+row is 20 by 40 (measured: `lay-minmax`).
 
 Flex minimums follow the editor's Yoga layout (yoga-layout 3.2.1), not
 browser CSS: a flex item's automatic **content** minimum is **0**, so an
@@ -2226,6 +2295,9 @@ paths.
 
 ### Text
 
+- A percentage `letter-spacing`, `word-spacing` or
+  `-unity-paragraph-spacing` reads as that number of px, as Unity reads it
+  (its importer warns; measured: `uss-text-inherit`).
 - `letter-spacing` and `word-spacing` make a `FontVariation` over the
   element's font (with the element `-unity-font-style`), with `spacing_glyph` and
   `spacing_space`. Unity's standard text generator reads both lengths in
@@ -2266,6 +2338,24 @@ paths.
 - `-unity-text-generator` and `-unity-editor-text-rendering-mode` are
   accepted without a diagnostic and have no effect: Godot has one text
   shaper and one glyph rendering path per font.
+
+Measured resolved values that change no box (the parity harness compares
+every resolved value since unity/corpus): Unity clips the BaseField
+labels, the text fields, toggles, radio buttons, the button groups, the
+composite, popup and enum fields, the Scroller slider, the TabView
+content viewport, the TwoPaneSplitView and the multi-column header and
+cells (`overflow: hidden`, so a too-long field label is elided with its
+`text-overflow: ellipsis`); the popup and enum field inputs do not wrap;
+the composite field spacer is `visibility: hidden`; single-line text
+inputs shrink (`flex-shrink: 1`); the TwoPaneSplitView draglines have
+the resize cursors; the TabView header container animates `translate`
+(0.5s, ease-in-out); the ListView footer buttons are bold; the editor
+skin gives text inputs and selectable text the text cursor and dragger
+labels the slide-arrow cursor. Slice values of theme parts are Unity's
+where godot-uxml draws no image (the MinMaxSlider dragger, the
+ObjectField display and picker); parts drawn with godot-uxml's own
+images (the editor checkmark, the breadcrumbs) keep the slices those
+images need.
 
 ### Rich text
 
@@ -2319,6 +2409,11 @@ paths.
   `StyleBox` subclass. The same StyleBox draws on a UxmlBox and in the
   stylebox slots of a themed control, so padding still insets the
   control text through the content margins.
+- `background-position-x` / `-y` keep a keyword of the other axis that
+  the shorthand put there, as Unity does (`background-position: bottom
+  4px right` gives x `bottom 4px`, y `right`; measured:
+  `uss-background`). On either axis `left` and `top` measure from the
+  leading edge, `right` and `bottom` from the trailing edge.
 - `-unity-background-scale-mode` sets the four placement longhands, as
   Unity's `BackgroundPropertyHelper` does: `stretch-to-fill` is
   `100% 100%`, `scale-and-crop` is `cover` and `scale-to-fit` is

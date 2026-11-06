@@ -25,7 +25,12 @@
 //                  {"op": "tree-items", "target": "tree", "items": [{"id": 1, "data": "a", "children": [...]}], "expand": true},
 //                  {"op": "scroll", "target": "sv", "x": 0, "y": 40},
 //                  {"op": "select", "target": "list", "indices": [1]},
-//                  {"op": "wheel", "x": 10, "y": 10, "dy": 1} ] }
+//                  {"op": "wheel", "x": 10, "y": 10, "dy": 1},
+//                  {"op": "add-class", "target": "name", "class": "on"},
+//                  {"op": "remove-class", "target": "name", "class": "on"},
+//                  {"op": "advance", "ms": 250} ] }
+// The panel runs on a fake clock that only "advance" moves, so a case can
+// sample a transition at an exact time.
 // "target" names an element by `name`; "path" (e.g. "0/1/0") reaches parts.
 
 using System;
