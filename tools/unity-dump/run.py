@@ -19,6 +19,10 @@ Case sources (both may be given):
 
   python tools/unity-dump/run.py [--unity PATH] [--out bench/parity/unity]
                                  [--only a,b] [--no-reference]
+                                 [--render bench/pixels/unity]
+
+--render also draws each case to <DIR>/<case>.png and <case>.notext.png
+(Unity runs with a graphics device for it; see UxmlDump.RenderCase).
 """
 import argparse
 import json

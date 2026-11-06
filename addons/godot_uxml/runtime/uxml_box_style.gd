@@ -3,95 +3,157 @@ extends StyleBox
 ## A USS box as Unity 6000.3 draws it (measured with bench/pixels.py,
 ## case px-border): the background fills the whole border box, under the
 ## border; each side has its own colour, and two sides meet on the line
-## from the outer corner to the inner corner (a hard edge); a corner is an
-## ellipse whose radii are the USS radius clamped to half the width and
-## half the height (a radius over half the shorter side gives an elliptic
-## corner, not CSS's scaled circle); the inner corner has the radii less
-## the adjacent border widths. Curved edges are antialiased over one pixel
-## across the edge (Unity's arc coverage, clamp(0.5 - distance)); straight
-## edges on the pixel grid stay hard.
+## from the box corner to the point max(width, radius) in (a hard edge); a
+## corner is an ellipse whose radii are the USS radius clamped to half the
+## width and half the height (a radius over half the shorter side gives an
+## elliptic corner, not CSS's scaled circle); the inner corner has the
+## radii less the adjacent border widths. Curved edges are antialiased over
+## one pixel across the edge (Unity's arc coverage, clamp(0.5 - distance));
+## straight edges on the pixel grid stay hard.
 ##
 ## The applier uses this StyleBox for a box with a radius, with sides of
-## different colours or with a translucent border over a background;
-## other boxes keep StyleBoxFlat, which draws them the same. An optional
-## `image` StyleBox (a background image) draws between the background
-## colour and the border, as Unity draws it.
+## different colours or with a background under a border; other boxes keep
+## StyleBoxFlat, which draws them the same. An optional `image` StyleBox (a
+## background image) draws between the background colour and the border,
+## as Unity draws it.
+##
+## The geometry of a box at a size is shared by every UxmlBoxStyle with the
+## same geometry inputs (`_cache`): one ArrayMesh per part (background,
+## each side, the clipped image, the clip mask), its vertex colours white
+## with the coverage in alpha (the mask: the coverage in the colour
+## channels), drawn with the part's colour as the modulate. A colour change
+## (a hover, a colour transition) needs no new geometry; a new size builds
+## it once.
 
 var bg_color := Color(0, 0, 0, 0)
 ## Border widths: top, right, bottom, left (px, on the pixel grid).
-var widths := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
+var widths := _ZERO4
 ## Border colours: top, right, bottom, left.
-var colors: Array[Color] = [Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(0, 0, 0, 0)]
+var colors: Array = _CLEAR4
 ## Corner radii: top-left, top-right, bottom-right, bottom-left (px).
-var radii := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
+var radii := _ZERO4
 ## Drawn over the background colour and under the border.
 var image: StyleBox = null
-## Fill the inside of the border only, in bg_color fading to opaque
-## black over the antialiased edge, and draw no border: the mask of a
-## rounded overflow clip (UxmlClip).
+## Fill the inside of the border only, white fading to opaque black over
+## the antialiased edge, and draw no border: the mask of a rounded
+## overflow clip (UxmlClip).
 var fill_inner := false
 
-var _key := Rect2()
-var _img_points := PackedVector2Array()
-var _img_cols := PackedColorArray()
-var _img_uvs := PackedVector2Array()
-var _img_idx := PackedInt32Array()
-var _grow := 1.0
-var _points := PackedVector2Array()
-var _cols := PackedColorArray()
-var _idx := PackedInt32Array()
+## Mesh groups: background, the four sides (1 + side), the image, the mask.
+const _G_BG := 0
+const _G_IMAGE := 5
+const _G_MASK := 6
+const _GROUPS := 7
+static var _cache: Dictionary = {}
+const _CACHE_MAX := 2048
+
+var _geo = null
+# Build state (static: one build at a time): the arc compensation, the
+# vertices and colours of every group, and each group's indices.
+static var _grow := 1.0
+static var _pts := PackedVector2Array()
+static var _cols := PackedColorArray()
+static var _gi: Array = []
 
 const _EPS := 0.001
+static var _ZERO4 := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
+static var _CLEAR4: Array = [Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(0, 0, 0, 0), Color(0, 0, 0, 0)]
 ## Sides of the segments of each corner, before and after its split:
 ## [first side, second side] in top/right/bottom/left order.
 const _CORNER_SIDES := [[3, 0], [0, 1], [1, 2], [2, 3]]
+const _MITER := [Vector2(-1.0, -1.0), Vector2(1.0, -1.0), Vector2(1.0, 1.0), Vector2(-1.0, 1.0)]
 const _NUDGE := [Vector2(-0.007, 0.007), Vector2(-0.007, -0.007), Vector2(-0.007, 0.007), Vector2(-0.007, -0.007)]
 
 
 func _draw(to_canvas_item: RID, rect: Rect2) -> void:
 	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
 		return
-	if rect != _key or _points.is_empty() and _idx.is_empty():
-		_build(rect)
-		_key = rect
+	if rect.size != _geo_size or _geo == null:
+		_find_geo(rect.size)
+	var xf := Transform2D(0.0, rect.position)
+	if fill_inner:
+		_mesh(to_canvas_item, _G_MASK, xf, Color.WHITE, RID())
+		return
+	if bg_color.a > 0.0:
+		_mesh(to_canvas_item, _G_BG, xf, bg_color, RID())
 	if image != null:
-		# The image between the background colour and the border.
-		if bg_color.a > 0.0:
-			_draw_part(to_canvas_item, 0)
-		if not _img_idx.is_empty():
-			# A stretched image in a rounded box: clipped to the box's
-			# outline, as Unity clips it.
-			var tex: Texture2D = (image as StyleBoxTexture).texture
-			RenderingServer.canvas_item_add_triangle_array(to_canvas_item, _img_idx, _img_points,
-				_img_cols, _img_uvs, PackedInt32Array(), PackedFloat32Array(), tex.get_rid())
+		# The image between the background colour and the border; a
+		# stretched image in a rounded box is clipped to the box's outline,
+		# as Unity clips it.
+		if _img_round:
+			var st := image as StyleBoxTexture
+			_mesh(to_canvas_item, _G_IMAGE, xf, st.modulate_color, st.texture.get_rid())
 		else:
 			image.draw(to_canvas_item, rect)
-		_draw_part(to_canvas_item, 1)
-	elif not _idx.is_empty():
-		RenderingServer.canvas_item_add_triangle_array(to_canvas_item, _idx, _points, _cols)
-
-
-## Background (0) or border (1) only: the triangles from _bg_end on are
-## the border's.
-var _bg_end := 0
-
-
-func _draw_part(ci: RID, part: int) -> void:
-	var from := 0 if part == 0 else _bg_end
-	var to := _bg_end if part == 0 else _idx.size()
-	if to <= from:
+	if _uniform >= 0:
+		# Every drawn side has one colour: the sides are one mesh.
+		_mesh(to_canvas_item, 1, xf, colors[_uniform], RID())
 		return
-	var idx := _idx.slice(from, to)
-	RenderingServer.canvas_item_add_triangle_array(ci, idx, _points, _cols)
+	for k in 4:
+		if colors[k].a > 0.0:
+			_mesh(to_canvas_item, 1 + k, xf, colors[k], RID())
 
 
-## One sample of the box outline: the outer point, its outward normal, the
-## inner point and its normal, and the side of the segment that starts at
-## the sample.
-func _build(rect: Rect2) -> void:
-	_points = PackedVector2Array()
+## The shared geometry for a size (this style's inputs do not change after
+## the applier built it, so a size is the only key per instance).
+var _geo_size := Vector2(-1.0, -1.0)
+var _img_round := false
+## The side whose colour every drawn side has (-1: the sides differ).
+var _uniform := -1
+
+
+## Call after changing widths, radii, colours, image or fill_inner of a
+## style that has drawn.
+func invalidate() -> void:
+	_geo = null
+	_geo_size = Vector2(-1.0, -1.0)
+
+
+func _find_geo(size: Vector2) -> void:
+	var st := image as StyleBoxTexture
+	_img_round = st != null and st.texture != null 		and (radii[0] > 0.0 or radii[1] > 0.0 or radii[2] > 0.0 or radii[3] > 0.0) 		and st.texture_margin_left == 0.0 and st.texture_margin_top == 0.0 		and st.texture_margin_right == 0.0 and st.texture_margin_bottom == 0.0
+	_uniform = -1
+	for k in 4:
+		if widths[k] > 0.0 and colors[k].a > 0.0:
+			if _uniform < 0:
+				_uniform = k
+			elif colors[k] != colors[_uniform]:
+				_uniform = -1
+				break
+	var flags := (1.0 if fill_inner else 0.0) + (2.0 if _img_round else 0.0) + (4.0 if _uniform >= 0 else 0.0)
+	for k in 4:
+		if widths[k] > 0.0 and colors[k].a >= 1.0:
+			flags += float(8 << k)
+	var key := PackedFloat64Array([size.x, size.y, widths[0], widths[1], widths[2], widths[3],
+		radii[0], radii[1], radii[2], radii[3], flags])
+	var hit = _cache.get(key)
+	if hit == null:
+		if _cache.size() >= _CACHE_MAX:
+			_cache.clear()
+		hit = _build(Rect2(Vector2.ZERO, size), _img_round, _uniform >= 0)
+		_cache[key] = hit
+	_geo = hit
+	_geo_size = size
+
+
+func _mesh(ci: RID, g: int, xf: Transform2D, modulate: Color, tex: RID) -> void:
+	var m = (_geo as Array)[g]
+	if m != null:
+		RenderingServer.canvas_item_add_mesh(ci, (m as ArrayMesh).get_rid(), xf, modulate, tex)
+
+
+## The box at the origin as meshes, one per group (null for an empty one).
+## The outline is a list of samples: the outer point, its outward normal,
+## the inner point and its normal, the side of the segment that starts at
+## the sample, and the corner's miter.
+func _build(rect: Rect2, img_round: bool, uniform: bool) -> Array:
+	_pts = PackedVector2Array()
 	_cols = PackedColorArray()
-	_idx = PackedInt32Array()
+	_gi = []
+	# Indices in plain Arrays while building (reference types: an append
+	# does not copy).
+	for g in _GROUPS:
+		_gi.append([])
 	var x0 := rect.position.x
 	var y0 := rect.position.y
 	var x1 := rect.end.x
@@ -116,7 +178,7 @@ func _build(rect: Rect2) -> void:
 	var sx := [-1.0, 1.0, 1.0, -1.0]
 	var sy := [-1.0, -1.0, 1.0, 1.0]
 	var a0s := [PI, PI * 1.5, 0.0, PI * 0.5]
-	var samples: Array = []  # [outer, n_outer, inner, n_inner, side]
+	var samples: Array = []
 	for k in 4:
 		var cx: float = corner_x[k]
 		var cy: float = corner_y[k]
@@ -194,97 +256,102 @@ func _build(rect: Rect2) -> void:
 			samples.append(_sample(cx, cy, orx, ory, icx, icy, irx, iry, a0 + PI * 0.5 * u,
 				a0 + PI * 0.5 * ui, sharp, isharp, k, second if placed else first))
 	var count := samples.size()
-	# Background: a fan over the outline inset by half a pixel, and a
-	# feather out to half a pixel outside.
-	# The background fills the box. Under a side with an opaque border its
-	# edge is half a pixel inside the outer edge; elsewhere (no border, or a
-	# translucent one) on the outer edge (measured: the first pixel under
-	# an opaque border is half background, a translucent border shows the
-	# background out to its antialiased outer pixels). The edge is
-	# antialiased over a pixel; a square corner has none on the grid.
+	var full := Color(1.0, 1.0, 1.0, 1.0)
+	var none := Color(1.0, 1.0, 1.0, 0.0)
+	var centre := Vector2(x0 + w * 0.5, y0 + h * 0.5)
 	if fill_inner:
 		# A mask: the coverage in the colour channels, alpha 1 (UxmlClip).
-		var centre := Vector2(x0 + w * 0.5, y0 + h * 0.5)
-		var transparent := Color(0.0, 0.0, 0.0, 1.0)
+		var black := Color(0.0, 0.0, 0.0, 1.0)
 		for i in count:
 			var s: Array = samples[i]
 			var t: Array = samples[(i + 1) % count]
 			var p0: Vector2 = s[2] - s[3] * 0.5
 			var p1: Vector2 = t[2] - t[3] * 0.5
 			if p0.distance_squared_to(p1) > 1e-8:
-				_tri(centre, p0, p1, bg_color, bg_color, bg_color)
+				_tri(_G_MASK, centre, p0, p1, full, full, full)
 			if s[3] != Vector2.ZERO or t[3] != Vector2.ZERO:
-				_quad(p0, p1, t[2] + t[3] * 0.5, s[2] + s[3] * 0.5,
-					bg_color, bg_color, transparent, transparent)
-		_bg_end = _idx.size()
-		return
-	if bg_color.a > 0.0:
-		var centre := Vector2(x0 + w * 0.5, y0 + h * 0.5)
-		var transparent := Color(bg_color, 0.0)
-		for i in count:
-			var s: Array = samples[i]
-			var t: Array = samples[(i + 1) % count]
-			var side: int = s[4]
-			var under := widths[side] > 0.0 and colors[side].a >= 1.0
-			var shift := 0.5 if under else 0.0
-			var n0: Vector2 = s[1] if s[1] != Vector2.ZERO else (s[5] if under else Vector2.ZERO)
-			var n1: Vector2 = t[1] if t[1] != Vector2.ZERO else (t[5] if under else Vector2.ZERO)
-			var p0: Vector2 = s[0] - n0 * (0.5 + shift)
-			var p1: Vector2 = t[0] - n1 * (0.5 + shift)
-			if p0.distance_squared_to(p1) > 1e-8:
-				_tri(centre, p0, p1, bg_color, bg_color, bg_color)
-			if n0 != Vector2.ZERO or n1 != Vector2.ZERO:
-				_quad(p0, p1, t[0] + n1 * (0.5 - shift), s[0] + n0 * (0.5 - shift),
-					bg_color, bg_color, transparent, transparent)
-	_bg_end = _idx.size()
-	_img_points = PackedVector2Array()
-	_img_cols = PackedColorArray()
-	_img_uvs = PackedVector2Array()
-	_img_idx = PackedInt32Array()
-	var st := image as StyleBoxTexture
-	if st != null and st.texture != null and (radii[0] > 0.0 or radii[1] > 0.0 or radii[2] > 0.0 or radii[3] > 0.0) 			and st.texture_margin_left == 0.0 and st.texture_margin_top == 0.0 			and st.texture_margin_right == 0.0 and st.texture_margin_bottom == 0.0:
-		_build_image(samples, rect, st.modulate_color)
-	# Border: per segment, in the colour of its side: the strip between the
-	# outer and the inner outline, feathered on both edges.
+				_quad(_G_MASK, p0, p1, t[2] + t[3] * 0.5, s[2] + s[3] * 0.5, full, full, black, black)
+		return _meshes(rect.size)
+	# The background fills the box. Under a side with an opaque border its
+	# edge is half a pixel inside the outer edge; elsewhere (no border, or a
+	# translucent one) on the outer edge (measured: the first pixel under
+	# an opaque border is half background, a translucent border shows the
+	# background out to its antialiased outer pixels). The edge is
+	# antialiased over a pixel; a square corner has none on the grid.
 	for i in count:
 		var s: Array = samples[i]
 		var t: Array = samples[(i + 1) % count]
 		var side: int = s[4]
-		var c: Color = colors[side]
-		if c.a <= 0.0:
-			continue
-		var ends: Array = [_edges(s), _edges(t)]
-		var e0: Array = ends[0]
-		var e1: Array = ends[1]
-		var c0 := Color(c, c.a * float(e0[4]))
-		var c1 := Color(c, c.a * float(e1[4]))
-		var z0 := Color(c, 0.0)
-		# outer feather, body, inner feather
-		_quad(e0[0], e1[0], e1[1], e0[1], z0, z0, c1, c0)
-		_quad(e0[1], e1[1], e1[2], e0[2], c0, c1, c1, c0)
-		_quad(e0[2], e1[2], e1[3], e0[3], c0, c1, z0, z0)
-
-
-## The image of a rounded box: the outline's fan and its feather, with the
-## texture stretched over the box.
-func _build_image(samples: Array, rect: Rect2, tint: Color) -> void:
-	var count := samples.size()
-	var centre := rect.get_center()
-	var clear := Color(tint, 0.0)
-	var add := func(p: Vector2, c: Color) -> int:
-		_img_points.append(p)
-		_img_cols.append(c)
-		_img_uvs.append(((p - rect.position) / rect.size).clamp(Vector2.ZERO, Vector2.ONE))
-		return _img_points.size() - 1
-	var ci: int = add.call(centre, tint)
+		var under: bool = widths[side] > 0.0 and colors[side].a >= 1.0
+		var shift := 0.5 if under else 0.0
+		var n0: Vector2 = s[1] if s[1] != Vector2.ZERO else (s[5] if under else Vector2.ZERO)
+		var n1: Vector2 = t[1] if t[1] != Vector2.ZERO else (t[5] if under else Vector2.ZERO)
+		var p0: Vector2 = s[0] - n0 * (0.5 + shift)
+		var p1: Vector2 = t[0] - n1 * (0.5 + shift)
+		if p0.distance_squared_to(p1) > 1e-8:
+			_tri(_G_BG, centre, p0, p1, full, full, full)
+		if n0 != Vector2.ZERO or n1 != Vector2.ZERO:
+			_quad(_G_BG, p0, p1, t[0] + n1 * (0.5 - shift), s[0] + n0 * (0.5 - shift), full, full, none, none)
+	if img_round:
+		# The image of a rounded box: the outline's fan and its feather.
+		for i in count:
+			var s: Array = samples[i]
+			var t: Array = samples[(i + 1) % count]
+			var a: Vector2 = s[0] - s[1] * 0.5
+			var b: Vector2 = t[0] - t[1] * 0.5
+			_tri(_G_IMAGE, centre, a, b, full, full, full)
+			_quad(_G_IMAGE, a, b, t[0] + t[1] * 0.5, s[0] + s[1] * 0.5, full, full, none, none)
+	# Border: per segment, in the group of its side: the strip between the
+	# outer and the inner outline, feathered on both edges.
+	var edges: Array = []
+	for i in count:
+		edges.append(_edges(samples[i]))
 	for i in count:
 		var s: Array = samples[i]
 		var t: Array = samples[(i + 1) % count]
-		var a: int = add.call(s[0] - s[1] * 0.5, tint)
-		var b: int = add.call(t[0] - t[1] * 0.5, tint)
-		var c: int = add.call(t[0] + t[1] * 0.5, clear)
-		var d: int = add.call(s[0] + s[1] * 0.5, clear)
-		_img_idx.append_array([ci, a, b, a, b, c, a, c, d])
+		var side: int = s[4]
+		if widths[side] <= 0.0 and _thick(s) < _EPS and _thick(t) < _EPS:
+			continue
+		if uniform and colors[side].a <= 0.0:
+			continue
+		var g := 1 if uniform else 1 + side
+		var e0: Array = edges[i]
+		var e1: Array = edges[(i + 1) % count]
+		var c0 := Color(1.0, 1.0, 1.0, float(e0[4]))
+		var c1 := Color(1.0, 1.0, 1.0, float(e1[4]))
+		# outer feather, body, inner feather
+		_quad(g, e0[0], e1[0], e1[1], e0[1], none, none, c1, c0)
+		_quad(g, e0[1], e1[1], e1[2], e0[2], c0, c1, c1, c0)
+		_quad(g, e0[2], e1[2], e1[3], e0[3], c0, c1, none, none)
+	return _meshes(rect.size)
+
+
+## The build buffers as one ArrayMesh per group (null for an empty one).
+## Every mesh has all the vertices; its indices pick its triangles.
+func _meshes(size: Vector2) -> Array:
+	var out: Array = []
+	for g in _GROUPS:
+		var idx: Array = _gi[g]
+		if idx.is_empty():
+			out.append(null)
+			continue
+		var arr: Array = []
+		arr.resize(Mesh.ARRAY_MAX)
+		arr[Mesh.ARRAY_VERTEX] = _pts
+		arr[Mesh.ARRAY_COLOR] = _cols
+		arr[Mesh.ARRAY_INDEX] = PackedInt32Array(idx)
+		if g == _G_IMAGE:
+			# The box stretched over the texture.
+			var uvs := PackedVector2Array()
+			uvs.resize(_pts.size())
+			for k in _pts.size():
+				uvs[k] = (_pts[k] / size).clamp(Vector2.ZERO, Vector2.ONE)
+			arr[Mesh.ARRAY_TEX_UV] = uvs
+		var m := ArrayMesh.new()
+		m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		out.append(m)
+	_gi = []
+	return out
 
 
 ## The border's thickness at a sample.
@@ -292,17 +359,6 @@ static func _thick(s: Array) -> float:
 	var n: Vector2 = s[1]
 	var d: Vector2 = s[0] - s[2]
 	return d.dot(n) if n != Vector2.ZERO else d.length()
-
-
-## `inner` moved `by` px along `n`, at most to `outer`.
-static func _toward(inner: Vector2, n: Vector2, outer: Vector2, by: float) -> Vector2:
-	if n == Vector2.ZERO:
-		# A square inner corner: each axis on its own, toward the outer one.
-		var d := outer - inner
-		return Vector2(inner.x + signf(d.x) * minf(by, absf(d.x)),
-			inner.y + signf(d.y) * minf(by, absf(d.y)))
-	var room := (outer - inner).dot(n)
-	return inner + n * minf(by, maxf(room, 0.0))
 
 
 ## The four points of the border strip at a sample, from outside in, and
@@ -330,7 +386,7 @@ func _sample(cx: float, cy: float, orx: float, ory: float, icx: float, icy: floa
 	var no := Vector2.ZERO if sharp else Vector2(cos(a) / orx, sin(a) / ory).normalized()
 	var inner := Vector2(icx + irx * _grow * cos(ai), icy + iry * _grow * sin(ai))
 	var ni := Vector2.ZERO if isharp else Vector2(cos(ai) / irx, sin(ai) / iry).normalized()
-	return [o, no, inner, ni, side, Vector2([-1.0, 1.0, 1.0, -1.0][k], [-1.0, -1.0, 1.0, 1.0][k])]
+	return [o, no, inner, ni, side, _MITER[k]]
 
 
 ## Where the line from `corner` along `dir` meets the ellipse arc of the
@@ -359,32 +415,34 @@ static func _arc_split(corner: Vector2, dir: Vector2, c: Vector2, rx: float, ry:
 	return clampf((ang - a0) / (PI * 0.5), 0.0, 1.0)
 
 
-func _tri(a: Vector2, b: Vector2, c: Vector2, ca: Color, cb: Color, cc: Color) -> void:
-	var base := _points.size()
-	_points.append(a)
-	_points.append(b)
-	_points.append(c)
+func _tri(g: int, a: Vector2, b: Vector2, c: Vector2, ca: Color, cb: Color, cc: Color) -> void:
+	var base := _pts.size()
+	_pts.append(a)
+	_pts.append(b)
+	_pts.append(c)
 	_cols.append(ca)
 	_cols.append(cb)
 	_cols.append(cc)
-	_idx.append(base)
-	_idx.append(base + 1)
-	_idx.append(base + 2)
+	var ix: Array = _gi[g]
+	ix.append(base)
+	ix.append(base + 1)
+	ix.append(base + 2)
 
 
-func _quad(a: Vector2, b: Vector2, c: Vector2, d: Vector2, ca: Color, cb: Color, cc: Color, cd: Color) -> void:
-	var base := _points.size()
-	_points.append(a)
-	_points.append(b)
-	_points.append(c)
-	_points.append(d)
+func _quad(g: int, a: Vector2, b: Vector2, c: Vector2, d: Vector2, ca: Color, cb: Color, cc: Color, cd: Color) -> void:
+	var base := _pts.size()
+	_pts.append(a)
+	_pts.append(b)
+	_pts.append(c)
+	_pts.append(d)
 	_cols.append(ca)
 	_cols.append(cb)
 	_cols.append(cc)
 	_cols.append(cd)
-	_idx.append(base)
-	_idx.append(base + 1)
-	_idx.append(base + 2)
-	_idx.append(base)
-	_idx.append(base + 2)
-	_idx.append(base + 3)
+	var ix: Array = _gi[g]
+	ix.append(base)
+	ix.append(base + 1)
+	ix.append(base + 2)
+	ix.append(base)
+	ix.append(base + 2)
+	ix.append(base + 3)

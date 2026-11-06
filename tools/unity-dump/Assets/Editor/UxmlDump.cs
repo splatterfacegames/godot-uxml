@@ -10,6 +10,16 @@
 //   Unity.exe -batchmode -nographics -projectPath tools/unity-dump
 //     -executeMethod UxmlDump.Run -dumpCases Assets/Cases -dumpOut <dir> -quit
 //
+// With -renderOut <dir> (run.py --render) each case is also drawn to
+// <dir>/<case>.png and <case>.notext.png (every text colour transparent)
+// for bench/pixels.py. Rendering needs a graphics device: no -nographics.
+// A runtime panel draws through UIElementsRuntimeUtility.RepaintPanel and
+// RenderPanel into its PanelSettings render texture (depth and stencil: a
+// rounded overflow clip draws a stencil mask); an editor panel through
+// Panel.Repaint(Event) and Panel.Render() into a render texture with the
+// panel's clearSettings. Both clear to an opaque colour (white, or the
+// editor window colour of the skin) and read back RGBA8 (gamma).
+//
 // A case is a folder Assets/Cases/<name>/ with <name>.uxml, an optional
 // <name>.uss (attached to the case root) and an optional <name>.json sidecar:
 //   { "width": 400, "height": 300,

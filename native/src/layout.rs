@@ -285,6 +285,10 @@ pub struct LayoutIn {
     pub labels: Vec<Option<Gd<Label>>>,
     /// Rich text Labels (RichTextLabel): wrap-volatile like Labels.
     pub rich: Vec<Option<Gd<RichTextLabel>>>,
+    /// Buttons (Button and its subclasses): fitted to their box by the
+    /// placement (UxmlStyleApplier.fit_button) and, with children, not
+    /// measured.
+    pub buttons: Vec<bool>,
     /// Some control carries `uxml_clip_text` (overflow: hidden text); while
     /// false the measurer skips the meta check (UxmlStyleApplier.clip_texts).
     pub text_clip: bool,
@@ -480,7 +484,7 @@ impl Placement {
                 if self.bfit.len() != io.controls.len() {
                     self.bfit = vec![false; io.controls.len()];
                 }
-                if (c.get_size() != r.size || self.bfit[i]) && c.is_class("Button") {
+                if io.buttons[i] && (self.bfit[i] || c.get_size() != r.size) {
                     let mut a = a.clone();
                     let fitted = a.call("fit_button", &[c.to_variant(), r.size.to_variant(), start.to_variant(), end.to_variant()]);
                     self.bfit[i] = fitted.try_to::<bool>().unwrap_or(false);
@@ -563,9 +567,6 @@ pub struct Pass<'a> {
     /// Per-pass memo: the control carries `uxml_clip_text` (metas do not
     /// change during a pass).
     cliptext_m: Vec<Option<bool>>,
-    /// Whether element i's control draws text (Label, RichTextLabel,
-    /// Button): Unity measures text only on leaves.
-    textish_m: Vec<Option<bool>>,
     /// Some element is best-fit text; per-pass memo of hint_sub.
     any_hinted: bool,
     hs_m: Vec<Option<bool>>,
@@ -645,7 +646,6 @@ impl<'a> Pass<'a> {
             meas_m: (0..n).map(|_| vec![]).collect(),
             margins_m: vec![None; n],
             cliptext_m: vec![None; n],
-            textish_m: vec![None; n],
             fit_m: vec![None; n],
             any_hinted,
             hs_m: vec![None; n],
@@ -1407,15 +1407,7 @@ impl<'a> Pass<'a> {
             let (nat, mtx, mty) = self.measure_content(i, Vector2::new(f(cw), f(ch)), lx, ly);
             // UxmlDocument._measure_leaf: a text control with children
             // measures nothing (Unity measures text on leaves only).
-            let textish = match self.textish_m[i] {
-                Some(t) => t,
-                None => {
-                    let t = self.io.labels[i].is_some() || self.io.rich[i].is_some()
-                        || self.io.controls[i].as_ref().is_some_and(|c| c.is_class("Button"));
-                    self.textish_m[i] = Some(t);
-                    t
-                }
-            };
+            let textish = self.io.labels[i].is_some() || self.io.rich[i].is_some() || self.io.buttons[i];
             let chrome = if textish { Vector2::ZERO } else { self.measure_call(i, cw) };
             bw = if w >= 0.0 { w } else { gmax(d(nat.x), d(chrome.x)) + in_w };
             bh = if h >= 0.0 { h } else { gmax(d(nat.y), d(chrome.y)) + in_h };

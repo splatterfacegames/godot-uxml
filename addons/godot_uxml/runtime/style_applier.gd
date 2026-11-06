@@ -382,6 +382,8 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 			if sb == null and c is BaseButton:
 				sb = _NO_BOX
 			for slot in slots:
+				if sb == _NO_BOX and c.has_theme_stylebox_override(slot) and c.get_theme_stylebox(slot) == sb:
+					continue  # installed: a new override would update the theme again
 				if sb != null:
 					c.add_theme_stylebox_override(slot, sb)
 				else:

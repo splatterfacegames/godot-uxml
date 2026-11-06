@@ -99,6 +99,7 @@ func _update_rect() -> void:
 	if _mask != null:
 		RenderingServer.canvas_item_clear(item)
 		_mask.widths = PackedFloat64Array([inset.y, inset.z, inset.w, inset.x])
+		_mask.invalidate()
 		_mask.draw(item, Rect2(Vector2.ZERO, host.size))
 
 

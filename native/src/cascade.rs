@@ -1817,8 +1817,10 @@ impl UxmlNativeCascade {
         let mut labels = vec![];
         let mut rich = vec![];
         let mut texrects = vec![];
+        let mut buttons = vec![];
         for (k, v) in controls.iter_shared().enumerate() {
             let c = v.try_to::<Gd<godot::classes::Control>>().ok();
+            buttons.push(c.as_ref().is_some_and(|c| c.clone().try_cast::<godot::classes::Button>().is_ok()));
             labels.push(c.as_ref().and_then(|c| c.clone().try_cast::<godot::classes::Label>().ok()));
             rich.push(c.as_ref().and_then(|c| c.clone().try_cast::<godot::classes::RichTextLabel>().ok()));
             ctl.push(c);
@@ -1831,6 +1833,7 @@ impl UxmlNativeCascade {
             boxed: ks.iter().map(|&b| b & 1 != 0).collect(),
             labels,
             rich,
+            buttons,
             text_clip: false,
             pixel_grid: false,
             auto_size: None,
