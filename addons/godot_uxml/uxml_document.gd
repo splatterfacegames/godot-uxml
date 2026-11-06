@@ -646,7 +646,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			_resolver, _doc.path, _doc.source, _rt_warnings
 		)
 		_applier.element_paths = _doc.element_paths
-		_applier.unity_line_metrics = theme_path == UxmlTheme.DEFAULT and OS.get_environment("NOLINES") == ""
+		_applier.unity_line_metrics = theme_path == UxmlTheme.DEFAULT
 	var need_layout := _force_layout or _full_apply or _unsettled
 	var applied: Array = []
 	var fresh := 0  # applied[0..fresh) changed this pass; the rest are re-applies
