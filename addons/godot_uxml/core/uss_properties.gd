@@ -562,7 +562,7 @@ static func unity_value(prop: String, value: String) -> String:
 	var kw = ENUM_VALUES.get(prop)
 	if kw != null:
 		if (kw as Array).has(lv):
-			return lv if lv == v else lv
+			return lv
 		return kw[0]
 	if LENGTH_PROPS.has(prop):
 		if lv == "auto" or lv == "none":
