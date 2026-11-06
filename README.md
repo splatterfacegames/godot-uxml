@@ -33,9 +33,11 @@ loads in 72 ms and scrolls in 2.9 ms.
 
 **Verified against Unity.** A dump tool runs each test case in Unity
 6000.3 and records every element, every rectangle and every resolved
-style value. godot-uxml matches Unity exactly in 169 of 170 cases. Over
-all cases, 4,188 of 4,188 elements, 281,164 of 281,165 style values,
-13,955 of 13,956 geometry values and 86 of 86 import diagnostics match.
+style value. godot-uxml matches Unity exactly in 176 of 177 cases. Over
+all cases, 4,329 of 4,329 elements, 302,242 of 302,243 style values,
+14,519 of 14,520 geometry values and 86 of 86 import diagnostics match.
+Unity also renders every case, and `bench/pixels.py` compares the pixels:
+99.1% of the box pixels match exactly, 99.3% within one pixel.
 See [Fidelity](#fidelity).
 
 **Optimizations verified.** The optimizations do not change behaviour.
@@ -224,14 +226,13 @@ style.
 
 | Measure | Match |
 | --- | ---: |
-| Cases, exact | 169 of 170 |
-| Elements | 4,188 of 4,188 |
-| Resolved style values | 281,164 of 281,165 |
-| Geometry values | 13,955 of 13,956 |
+| Cases, exact | 176 of 177 |
+| Elements | 4,329 of 4,329 |
+| Resolved style values | 302,242 of 302,243 |
+| Geometry values | 14,519 of 14,520 |
 | Import diagnostics | 86 of 86 |
 
-The cases cover the controls and every USS property except `filter` and
-`-unity-material`, and every value form, keyword,
+The cases cover the controls and every USS property, and every value form, keyword,
 selector and pseudo-class, layout edge cases, templates and transitions
 sampled at fixed times. The case that differs is a 1px text width that
 Unity does not lay out the same way in every run.
