@@ -16,6 +16,8 @@ use godot::prelude::*;
 use crate::cascade::Cascade;
 
 const EPS: f64 = 0.01;
+/// flex_layout.gd NO_BOUND: no bound changes this axis of a measure.
+const NO_BOUND: f64 = -1.0e30;
 pub const LAYOUT_PROPS: [&str; 37] = [
     "width", "height", "min-width", "min-height", "max-width", "max-height", "flex-basis",
     "padding-top", "padding-right", "padding-bottom", "padding-left",
@@ -297,6 +299,12 @@ pub struct LayoutIn {
     /// -unity-text-auto-size (UxmlStyleApplier.auto_sizes > 0): its
     /// autosize_measure / autosize_place serve both layout paths.
     pub auto_size: Option<Gd<Object>>,
+    /// Max-content widths of wrapping Labels by text (label_max_content),
+    /// kept across layouts; layout_place drops the entries of re-applied
+    /// controls and of controls whose insets changed. Used only while
+    /// `maxc_on` (the placing layout).
+    pub maxc: std::cell::RefCell<Vec<Option<(GString, f64)>>>,
+    pub maxc_on: std::cell::Cell<bool>,
 }
 
 /// Native placement state: the last layout and the insets last handed to
@@ -306,6 +314,8 @@ pub struct Placement {
     pub last: Option<Out>,
     hooked: Vec<Option<(Vector2, Vector2)>>,
     sn_fit: Option<StringName>,
+    /// The height each Label was last fitted for (NaN: not fitted).
+    fit_h: Vec<f32>,
 }
 
 impl Placement {
@@ -337,10 +347,27 @@ impl Placement {
         if let (Some(lbl), Some(a)) = (&io.labels[i], applier) {
             // UxmlDocument._place_control: Godot floors a Label at one text
             // line; Unity's box can be shorter (UxmlStyleApplier.fit_label).
+            // A fitted Label is fitted again only for a new height.
+            if self.fit_h.len() != io.controls.len() {
+                self.fit_h = vec![f32::NAN; io.controls.len()];
+            }
+            // fit_h: the height of the last fit_label call, positive when the
+            // Label got a fit, negative when it could not (wrapping or
+            // multi-line text); NaN: never called. A Label is fitted again
+            // for a new height, or when a restyle dropped its fit.
             let sn_fit = self.sn_fit.get_or_insert_with(|| StringName::from("uxml_fit"));
-            if d(c.get_size().y) > d(r.size.y) + 0.01 || lbl.has_meta(&*sn_fit) {
+            let fh = self.fit_h[i];
+            let call = if fh.is_nan() {
+                d(c.get_size().y) > d(r.size.y) + 0.01
+            } else if fh.abs() != r.size.y {
+                true
+            } else {
+                fh > 0.0 && !lbl.has_meta(&*sn_fit)
+            };
+            if call {
                 let mut a = a.clone();
                 a.call("fit_label", &[c.to_variant(), r.size.to_variant()]);
+                self.fit_h[i] = if lbl.has_meta(&*sn_fit) { r.size.y } else { -r.size.y };
             }
         }
         let Some((start, end)) = out.insets[i] else { return };
@@ -348,6 +375,12 @@ impl Placement {
             self.hooked = vec![None; io.controls.len()];
         }
         let changed = force || self.hooked[i] != Some((start, end));
+        if changed && !force {
+            // New insets give the Label new stylebox margins.
+            if let Some(e) = io.maxc.borrow_mut().get_mut(i) {
+                *e = None;
+            }
+        }
         if io.fields[i] {
             if changed {
                 c.upcast::<Object>().call("set_content_insets", &[start.to_variant(), end.to_variant()]);
@@ -407,6 +440,10 @@ struct MemoE {
     kh: f64,
     bx: f64,
     by: f64,
+    tx: f64,
+    ty: f64,
+    lin_w: f64,
+    lin_h: f64,
     entry: Vec<f64>,
     out: Vector2,
     exit: Vec<f64>,
@@ -434,6 +471,14 @@ pub struct Pass<'a> {
     /// Per-pass memo: the control carries `uxml_clip_text` (metas do not
     /// change during a pass).
     cliptext_m: Vec<Option<bool>>,
+    /// Some element is best-fit text; per-pass memo of hint_sub.
+    any_hinted: bool,
+    hs_m: Vec<Option<bool>>,
+    pure_m: Vec<Option<(f64, Vector2)>>,
+    /// Per-pass memo: the max-content width of a wrapping Label.
+    maxc_m: Vec<Option<f32>>,
+    /// "font", "font_size", "normal".
+    sn_names: [StringName; 4],
     /// Per-pass memo: the unfitted height of a fitted Label, -1 for a Label
     /// without `uxml_fit` (UxmlStyleApplier.fit_label, unfitted_height).
     fit_m: Vec<Option<f64>>,
@@ -478,10 +523,11 @@ impl<'a> Pass<'a> {
                 };
                 if wraps {
                     volatile[i] = true;
-                    vw[i] = d(ctl.get_size().x);
+                    vw[i] = d(ctl.get_size().x) - hpad(ctl, &StringName::from("normal"), &StringName::from("uxml_margins"));
                 }
             }
         }
+        let any_hinted = hinted.iter().any(|&h| h);
         Pass {
             c,
             io,
@@ -502,6 +548,11 @@ impl<'a> Pass<'a> {
             margins_m: vec![None; n],
             cliptext_m: vec![None; n],
             fit_m: vec![None; n],
+            any_hinted,
+            hs_m: vec![None; n],
+            pure_m: vec![None; n],
+            maxc_m: vec![None; n],
+            sn_names: [StringName::from("font"), StringName::from("font_size"), StringName::from("normal"), StringName::from("uxml_maxc")],
             hinted,
             volatile,
             vw,
@@ -944,8 +995,10 @@ impl<'a> Pass<'a> {
     fn measure_leaf(&mut self, i: usize, content_w: f64) -> Vector2 {
         let Some(c) = self.io.controls[i].clone() else { return Vector2::ZERO };
         if self.volatile[i] && content_w >= 0.0 {
+            // UxmlDocument._measure_leaf: the content width plus the USS
+            // padding and border.
             let mut s = c.get_size();
-            s.x = f(content_w);
+            s.x = f(content_w + hpad(&c, &self.sn_normal, &self.sn_margins));
             let mut cm = c.clone();
             cm.set_size(s);
         }
@@ -985,8 +1038,17 @@ impl<'a> Pass<'a> {
         if let Some(lbl) = self.io.labels[i].clone() {
             if self.volatile[i] {
                 // Unity measures wrapping text at its max-content width
-                // (UxmlDocument._measure_leaf).
-                ms.x = f(label_max_content(&lbl));
+                // (UxmlDocument._measure_leaf). It does not depend on the
+                // width: once per pass.
+                let mc = match self.maxc_m[i] {
+                    Some(v) => v,
+                    None => {
+                        let v = f(self.max_content(i, &lbl));
+                        self.maxc_m[i] = Some(v);
+                        v
+                    }
+                };
+                ms.x = mc;
             }
             let sn_fit = &self.sn_fit;
             let fit_h = *self.fit_m[i].get_or_insert_with(|| {
@@ -1023,7 +1085,17 @@ impl<'a> Pass<'a> {
 
     fn measure_call(&mut self, i: usize, hint: f64) -> Vector2 {
         if !self.volatile[i] {
-            return self.measure_leaf(i, hint);
+            // A pure measure repeats within a pass: one engine call per
+            // element and argument (only best-fit text reads the argument).
+            let arg = if self.hinted[i] { hint } else { -1.0 };
+            if let Some((a, r)) = self.pure_m[i] {
+                if a == arg {
+                    return r;
+                }
+            }
+            let r = self.measure_leaf(i, hint);
+            self.pure_m[i] = Some((arg, r));
+            return r;
         }
         if hint >= 0.0 {
             if let Some(&(actual, res)) = self.vset[i].get(&hint.to_bits()) {
@@ -1031,7 +1103,8 @@ impl<'a> Pass<'a> {
                 return res;
             }
             let res = self.measure_leaf(i, hint);
-            let actual = d(self.io.controls[i].as_ref().unwrap().get_size().x);
+            let ctl = self.io.controls[i].clone().unwrap();
+            let actual = d(ctl.get_size().x) - hpad(&ctl, &self.sn_normal, &self.sn_margins);
             self.vset[i].insert(hint.to_bits(), (actual, res));
             self.vread[i].insert(actual.to_bits(), res);
             self.vw[i] = actual;
@@ -1051,6 +1124,87 @@ impl<'a> Pass<'a> {
     /// flex_layout.gd _measure: bx/by are the measure bounds (Yoga AtMost;
     /// -1 for none).
     fn measure(&mut self, i: usize, avail: Vector2, hint: f64, bx: f64, by: f64) -> Vector2 {
+        self.measure_t(i, avail, hint, bx, by).0
+    }
+
+    /// label_max_content through the cross-layout cache (by text).
+    fn max_content(&self, i: usize, lbl: &Gd<Label>) -> f64 {
+        if !self.io.maxc_on.get() {
+            return label_max_content(lbl, &self.sn_names);
+        }
+        let text = lbl.get_text();
+        if let Some((t, v)) = &self.io.maxc.borrow()[i] {
+            if *t == text {
+                return *v;
+            }
+        }
+        let v = label_max_content(lbl, &self.sn_names);
+        self.io.maxc.borrow_mut()[i] = Some((text, v));
+        v
+    }
+
+    /// flex_layout.gd _has_dim.
+    fn has_dim(&self, i: usize, pid: usize, base: f64) -> bool {
+        let r = &self.recs[i];
+        match r.kinds[pid] {
+            K::Px => r.vals[pid] >= 0.0,
+            K::Pct => base >= 0.0 && base * r.vals[pid] / 100.0 >= 0.0,
+            _ => false,
+        }
+    }
+
+    /// flex_layout.gd _has_flow_kids.
+    fn has_flow_kids(&self, i: usize) -> bool {
+        if let Some(k) = &self.kids_m[i] {
+            return !k.is_empty();
+        }
+        for ch in self.c.children(i) {
+            if self.c.non_visual(ch) {
+                continue;
+            }
+            if self.str_(ch, E_DISPLAY, "flex") == "none" {
+                continue;
+            }
+            if self.str_(ch, E_POSITION, "relative") == "absolute" {
+                continue;
+            }
+            return true;
+        }
+        false
+    }
+
+    /// flex_layout.gd _hint_sub.
+    fn hint_sub(&mut self, i: usize) -> bool {
+        if !self.any_hinted {
+            return false;
+        }
+        if let Some(v) = self.hs_m[i] {
+            return v;
+        }
+        let mut out = self.hinted[i];
+        if !out {
+            for ch in self.c.children(i) {
+                if self.hint_sub(ch) {
+                    out = true;
+                    break;
+                }
+            }
+        }
+        self.hs_m[i] = Some(out);
+        out
+    }
+
+    /// The measure and its bound thresholds (flex_layout.gd _measure,
+    /// entries [13] and [14]).
+    fn measure_t(&mut self, i: usize, avail: Vector2, hint: f64, bx: f64, by: f64) -> (Vector2, f64, f64, f64, f64) {
+        let mut bx = bx;
+        let mut by = by;
+        if bx >= 0.0 && (self.has_dim(i, P_W, d(avail.x)) || (hint >= 0.0 && self.has_flow_kids(i))) {
+            bx = -1.0;
+        }
+        if by >= 0.0 && self.has_dim(i, P_H, d(avail.y)) {
+            by = -1.0;
+        }
         let sens = self.sens(i);
         let kx = if sens & 1 != 0 { d(avail.x) } else { 0.0 };
         let ky = if sens & 2 != 0 { d(avail.y) } else { 0.0 };
@@ -1062,7 +1216,18 @@ impl<'a> Pass<'a> {
                 for (k, &v) in vl.iter().enumerate() {
                     self.vw[v] = e.exit[k];
                 }
-                return e.out;
+                return (e.out, e.tx, e.ty, e.lin_w, e.lin_h);
+            }
+        }
+        if by >= 0.0 {
+            let r = self.measure_t(i, avail, hint, bx, -1.0);
+            if below(r.2, r.4, by) {
+                return r;
+            }
+        } else if bx >= 0.0 && vl.is_empty() && !self.hint_sub(i) {
+            let r = self.measure_t(i, avail, hint, -1.0, -1.0);
+            if below(r.1, r.3, bx) {
+                return r;
             }
         }
         let w = self.dim(i, P_W, d(avail.x));
@@ -1073,7 +1238,13 @@ impl<'a> Pass<'a> {
         let in_h = pad[T] + pad[B] + bor[T] + bor[B];
         let kids = self.flex_children(i);
         let (bw, bh);
+        let mut tx = NO_BOUND;
+        let mut ty = NO_BOUND;
+        let mut lin_w = -1.0;
+        let mut lin_h = -1.0;
         if kids.is_empty() {
+            lin_w = in_w;
+            lin_h = in_h;
             let mut hint2 = -1.0;
             if hint >= 0.0 {
                 hint2 = gmax(0.0, hint - in_w);
@@ -1087,6 +1258,12 @@ impl<'a> Pass<'a> {
             // Unity clamps a leaf measure to the space the leaf has.
             let mut ix = d(intr.x);
             let mut iy = d(intr.y);
+            if w < 0.0 {
+                tx = ix;
+            }
+            if h < 0.0 {
+                ty = iy;
+            }
             if bx >= 0.0 {
                 ix = f64::min(ix, gmax(0.0, bx - in_w));
             }
@@ -1109,14 +1286,22 @@ impl<'a> Pass<'a> {
             if ly < 0.0 && by >= 0.0 {
                 ly = gmax(0.0, by - in_h);
             }
-            let nat = self.measure_content(i, Vector2::new(f(cw), f(ch)), lx, ly);
+            let (nat, mtx, mty) = self.measure_content(i, Vector2::new(f(cw), f(ch)), lx, ly);
             let chrome = self.measure_call(i, cw);
             bw = if w >= 0.0 { w } else { gmax(d(nat.x), d(chrome.x)) + in_w };
             bh = if h >= 0.0 { h } else { gmax(d(nat.y), d(chrome.y)) + in_h };
+            if w < 0.0 && hint < 0.0 && mtx > NO_BOUND {
+                tx = mtx + in_w;
+            }
+            if h < 0.0 && mty > NO_BOUND {
+                ty = mty + in_h;
+            }
         }
         let (mut bw, mut bh) = (bw, bh);
         let ar = self.ratio(i);
         if ar > 0.0 {
+            tx = f64::INFINITY;
+            ty = f64::INFINITY;
             if h >= 0.0 && w < 0.0 {
                 bw = h * ar;
             } else if h < 0.0 {
@@ -1130,6 +1315,14 @@ impl<'a> Pass<'a> {
         let maxh = self.bound(i, P_MAXH, d(avail.y), false);
         let mut oy = gmax(gclamp(bh, minh, maxh), in_h);
         let mut ox = ox;
+        if !kids.is_empty() && self.str_(i, E_OVERFLOW, "visible") == "scroll" {
+            if w < 0.0 && hint < 0.0 {
+                tx = gmax(tx, ox);
+            }
+            if h < 0.0 {
+                ty = gmax(ty, oy);
+            }
+        }
         if !kids.is_empty() && (bx >= 0.0 || by >= 0.0) && self.str_(i, E_OVERFLOW, "visible") == "scroll" {
             // Yoga: an auto-sized scroll box measured AtMost stays inside the
             // space it has on its cross axis; on its main axis only when the
@@ -1153,16 +1346,16 @@ impl<'a> Pass<'a> {
         }
         let out = Vector2::new(f(ox), f(oy));
         let exit: Vec<f64> = vl.iter().map(|&v| self.vw[v]).collect();
-        self.meas_m[i].push(MemoE { kx, ky, kh, bx, by, entry, out, exit });
-        out
+        self.meas_m[i].push(MemoE { kx, ky, kh, bx, by, tx, ty, lin_w, lin_h, entry, out, exit });
+        (out, tx, ty, lin_w, lin_h)
     }
 
     /// flex_layout.gd _measure_content: lx/ly bound the content (Yoga
     /// AtMost; -1 for none).
-    fn measure_content(&mut self, i: usize, cavail: Vector2, lx: f64, ly: f64) -> Vector2 {
+    fn measure_content(&mut self, i: usize, cavail: Vector2, lx: f64, ly: f64) -> (Vector2, f64, f64) {
         let kids = self.flex_children(i);
         if kids.is_empty() {
-            return Vector2::ZERO;
+            return (Vector2::ZERO, NO_BOUND, NO_BOUND);
         }
         let row = self.is_row(i);
         let wrap = self.enum_(i, E_WRAP, &WRAPS, "nowrap") != "nowrap";
@@ -1173,13 +1366,16 @@ impl<'a> Pass<'a> {
         let am = if row { lx } else { ly };
         let (mut lx, mut ly) = (lx, ly);
         // Yoga: a scroll container does not bound its children on its main axis.
-        if self.str_(i, E_OVERFLOW, "visible") == "scroll" {
+        let sc = self.str_(i, E_OVERFLOW, "visible") == "scroll";
+        if sc {
             if row {
                 lx = -1.0;
             } else {
                 ly = -1.0;
             }
         }
+        let mut cx = NO_BOUND;
+        let mut cy = NO_BOUND;
         let mut lines_main: Vec<f64> = vec![];
         let mut lines_cross: Vec<f64> = vec![];
         let (mut cur_main, mut cur_cross, mut cur_n) = (0.0f64, 0.0f64, 0usize);
@@ -1187,7 +1383,15 @@ impl<'a> Pass<'a> {
             let m = self.margins(ch, d(cavail.x));
             let bxc = if lx < 0.0 { -1.0 } else { gmax(0.0, lx - m[L] - m[R]) };
             let byc = if ly < 0.0 { -1.0 } else { gmax(0.0, ly - m[T] - m[B]) };
-            let msz = self.measure(ch, cavail, -1.0, bxc, byc);
+            let (msz, ctx, cty, clw, clh) = self.measure_b(ch, cavail, -1.0, bxc, byc);
+            let ex = ext(ctx, clw);
+            if ex > NO_BOUND {
+                cx = gmax(cx, ex + m[L] + m[R]);
+            }
+            let ey = ext(cty, clh);
+            if ey > NO_BOUND {
+                cy = gmax(cy, ey + m[T] + m[B]);
+            }
             let (o_main, o_cross) = if row {
                 (d(msz.x) + m[L] + m[R], d(msz.y) + m[T] + m[B])
             } else {
@@ -1213,7 +1417,32 @@ impl<'a> Pass<'a> {
             out[main] = f(gmax(d(out[main]), lines_main[k]));
             out[cross] = f(d(out[cross]) + (lines_cross[k] + if k > 0 { gap_c } else { 0.0 }));
         }
-        Vector2::new(out[0], out[1])
+        if wrap {
+            if row {
+                cx = gmax(cx, d(out[0]));
+            } else {
+                cy = gmax(cy, d(out[1]));
+            }
+        }
+        if sc {
+            if row {
+                cx = NO_BOUND;
+            } else {
+                cy = NO_BOUND;
+            }
+        }
+        (Vector2::new(out[0], out[1]), cx, cy)
+    }
+
+    /// flex_layout.gd _measure_b.
+    fn measure_b(&mut self, i: usize, avail: Vector2, hint: f64, bx: f64, by: f64) -> (Vector2, f64, f64, f64, f64) {
+        if (bx >= 0.0 || by >= 0.0) && self.vlist(i).is_empty() && !self.hint_sub(i) {
+            let r = self.measure_t(i, avail, hint, -1.0, -1.0);
+            if (bx < 0.0 || below(r.1, r.3, bx)) && (by < 0.0 || below(r.2, r.4, by)) {
+                return r;
+            }
+        }
+        self.measure_t(i, avail, hint, bx, by)
     }
 
     // ------------------------------------------------------------- arrange
@@ -1301,7 +1530,7 @@ impl<'a> Pass<'a> {
             let m = self.margins(ch, asx);
             let sh = self.stretch_hint(ch, row, align_items, ac, &m);
             let (bxc, byc) = bnd(&m);
-            let nat = self.measure(ch, area.size, sh, bxc, byc);
+            let nat = self.measure_b(ch, area.size, sh, bxc, byc).0;
             let basis = self.lenr(ch, P_BASIS, am);
             let hyp = if !basis.is_nan() {
                 basis
@@ -1381,7 +1610,7 @@ impl<'a> Pass<'a> {
                     if row { it_main[k] / car } else { it_main[k] * car }
                 } else {
                     let (bxc, byc) = bnd(&it_m[k]);
-                    let v = self.measure(ch, area.size, if row { it_main[k] } else { -1.0 }, bxc, byc);
+                    let v = self.measure_b(ch, area.size, if row { it_main[k] } else { -1.0 }, bxc, byc).0;
                     comp(v, cross)
                 };
                 let cmin = gmax(self.min_or(ch, min_cross, ac, 0.0), it_inc[k]);
@@ -1696,17 +1925,29 @@ impl RecCache {
 
 /// flex_layout.gd _abs_free.
 /// UxmlStyleApplier.label_max_content: the longest paragraph of a Label as
-/// one line, plus its stylebox margins.
-fn label_max_content(l: &Gd<Label>) -> f64 {
-    let mut font: Option<Gd<Font>> = l.get_theme_font("font");
-    let mut fs = l.get_theme_font_size("font_size");
+/// one line, plus its stylebox margins, kept in the `uxml_maxc` meta for the
+/// text.
+fn label_max_content(l: &Gd<Label>, sn: &[StringName; 4]) -> f64 {
+    let text = l.get_text();
+    if l.has_meta(&sn[3]) {
+        if let Ok(c) = l.get_meta(&sn[3]).try_to::<VarArray>() {
+            let same = c.get(0).and_then(|v| v.try_to::<GString>().ok()).map(|v| v == text).unwrap_or(false);
+            if same {
+                if let Some(v) = c.get(1).and_then(|v| v.try_to::<f64>().ok()) {
+                    return v;
+                }
+            }
+        }
+    }
+    let mut font: Option<Gd<Font>> = l.get_theme_font(&sn[0]);
+    let mut fs = l.get_theme_font_size(&sn[1]);
     if let Some(ls) = l.get_label_settings() {
         if let Some(lf) = ls.get_font() {
             font = Some(lf);
         }
         fs = ls.get_font_size();
     }
-    let mut t = l.get_text();
+    let mut t = text.clone();
     if l.is_uppercase() {
         t = t.to_upper();
     }
@@ -1716,8 +1957,14 @@ fn label_max_content(l: &Gd<Label>) -> f64 {
             w = d(fo.get_multiline_string_size_ex(&t).width(-1.0).font_size(fs).done().x);
         }
     }
-    let sb = l.get_theme_stylebox("normal");
-    w + sb.map(|s| d(s.get_minimum_size().x)).unwrap_or(0.0)
+    let sb = l.get_theme_stylebox(&sn[2]);
+    let total = w + sb.map(|s| d(s.get_minimum_size().x)).unwrap_or(0.0);
+    let mut arr = VarArray::new();
+    arr.push(&text.to_variant());
+    arr.push(&total.to_variant());
+    let mut lm = l.clone();
+    lm.set_meta(&sn[3], &arr.to_variant());
+    total
 }
 
 /// UxmlStyleApplier.unfitted_height: one line of the font a fitted Label has
@@ -1732,6 +1979,37 @@ fn unfitted_height(l: &Gd<Label>) -> f64 {
     let fh = base.map(|b| d(b.get_height_ex().font_size(fs).done())).unwrap_or(0.0);
     let sb = l.get_theme_stylebox("normal");
     fh + sb.map(|s| d(s.get_minimum_size().y)).unwrap_or(0.0)
+}
+
+/// UxmlDocument._hpad: the horizontal `uxml_margins` of the control's
+/// normal stylebox.
+fn hpad(c: &Gd<Control>, sn_normal: &StringName, sn_margins: &StringName) -> f64 {
+    if c.has_theme_stylebox_override(sn_normal) {
+        if let Some(sb) = c.get_theme_stylebox(sn_normal) {
+            if sb.has_meta(sn_margins) {
+                let a = sb.get_meta(sn_margins).to::<VarArray>();
+                let g = |k: usize| a.at(k).try_to::<f64>().unwrap_or(0.0);
+                return g(0) + g(2);
+            }
+        }
+    }
+    0.0
+}
+
+/// flex_layout.gd _ext.
+fn ext(t: f64, lin: f64) -> f64 {
+    if t <= NO_BOUND {
+        return NO_BOUND;
+    }
+    if lin >= 0.0 { t + lin } else { t + 0.001 }
+}
+
+/// flex_layout.gd _below.
+fn below(t: f64, lin: f64, b: f64) -> bool {
+    if lin < 0.0 {
+        return t <= b - 0.001;
+    }
+    t <= gmax(0.0, b - lin)
 }
 
 fn abs_free(mode: &str, reverse: bool, outer: f64, sz: f64, lead: f64) -> f64 {

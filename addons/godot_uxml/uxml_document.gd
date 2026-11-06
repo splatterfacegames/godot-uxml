@@ -646,7 +646,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			_resolver, _doc.path, _doc.source, _rt_warnings
 		)
 		_applier.element_paths = _doc.element_paths
-		_applier.unity_line_metrics = theme_path == UxmlTheme.DEFAULT
+		_applier.unity_line_metrics = theme_path == UxmlTheme.DEFAULT and OS.get_environment("NOLINES") == ""
 	var need_layout := _force_layout or _full_apply or _unsettled
 	var applied: Array = []
 	var fresh := 0  # applied[0..fresh) changed this pass; the rest are re-applies
@@ -850,8 +850,11 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 	if ((c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
 			and content_w >= 0.0 and not c.has_meta(&"uxml_autosize")):
 		# Label reports its wrapped height from its current width — hand it
-		# the width the line assigned so the measurement is honest.
-		c.size.x = content_w
+		# the width the line assigned so the measurement is honest. The
+		# control is as wide as the content plus its USS padding and border
+		# (the placement gives it that width too), so the text wraps at the
+		# content width.
+		c.size.x = content_w + _hpad(c)
 	var ms: Vector2
 	if _applier != null and _applier.auto_sizes > 0 and c.has_meta(&"uxml_autosize"):
 		# -unity-text-auto-size: the size at the font size that fits the
@@ -912,8 +915,19 @@ func _volatile_measures() -> Dictionary:
 		var c: Control = _controls[el]
 		if ((c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
 				and not c.has_meta(&"uxml_autosize")):
-			out[el] = c.size.x
+			out[el] = c.size.x - _hpad(c)
 	return out
+
+
+## The horizontal USS padding and border a control's stylebox carries
+## (`uxml_margins`): a wrapping Label is measured at its content width.
+static func _hpad(c: Control) -> float:
+	if c.has_theme_stylebox_override("normal"):
+		var sb: StyleBox = c.get_theme_stylebox("normal")
+		if sb != null and sb.has_meta("uxml_margins"):
+			var m: Array = sb.get_meta("uxml_margins")
+			return m[0] + m[2]
+	return 0.0
 
 
 ## Best-fit text elements: their measure reads the width hint although they
@@ -931,7 +945,8 @@ func _autosize_elements() -> Dictionary:
 ## Current width of a volatile element's control (after the engine clamps
 ## a measure-time size write).
 func _volatile_width(el: UxmlElement) -> float:
-	return (_controls[el] as Control).size.x
+	var c: Control = _controls[el]
+	return c.size.x - _hpad(c)
 
 
 ## Run the flex pass for `host` without touching controls' placement:
@@ -1034,7 +1049,7 @@ func _place_control(el: UxmlElement) -> void:
 		UxmlStyleApplier.autosize_place(c, cs)
 	c.position = r.position
 	c.size = r.size
-	if _applier != null and (c.size.y > r.size.y + 0.01 or _applier.fitted.has(c)) and c is Label:
+	if _applier != null and (c.size.y > r.size.y + 0.01 or _applier.fitted.get(c, r.size.y) != r.size.y) and c is Label:
 		# Godot floors a Label at one text line; Unity's box can be shorter.
 		_applier.fit_label(c, r.size)
 	# Internal chrome the flex pass does not position lives inside the

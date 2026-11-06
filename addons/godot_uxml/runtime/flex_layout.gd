@@ -43,6 +43,14 @@ extends RefCounted
 ## width hint is measured at the bound width (wrapping text). An
 ## `overflow: scroll` container does not bound its children on its main
 ## axis, and its own auto size stays inside its bound (Yoga).
+## A bound changes a measure only when the unbounded measure reaches it:
+## each measure entry keeps the thresholds (tx, ty) below which a bounded
+## measure equals the unbounded one (no leaf clamp, no wrap, no child
+## bound binds, no scroll clamp). Below the thresholds a bounded measure
+## reuses the entry without the bound: always for the height bound, and
+## for the width bound in a subtree without volatile or best-fit text
+## (their measure reads the width hint). So a subtree is not measured once
+## per distinct bound.
 ##
 ## Performance notes (the algorithm above is unchanged, bit for bit):
 ##   * every per-element style read is memoized for the pass — padding /
@@ -125,7 +133,7 @@ var _hint_free := false      # options["hint_free"]: only volatile measures read
 ## align stretch also measures them at their stretched width, as Yoga does.
 var _hinted: Dictionary = {}
 # Entries — measure: [kx, ky, kh, out, entry_state, exit_state, calls,
-# kids, ids, eid, el, bx, by]; layout: [size, cb_width, scroll_bar_width,
+# kids, ids, eid, el, bx, by, tx, ty, lin_w, lin_h]; layout: [size, cb_width, scroll_bar_width,
 # entry_state, exit_state, sub, calls, kids, ids, eid, el, rects, insets,
 # content_sizes]. `calls` are the entry's OWN measurer calls, `kids` the
 # child entries its computation used, `ids` the layout-record ids of el and
@@ -143,6 +151,12 @@ var _ok_m := {}              # eid -> bool (this pass)
 var _val_m := {}             # el -> {arg -> result} replayed this pass
 static var _eid_seq := 0
 var _laid: Array = []        # elements laid out this pass, in order
+var _last_ent: Array = []    # the entry of the last _measure() return
+var _hs_m := {}              # el -> best-fit text in its subtree
+var _pure_m := {}            # el -> [argument, result] of its last pure measure
+var _mc_tx := NO_BOUND       # thresholds of the last _measure_content
+var _mc_ty := NO_BOUND
+const NO_BOUND := -1.0e30    # threshold: no bound changes this axis
 const XC_MAX := 6            # cached entries per element and kind
 static var _rec_seq := 0
 static var _no_ids := PackedInt64Array()
@@ -653,6 +667,13 @@ func _measure(
 	# explicit size), and the hint only matters for leaves. Subtrees holding
 	# volatile (wrapping-label) measures also key on those labels' current
 	# widths and replay the widths the real calls would leave behind.
+	# A bound that cannot change the result is no bound: a width bound with
+	# a definite width (or, for a container, a width hint), a height bound
+	# with a definite height (the children get the content size instead).
+	if bx >= 0.0 and (_has_dim(el, P_W, avail.x) or (border_w_hint >= 0.0 and _has_flow_kids(el))):
+		bx = -1.0
+	if by >= 0.0 and _has_dim(el, P_H, avail.y):
+		by = -1.0
 	var sens := _sens(el)
 	var kx := avail.x if sens & 1 else 0.0
 	var ky := avail.y if sens & 2 else 0.0
@@ -670,10 +691,25 @@ func _measure(
 					_vw[vl[k]] = ex[k]
 				if not _frames.is_empty():
 					_frames.back()[1].append(e)
+				_last_ent = e
 				return e[3]
 	else:
 		memo = []
 		_meas_m[el] = memo
+	# Below its thresholds a bound changes nothing: the measure without the
+	# bound is the result (see the class notes). The height bound never
+	# changes a width hint, so it aliases in every subtree; the width bound
+	# only where no measure reads the hint (volatile or best-fit text).
+	if by >= 0.0:
+		var u := _measure(el, avail, border_w_hint, bx, -1.0)
+		if _below(_last_ent[14], _last_ent[16], by):
+			_alias(memo, kh, bx, by)
+			return u
+	elif bx >= 0.0 and vl.is_empty() and not _hint_sub(el):
+		var u2 := _measure(el, avail, border_w_hint, -1.0, -1.0)
+		if _below(_last_ent[13], _last_ent[15], bx):
+			_alias(memo, kh, bx, by)
+			return u2
 	if _xc != null:
 		var xe = _xc.get(el)
 		if xe != null:
@@ -686,6 +722,7 @@ func _measure(
 					memo.append(e)
 					if not _frames.is_empty():
 						_frames.back()[1].append(e)
+					_last_ent = e
 					return e[3]
 	_frames.append([[], []])
 	var w := _dim(el, P_W, avail.x)
@@ -697,7 +734,13 @@ func _measure(
 	var kids := _flex_children(el)
 	var bw: float
 	var bh: float
+	var tx := NO_BOUND
+	var ty := NO_BOUND
+	var lin_w := -1.0  # leaf: thresholds are content sizes, compared as the clamp does
+	var lin_h := -1.0
 	if kids.is_empty():
+		lin_w = in_w
+		lin_h = in_h
 		var hint := -1.0
 		if border_w_hint >= 0.0:
 			hint = maxf(0.0, border_w_hint - in_w)
@@ -710,6 +753,10 @@ func _measure(
 		# Unity clamps a leaf measure to the space the leaf has (AtMost).
 		var ix: float = intr.x
 		var iy: float = intr.y
+		if w < 0.0:
+			tx = ix
+		if h < 0.0:
+			ty = iy
 		if bx >= 0.0:
 			ix = minf(ix, maxf(0.0, bx - in_w))
 		if by >= 0.0:
@@ -729,13 +776,23 @@ func _measure(
 		if ly < 0.0 and by >= 0.0:
 			ly = maxf(0.0, by - in_h)
 		var nat := _measure_content(el, Vector2(cw, ch), lx, ly)
+		var mtx := _mc_tx
+		var mty := _mc_ty
 		# Native chrome (e.g. a wrapped control's minimum size) can floor the
 		# auto size, but an authored px/% always wins.
 		var chrome := _measure_call(el, cw)
 		bw = w if w >= 0.0 else maxf(nat.x, chrome.x) + in_w
 		bh = h if h >= 0.0 else maxf(nat.y, chrome.y) + in_h
+		# A bound changes a container only through its children (and its
+		# lines and scroll clamp): the thresholds of the content.
+		if w < 0.0 and border_w_hint < 0.0 and mtx > NO_BOUND:
+			tx = mtx + in_w
+		if h < 0.0 and mty > NO_BOUND:
+			ty = mty + in_h
 	var ar := _ratio(el)
 	if ar > 0.0:
+		tx = INF
+		ty = INF
 		if h >= 0.0 and w < 0.0:
 			bw = h * ar
 		elif h < 0.0:
@@ -750,6 +807,11 @@ func _measure(
 		clampf(bh, _min_or(el, P_MINH, avail.y, 0.0), _bound(el, P_MAXH, avail.y, false)),
 		in_h
 	)
+	if not kids.is_empty() and _str(el, "overflow", "visible") == "scroll":
+		if w < 0.0 and border_w_hint < 0.0:
+			tx = maxf(tx, ox)
+		if h < 0.0:
+			ty = maxf(ty, oy)
 	if not kids.is_empty() and (bx >= 0.0 or by >= 0.0) and _str(el, "overflow", "visible") == "scroll":
 		# Yoga: an auto-sized scroll box measured AtMost stays inside the
 		# space it has on its cross axis. On its main axis only when the
@@ -770,7 +832,7 @@ func _measure(
 	var fr: Array = _frames.pop_back()
 	_eid_seq += 1
 	var ent := [kx, ky, kh, out, entry, _vstate(vl) if not vl.is_empty() else _no_state,
-		fr[0], fr[1], _ids_of(el) if _xc != null else _no_ids, _eid_seq, el, bx, by]
+		fr[0], fr[1], _ids_of(el) if _xc != null else _no_ids, _eid_seq, el, bx, by, tx, ty, lin_w, lin_h]
 	_ok_m[_eid_seq] = true
 	memo.append(ent)
 	if _xc != null:
@@ -784,6 +846,96 @@ func _measure(
 		lst.append(ent)
 	if not _frames.is_empty():
 		_frames.back()[1].append(ent)
+	_last_ent = ent
+	return out
+
+
+## True when the size `pid` (P_W/P_H) of el is definite against `base`
+## (no diagnostic: _dim reports a bad value where the result is used).
+func _has_dim(el: UxmlElement, pid: int, base: float) -> bool:
+	var rec := _rec(el)
+	match rec[1][pid]:
+		K_PX:
+			return rec[2][pid] >= 0.0
+		K_PCT:
+			return base >= 0.0 and base * rec[2][pid] / 100.0 >= 0.0
+	return false
+
+
+## The extent at which a bound starts to change a measure with threshold
+## `t`: a leaf adds its padding and border (`lin`), a container keeps a
+## margin of 0.001 per level (_below).
+static func _ext(t: float, lin: float) -> float:
+	if t <= NO_BOUND:
+		return NO_BOUND
+	return t + lin if lin >= 0.0 else t + 0.001
+
+
+## _measure with bounds, the common case first: a subtree without volatile
+## or best-fit text that the bounds do not reach is its unbounded measure
+## (one memo lookup instead of the bounded lookup and the alias).
+func _measure_b(el: UxmlElement, avail: Vector2, hint: float, bx: float, by: float) -> Vector2:
+	if (bx >= 0.0 or by >= 0.0) and _vlist(el).is_empty() and not _hint_sub(el):
+		var u := _measure(el, avail, hint, -1.0, -1.0)
+		var ue: Array = _last_ent
+		if (bx < 0.0 or _below(ue[13], ue[15], bx)) and (by < 0.0 or _below(ue[14], ue[16], by)):
+			return u
+	return _measure(el, avail, hint, bx, by)
+
+
+## Memo the entry of the last measure (_last_ent) under the bounds bx, by
+## too, so the same bounded measure finds it at once.
+func _alias(memo: Array, kh: float, bx: float, by: float) -> void:
+	var e: Array = _last_ent.duplicate()
+	e[2] = kh
+	e[11] = bx
+	e[12] = by
+	memo.append(e)
+	_last_ent = e
+
+
+## True when a bound `b` leaves a measure with threshold `t` unchanged. A
+## leaf (`lin` >= 0: its padding and border) compares its content size as
+## the clamp does, so equality holds exactly; a container keeps a margin.
+static func _below(t: float, lin: float, b: float) -> bool:
+	if lin < 0.0:
+		return t <= b - 0.001
+	return t <= maxf(0.0, b - lin)
+
+
+## Quiet form of `not _flex_children(el).is_empty()`: no diagnostic, so
+## the diagnostics keep their order.
+func _has_flow_kids(el: UxmlElement) -> bool:
+	var hit = _kids_m.get(el)
+	if hit != null:
+		return not (hit as Array).is_empty()
+	for child in el.children:
+		if child.local == "UXML" or child.local == "Style":
+			continue
+		var en: Dictionary = _rec(child)[5]
+		if String(en.get("display", "flex")) == "none":
+			continue
+		if String(en.get("position", "relative")) == "absolute":
+			continue
+		return true
+	return false
+
+
+## True when el or a descendant is best-fit text (its measure reads the
+## width hint, so a bound changes it).
+func _hint_sub(el: UxmlElement) -> bool:
+	if _hinted.is_empty():
+		return false
+	var hit = _hs_m.get(el)
+	if hit != null:
+		return hit
+	var out := _hinted.has(el)
+	if not out:
+		for c in el.children:
+			if _hint_sub(c):
+				out = true
+				break
+	_hs_m[el] = out
 	return out
 
 
@@ -815,7 +967,16 @@ func _stretch_hint(child: UxmlElement, row: bool, align_items: String, ac: float
 ## original call sequence would have measured at.
 func _measure_call(el: UxmlElement, hint: float) -> Vector2:
 	if not _volatile.has(el):
-		var r0: Vector2 = _measurer.call(el, _style_for_measure(el), hint)
+		# A pure measure repeats within a pass (a bounded and an unbounded
+		# measure of one leaf): one real call per element and argument.
+		var arg := -1.0 if (_hint_free and not _hinted.has(el)) else hint
+		var r0: Vector2
+		var pm = _pure_m.get(el)
+		if pm != null and pm[0] == arg:
+			r0 = pm[1]
+		else:
+			r0 = _measurer.call(el, _style_for_measure(el), hint)
+			_pure_m[el] = [arg, r0]
 		if not _frames.is_empty():
 			_frames.back()[0].append([el, false, hint, r0])
 		return r0
@@ -981,16 +1142,28 @@ func _measure_content(el: UxmlElement, cavail: Vector2, lx: float = -1.0, ly: fl
 	var cur_n := 0
 	var am: float = lx if row else ly
 	# Yoga: a scroll container does not bound its children on its main axis.
-	if _str(el, "overflow", "visible") == "scroll":
+	var sc := _str(el, "overflow", "visible") == "scroll"
+	if sc:
 		if row:
 			lx = -1.0
 		else:
 			ly = -1.0
+	# The bound thresholds of the content: the largest child threshold plus
+	# its margins (a bound below it reaches some child).
+	var cx := NO_BOUND
+	var cy := NO_BOUND
 	for child in kids:
 		var m := _margins(child, cavail.x)
-		var msz := _measure(child, cavail, -1.0,
+		var msz := _measure_b(child, cavail, -1.0,
 			-1.0 if lx < 0.0 else maxf(0.0, lx - m[L] - m[R]),
 			-1.0 if ly < 0.0 else maxf(0.0, ly - m[T] - m[B]))
+		var ce: Array = _last_ent
+		var ex := _ext(ce[13], ce[15])
+		if ex > NO_BOUND:
+			cx = maxf(cx, ex + m[L] + m[R])
+		var ey := _ext(ce[14], ce[16])
+		if ey > NO_BOUND:
+			cy = maxf(cy, ey + m[T] + m[B])
 		var o_main: float
 		var o_cross: float
 		if row:
@@ -1018,6 +1191,19 @@ func _measure_content(el: UxmlElement, cavail: Vector2, lx: float = -1.0, ly: fl
 	for i in lines_main.size():
 		out[main] = maxf(out[main], lines_main[i])
 		out[cross] += lines_cross[i] + (gap_c if i > 0 else 0.0)
+	if wrap:
+		# Lines break at the main bound.
+		if row:
+			cx = maxf(cx, out.x)
+		else:
+			cy = maxf(cy, out.y)
+	if sc:
+		if row:
+			cx = NO_BOUND
+		else:
+			cy = NO_BOUND
+	_mc_tx = cx
+	_mc_ty = cy
 	return out
 
 
@@ -1289,7 +1475,7 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	for k in n:
 		var child: UxmlElement = kids[k]
 		var m := _margins(child, asx)
-		var nat := _measure(child, area.size, _stretch_hint(child, row, align_items, ac, m),
+		var nat := _measure_b(child, area.size, _stretch_hint(child, row, align_items, ac, m),
 			-1.0 if bnd_x < 0.0 else maxf(0.0, bnd_x - m[L] - m[R]),
 			-1.0 if bnd_y < 0.0 else maxf(0.0, bnd_y - m[T] - m[B]))
 		var hyp: float
@@ -1386,7 +1572,7 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 				# For a row item the final main size is now known — measuring
 				# with it lets wrapped text report the height it really needs.
 				var mc: PackedFloat64Array = it_m[k]
-				nat = _measure(
+				nat = _measure_b(
 					child, area.size,
 					it_main[k] if row else -1.0,
 					-1.0 if bnd_x < 0.0 else maxf(0.0, bnd_x - mc[L] - mc[R]),

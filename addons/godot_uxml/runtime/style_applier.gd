@@ -77,7 +77,7 @@ static var _line_fonts: Dictionary = {}
 const UNITY_LINE_EM := 1.2099
 const UNITY_ASCENT_EM := 0.96875
 ## Labels fitted into a box shorter than their text line (fit_label):
-## control -> true.
+## control -> the height fitted for.
 var fitted: Dictionary = {}
 static var _fit_fonts: Dictionary = {}
 ## How many controls carry clip_text for overflow: hidden text. While zero
@@ -318,17 +318,31 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 
 	var font_name := _font_name(c)
 	var font := _font(c, style, el)
+	if c.has_meta(&"uxml_maxc"):
+		# The font, size or stylebox may change: measure the width again.
+		c.remove_meta(&"uxml_maxc")
 	if unity_line_metrics and (c is Label or c is Button or c is LineEdit or c is TextEdit
 			or c is RichTextLabel) and not _has_url_font(style):
 		font = _line_font(c, font, style, el)
+	var keep_fit := false
 	if fitted.has(c):
-		# The font override below replaces the fitted font: the next
-		# placement fits the Label again.
-		fitted.erase(c)
-		c.remove_meta(&"uxml_fit")
-		c.remove_meta(&"uxml_fit_base")
-	if font != null:
-		c.add_theme_font_override(font_name, font)
+		var fb: Array = c.get_meta(&"uxml_fit_base")
+		if fb[0] == (font != null) and fb[1] == (font if font != null else fb[1]):
+			# Same font as the fit was made for: the fit stays.
+			keep_fit = true
+		else:
+			# The font override below replaces the fitted font: the next
+			# placement fits the Label again.
+			fitted.erase(c)
+			c.remove_meta(&"uxml_fit")
+			c.remove_meta(&"uxml_fit_base")
+	if keep_fit:
+		pass
+	elif font != null:
+		# An unchanged override is not set again (a theme change makes the
+		# control shape its text again).
+		if not c.has_theme_font_override(font_name) or c.get_theme_font(font_name) != font:
+			c.add_theme_font_override(font_name, font)
 	elif c.has_theme_font_override(font_name):
 		c.remove_theme_font_override(font_name)
 
@@ -830,15 +844,33 @@ func _line_font(c: Control, font: Font, style: Dictionary, el: UxmlElement) -> F
 	var fs := _effective_font_size(c, style, el)
 	if fs <= 0:
 		return font
-	var key := "%d|%d" % [base.get_instance_id(), fs]
-	var hit = _line_fonts.get(key)
+	# Cached per font (by content for a FontVariation) and size.
+	var per = _line_fonts.get(_font_key(base) if base is FontVariation else base)
+	if per == null:
+		per = {}
+		_line_fonts[_font_key(base) if base is FontVariation else base] = per
+	var hit = per.get(fs)
 	if hit == null:
 		var want_h := ceilf(UNITY_LINE_EM * fs - 0.001)
 		var top := roundi(UNITY_ASCENT_EM * fs - base.get_ascent(fs))
 		var bottom := roundi(want_h - base.get_height(fs)) - top
 		hit = base if top == 0 and bottom == 0 else with_spacing(base, top, bottom)
-		_line_fonts[key] = hit
+		per[fs] = hit
 	return hit if hit != base or font != null else font
+
+
+## A cache key for a font by content: _font() makes a new FontVariation
+## for a bold or italic style on each apply, so a key by instance would
+## keep every one of them (and its TextServer caches) alive.
+static func _font_key(f: Font) -> String:
+	if f == null:
+		return "-"
+	if f is FontVariation:
+		var v := f as FontVariation
+		return "v%s|%s|%s|%d|%d|%d|%d|%s|%s" % [_font_key(v.base_font), v.variation_embolden,
+			v.variation_transform, v.spacing_top, v.spacing_bottom, v.spacing_space, v.spacing_glyph,
+			v.variation_opentype, v.opentype_features]
+	return "f%d" % f.get_instance_id()
 
 
 ## `base` with extra top and bottom spacing. Godot does not stack nested
@@ -864,6 +896,14 @@ static func with_spacing(base: Font, top: int, bottom: int) -> FontVariation:
 ## without a width bound. The native measurer computes the same value
 ## (layout.rs, label_max_content).
 static func label_max_content(l: Label) -> float:
+	# Shaping a paragraph and the theme lookups cost microseconds: the width
+	# is kept on the Label for its text (`uxml_maxc`; apply() drops it with
+	# a font, size or stylebox change). The native measurer reads and
+	# writes the same meta.
+	if l.has_meta(&"uxml_maxc"):
+		var c: Array = l.get_meta(&"uxml_maxc")
+		if c[0] == l.text:
+			return c[1]
 	var font: Font = l.get_theme_font(&"font")
 	var fs: int = l.get_theme_font_size(&"font_size")
 	var ls := l.label_settings
@@ -878,7 +918,9 @@ static func label_max_content(l: Label) -> float:
 	if font != null and not t.is_empty():
 		w = font.get_multiline_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1.0, fs).x
 	var sb := l.get_theme_stylebox(&"normal")
-	return w + (0.0 if sb == null else sb.get_minimum_size().x)
+	var total := w + (0.0 if sb == null else sb.get_minimum_size().x)
+	l.set_meta(&"uxml_maxc", [l.text, total])
+	return total
 
 
 ## Godot floors a Control at its minimum size, and the minimum height of a
@@ -897,6 +939,8 @@ func fit_label(c: Label, want: Vector2) -> void:
 	if c.autowrap_mode == TextServer.AUTOWRAP_OFF and c.label_settings == null and c.get_line_count() <= 1:
 		need = maxi(0, int(ceilf(unfitted_height(c) - want.y - 0.01)))
 	if need == fit:
+		if need > 0:
+			fitted[c] = want.y
 		if c.size != want:
 			c.update_minimum_size()
 			c.size = want
@@ -919,7 +963,7 @@ func fit_label(c: Label, want: Vector2) -> void:
 		c.remove_meta(&"uxml_fit_base")
 		fitted.erase(c)
 	else:
-		var key := "%d|%d" % [0 if base == null else base.get_instance_id(), need]
+		var key := "%s|%d" % [_font_key(base), need]
 		var fv: FontVariation = _fit_fonts.get(key)
 		if fv == null:
 			fv = with_spacing(base, 0, -need)
@@ -928,7 +972,9 @@ func fit_label(c: Label, want: Vector2) -> void:
 		c.set_meta(&"uxml_fit", need)
 		if fit == 0:
 			c.set_meta(&"uxml_fit_base", [had, base])
-		fitted[c] = true
+	if need > 0:
+		# The height fitted for: a placement at the same height skips the fit.
+		fitted[c] = want.y
 	c.update_minimum_size()
 	c.size = want
 
@@ -1227,6 +1273,8 @@ func apply_resolved_insets(c: Control, start: Vector2, end: Vector2) -> void:
 	if memo != null and memo[0] == start and memo[1] == end:
 		return
 	_inset_memo[c] = [start, end]
+	if c.has_meta(&"uxml_maxc"):
+		c.remove_meta(&"uxml_maxc")
 	if _clip_content.has(c):
 		var clip = (c.get_meta("uxml_clip") if c.has_meta("uxml_clip") else null)
 		if clip != null:

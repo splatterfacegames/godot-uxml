@@ -334,30 +334,21 @@ static func update_scroll_view(el: UxmlElement, size_of: Callable, bounds_of: Ca
 
 
 ## Unity VisualElement.boundingBox of `content`, as a size: the content box
-## and the boxes of the descendants (margins excluded, translate ignored),
-## not inside descendants that clip. `rect_of(el)` returns the laid-out
-## rect relative to the parent (null: not laid out), `clips(el)` returns
-## true for an element that clips its children.
-static func bounding_size(content: UxmlElement, rect_of: Callable, clips: Callable) -> Variant:
+## and the boxes of its children (margins excluded, translate ignored).
+## Unity also takes the boxes of deeper descendants that overflow their
+## parents; godot-uxml stops at the children, so a scroll after each
+## layout does not walk the whole content. `rect_of(el)` returns the
+## laid-out rect relative to the parent (null: not laid out).
+static func bounding_size(content: UxmlElement, rect_of: Callable) -> Variant:
 	var r = rect_of.call(content)
 	if r == null:
 		return null
 	var bb := Rect2(Vector2.ZERO, (r as Rect2).size)
 	for c in content.children:
-		bb = _bb_merge(c, Vector2.ZERO, bb, rect_of, clips)
+		var cr = rect_of.call(c)
+		if cr != null:
+			bb = bb.merge(cr)
 	return bb.size
-
-
-static func _bb_merge(el: UxmlElement, origin: Vector2, bb: Rect2, rect_of: Callable, clips: Callable) -> Rect2:
-	var r = rect_of.call(el)
-	if r == null:
-		return bb
-	var rr := Rect2(origin + (r as Rect2).position, (r as Rect2).size)
-	bb = bb.merge(rr)
-	if not el.children.is_empty() and not clips.call(el):
-		for c in el.children:
-			bb = _bb_merge(c, rr.position, bb, rect_of, clips)
-	return bb
 
 
 static func _set_scroller_state(sc: UxmlElement, _shown: bool, enabled: bool, high: float, factor: float) -> bool:

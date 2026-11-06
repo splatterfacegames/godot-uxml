@@ -195,13 +195,8 @@ func _settle(doc: UxmlDocumentModel, resolve: Callable, layout: Callable) -> Arr
 			return null if r == null else (r as Rect2).size
 		var rect_of := func(el: UxmlElement):
 			return rects.get(el)
-		var clips := func(el: UxmlElement) -> bool:
-			var ov = styles.get(el, {}).get("overflow")
-			if ov == null or not String(ov["value"]) in ["hidden", "scroll"]:
-				return false
-			return not str(el.get_attribute("class")).contains("unity-scroll-view__content-container")
 		var bounds_of := func(el: UxmlElement):
-			return UxmlContainerParts.bounding_size(el, rect_of, clips)
+			return UxmlContainerParts.bounding_size(el, rect_of)
 		var changed := UxmlContainerParts.after_layout(doc.root, size_of, bounds_of)
 		for el in doc.root.walk():
 			if not UxmlContainerParts.is_collection(el.local) or el.part_of != null:

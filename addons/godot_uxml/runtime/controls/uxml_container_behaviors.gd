@@ -126,14 +126,10 @@ class ScrollViewBehavior extends UxmlBehaviors.Behavior:
 		var c: Control = doc._controls.get(x)
 		return null if c == null or not c.visible else Rect2(c.position, c.size)
 
-	func _clips(x: UxmlElement) -> bool:
-		var c: Control = doc._controls.get(x)
-		return c != null and c.clip_contents
-
 	## Unity contentContainer.boundingBox (the content and the children
 	## that overflow it).
 	func _bounds_of(x: UxmlElement):
-		return UxmlContainerParts.bounding_size(x, _rect_of, _clips)
+		return UxmlContainerParts.bounding_size(x, _rect_of)
 
 	func after_layout() -> void:
 		var before := offset()

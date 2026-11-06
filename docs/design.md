@@ -1224,8 +1224,10 @@ the viewport `hidden`, the content container `scroll` without clipping,
 a VerticalAndHorizontal viewport `scroll`): the content container does
 not shrink, so it is as tall as its content inside the viewport. The
 scroll range is the height of the content's bounding box (Unity's
-`contentContainer.boundingBox`: the content box and the boxes of the
-descendants that overflow it, margins excluded), less the viewport. Two
+`contentContainer.boundingBox`: the content box and the boxes of its
+children, margins excluded), less the viewport. Unity also counts deeper
+descendants that overflow their parents; godot-uxml stops at the
+children, so the update after a layout does not walk the whole content. Two
 Yoga rules make that work, in the GDScript and the native layout alike:
 
 - A container that a column stretches is measured at the stretched
@@ -1263,7 +1265,18 @@ Measure bounds (Yoga's AtMost measure mode), in both layout paths and in
 - Absolute children are measured without a bound.
 
 The memo and cross-pass cache key on the bounds (measure entries hold
-`bx` and `by`; layout entries have definite sizes and need no bound).
+`bx` and `by`; layout entries have definite sizes and need no bound). A
+bound that cannot change a measure is dropped from the key (a definite
+width or height, a width hint of a container). Each measure entry keeps
+thresholds: the size at which a bound starts to change the measure (a
+leaf: its content size, compared as the clamp compares; a container: the
+largest child threshold plus margins, its lines when it wraps, and its
+own size when it is a scroll box). A bounded measure below the
+thresholds is the unbounded measure: always for the height bound, and
+for the width bound in a subtree without wrapping or best-fit text (a
+width bound changes their width hint). So a subtree is measured once,
+not once per distinct bound. Both layout paths and the reference engine
+give the same results; the reference computes every bounded measure.
 
 ### Style application
 
@@ -1552,11 +1565,16 @@ rows keep `fixed-item-height`.
   so container chrome is faithful.
 - Text measurement is Godot's (`get_combined_minimum_size`), not Unity's
   text engine — intrinsic label sizes can differ slightly. Auto-height
-  labels re-measure at their assigned width when wrapping. A wrapping
+  labels re-measure at their assigned width when wrapping: the control
+  gets the content width plus its USS padding and border (the width the
+  placement gives it), so the text wraps at the content width. A wrapping
   Label measures its max-content width (the longest paragraph as one
   line, `UxmlStyleApplier.label_max_content`, the same in the native
   measurer), so the layout gives it Unity's width (a HelpBox label is as
-  wide as its text, at most the space it has).
+  wide as its text, at most the space it has). The width is cached for
+  the text: in the `uxml_maxc` meta (GDScript; an apply or new insets
+  drop it) and, in the native layout, per control until the control is
+  applied again or gets new insets.
 - Godot floors a Label at one text line. When the layout gives a
   one-line Label less height (a Label in a 20px TreeView row is 14px, a
   Label row of a ListView is the item height), `UxmlStyleApplier.
