@@ -205,9 +205,33 @@ func apply(
 		_apply_themed(native, style, el, false)
 	elif control is UxmlBox:
 		_apply_box(control, el, style)
+		if native is TextureRect and el.local == "Image":
+			_apply_image(control, native, style, el)
 	else:
 		_apply_themed(native, style, el, true)
 	_apply_visual(el, control, native, style)
+
+
+## Unity's Image reads its image, scale mode and tint from the custom
+## properties --unity-image, --unity-image-size (stretch-to-fill,
+## scale-and-crop, scale-to-fit) and --unity-image-tint-color (Image's
+## k_ImageProperty, k_ScaleModeProperty, k_TintColorProperty).
+const _IMAGE_FIT := {"stretch-to-fill": TextureRect.STRETCH_SCALE,
+	"scale-and-crop": TextureRect.STRETCH_KEEP_ASPECT_COVERED,
+	"scale-to-fit": TextureRect.STRETCH_KEEP_ASPECT_CENTERED}
+
+
+func _apply_image(box: UxmlBox, tr: TextureRect, style: Dictionary, el: UxmlElement) -> void:
+	if style.has("--unity-image"):
+		var tex := _texture(style, "--unity-image", el)
+		if tex != null and tr.texture != tex:
+			tr.texture = tex
+			box.natural_size = tex.get_size()
+	var fit := _str(style, "--unity-image-size")
+	if _IMAGE_FIT.has(fit):
+		tr.stretch_mode = _IMAGE_FIT[fit]
+	var tint = _color(style, "--unity-image-tint-color", el) if style.has("--unity-image-tint-color") else null
+	tr.self_modulate = tint if tint != null else Color.WHITE
 
 
 # ---------------------------------------------------------------------------
@@ -312,18 +336,14 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 				# fall back to its texture margins as content margins.
 				for side in ["left", "top", "right", "bottom"]:
 					sb.set("content_margin_" + side, 0.0)
+			elif sb != null and tex != null and _box_drawn(sb):
+				# Unity draws the background colour, the image over it and
+				# the border over the image: a UxmlBoxStyle carries the image
+				# between its fill and its border.
+				sb = _with_image(style, el, tex)
 			elif sb != null and tex != null:
-				# StyleBoxFlat cannot carry a texture; the image wins the fill.
-				# Padding (content margins) carries over to the texture box; only
-				# a visible flat background or border is lost, and diagnosed.
-				var flat := sb as StyleBoxFlat
-				if flat != null and (flat.bg_color.a > 0.0 or flat.border_width_left > 0
-						or flat.border_width_top > 0 or flat.border_width_right > 0
-						or flat.border_width_bottom > 0):
-					_warn_once_key(
-						"bg-image-plus-border", el,
-						"background-image combined with border/background styling: the image is drawn, border styling is not"
-					)
+				# Padding only: the image's stylebox carries the content
+				# margins.
 				var tsb := _image_stylebox(tex, style, el)
 				for side in ["left", "top", "right", "bottom"]:
 					tsb.set("content_margin_" + side, sb.get("content_margin_" + side))
@@ -751,6 +771,31 @@ func _image_stylebox(tex: Texture2D, style: Dictionary, el: UxmlElement) -> Styl
 	return bs
 
 
+## A UxmlBoxStyle of the element's box with its background image.
+func _with_image(style: Dictionary, el: UxmlElement, tex: Texture2D) -> StyleBox:
+	var ub = _stylebox(style, el, true)
+	var img: StyleBox
+	if _needs_placement(style):
+		img = _image_stylebox(tex, style, el)
+	else:
+		img = _texture_stylebox(tex, style, el)
+	for side in ["left", "top", "right", "bottom"]:
+		img.set("content_margin_" + side, 0.0)
+	if ub is UxmlBoxStyle:
+		ub.image = img
+		return ub
+	return img
+
+
+## Whether a box style draws anything (a fill, a border or a radius).
+static func _box_drawn(sb: StyleBox) -> bool:
+	if sb is UxmlBoxStyle:
+		return true
+	var f := sb as StyleBoxFlat
+	return f != null and (f.draw_center or f.border_width_left > 0 or f.border_width_top > 0
+		or f.border_width_right > 0 or f.border_width_bottom > 0)
+
+
 func _has_slice_or_tint(style: Dictionary) -> bool:
 	for k in ["-unity-slice-left", "-unity-slice-right", "-unity-slice-top",
 			"-unity-slice-bottom", "-unity-background-image-tint-color"]:
@@ -766,7 +811,13 @@ func _has_slice_or_tint(style: Dictionary) -> bool:
 func _apply_box(box: UxmlBox, el: UxmlElement, style: Dictionary) -> void:
 	box.box_style = _stylebox(style, el)
 	var tex := _texture(style, "background-image", el)
-	if tex != null and _needs_placement(style):
+	if tex != null and box.box_style != null and _box_drawn(box.box_style):
+		# A background colour, border or radius with the image: the image
+		# draws between the fill and the border (UxmlBoxStyle), as in Unity.
+		box.box_style = _with_image(style, el, tex)
+		box.box_texture_style = null
+		box.box_texture = null
+	elif tex != null and _needs_placement(style):
 		box.box_texture_style = _image_stylebox(tex, style, el)
 		box.box_texture = null
 	elif tex != null and _has_slice_or_tint(style):
@@ -1266,7 +1317,9 @@ const _BR := [
 const _PAD := ["padding-top", "padding-right", "padding-bottom", "padding-left"]
 
 
-func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
+## `force_box`: a UxmlBoxStyle even when StyleBoxFlat would draw the box
+## the same (a background image goes between its fill and its border).
+func _stylebox(style: Dictionary, el: UxmlElement, force_box := false) -> StyleBox:
 	var bg := _color(style, "background-color", el)
 	# Per-side values in [top, right, bottom, left] order; corners clockwise
 	# from top-left. Diagnostics are emitted in the original order.
@@ -1279,7 +1332,9 @@ func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 		var w := 0.0
 		var p := UssValues.parse_length(String(e["value"]))
 		if p["kind"] == "px":
-			w = maxf(0.0, p["value"])
+			# On the pixel grid, as the layout lays the border out (and
+			# Unity draws it: 1.5px draws 2px wide).
+			w = UxmlFlexLayout.grid_box(maxf(0.0, p["value"]), true)
 		elif p["kind"] == "invalid":
 			_warn(el, "border-width", "border-%s-width: %s" % [_SIDES[k], p["problem"]])
 		else:
@@ -1288,19 +1343,32 @@ func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 		any_border = any_border or w > 0.0
 	var any_bcolor := false
 	var first_bcolor: Variant = null
+	# Unity's initial border colour is transparent (measured: a border
+	# width without a colour draws nothing).
+	var bcolors: Array[Color] = [Color.TRANSPARENT, Color.TRANSPARENT, Color.TRANSPARENT, Color.TRANSPARENT]
+	var mixed := false
 	for k in 4:
 		if not style.has(_BC[k]):
 			continue
-		var c := _color(style, _BC[k], el)
+		var c = _color(style, _BC[k], el)
 		if c != null:
 			any_bcolor = true
+			bcolors[k] = c
 			if first_bcolor == null:
 				first_bcolor = c
-			elif c != first_bcolor:
-				_warn_once_key(
-					"border-color-mixed", el,
-					"per-side border colors differ; StyleBoxFlat supports one border color — the first is used"
-				)
+	var drawn: Variant = null
+	for k in 4:
+		if widths[k] > 0.0:
+			if drawn == null:
+				drawn = bcolors[k]
+			elif bcolors[k] != drawn:
+				mixed = true
+	if not mixed:
+		# The colour of the drawn sides (StyleBoxFlat has one).
+		for k in 4:
+			if widths[k] > 0.0:
+				first_bcolor = bcolors[k]
+				break
 	var radii := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 	var any_radius := false
 	for k in 4:
@@ -1343,10 +1411,21 @@ func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 	if not has_visual:
 		return null
 
+	# StyleBoxFlat draws a box like Unity when its corners are square, its
+	# drawn sides have one colour and it has no background under a border;
+	# Unity's elliptic corners, per-side colours and the background under
+	# the border (seen through a translucent border, or an opaque one at
+	# an opacity below 1) need UxmlBoxStyle.
+	if force_box or any_radius or mixed or (any_border and bg != null and bg.a > 0.0):
+		var ub := UxmlBoxStyle.new()
+		ub.bg_color = bg if bg != null else Color.TRANSPARENT
+		ub.widths = widths.duplicate()
+		ub.colors = bcolors
+		ub.radii = radii.duplicate()
+		_box_margins(ub, widths, pads)
+		return ub
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg if bg != null else Color.TRANSPARENT
-	# Unity's initial border colour is transparent (measured: a border
-	# width without a colour draws nothing).
 	sb.border_color = first_bcolor if first_bcolor != null else Color.TRANSPARENT
 	sb.border_width_top = int(widths[0])
 	sb.border_width_right = int(widths[1])
@@ -1365,12 +1444,23 @@ func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 		widths[1] + pads[1],
 		widths[2] + pads[2],
 	])
-	sb.corner_radius_top_left = int(radii[0])
-	sb.corner_radius_top_right = int(radii[1])
-	sb.corner_radius_bottom_right = int(radii[2])
-	sb.corner_radius_bottom_left = int(radii[3])
 	sb.draw_center = bg != null
 	return sb
+
+
+## Content margins (border + padding) of a UxmlBoxStyle, as _stylebox
+## gives a StyleBoxFlat.
+static func _box_margins(sb: StyleBox, widths: PackedFloat64Array, pads: PackedFloat64Array) -> void:
+	sb.content_margin_top = widths[0] + pads[0]
+	sb.content_margin_right = widths[1] + pads[1]
+	sb.content_margin_bottom = widths[2] + pads[2]
+	sb.content_margin_left = widths[3] + pads[3]
+	sb.set_meta("uxml_margins", [
+		widths[3] + pads[3],
+		widths[0] + pads[0],
+		widths[1] + pads[1],
+		widths[2] + pads[2],
+	])
 
 
 ## Post-layout correction: the flex pass has resolved percentage padding
@@ -1638,11 +1728,22 @@ func _apply_overflow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 		else:
 			inset = _px_insets(style, false)
 	var clip = (c.get_meta("uxml_clip") if c.has_meta("uxml_clip") else null)
-	if hidden and inset != Vector4.ZERO:
+	# Unity clips to the rounded inner outline of a box with a radius.
+	var radii := PackedFloat64Array()
+	if hidden:
+		for k in 4:
+			var re = style.get(_BR[k])
+			if re != null:
+				var p := UssValues.parse_length(String(re["value"]))
+				if p["kind"] == "px" and float(p["value"]) > 0.0:
+					radii.resize(4)
+					radii[k] = float(p["value"])
+	if hidden and (inset != Vector4.ZERO or not radii.is_empty()):
 		if clip == null:
 			clip = UxmlClip.new(c)
 			c.set_meta("uxml_clip", clip)
 		clip.set_inset(inset)
+		clip.set_radii(radii)
 		if box == "content-box":
 			_clip_content[c] = true
 		else:
