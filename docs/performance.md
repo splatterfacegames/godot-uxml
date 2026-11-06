@@ -1039,3 +1039,316 @@ What remains:
   the largest engine cost of a load. An empty Label costs as much as one
   with text, so the cost is presumably the per-control theme item
   caching. None of the document-side changes tried here made it cheaper.
+
+## Cost of Unity's clipping, recovered (`perf/clip`)
+
+Goal: recover what the corpus merge (`unity/corpus`, f6696c6) added to
+layout and load times, without changing any output. That merge made the
+default theme clip many control parts (`overflow: hidden` on field
+labels, toggles, radio buttons, popup and composite fields, ...), and
+with it came the label elision that `text-overflow: ellipsis` enables.
+Measured with `bench/bench.gd -- --quick` against a2a1544 (the main
+before it), the merge cost about 10 % on the theme's layout operations.
+
+### Where the time went
+
+`bench/clip_ab.gd` (new) loads two copies of the large bench document in
+one process. Side A uses the stock default theme. Side B uses the same
+theme without the "Unity clips these controls and parts" block. The
+script runs the same operations on both, alternating between them, and
+loads the fixtures the same way. Options: keep only some selectors of
+the block, use another theme file for side B, compare the stock theme
+with itself (`--same`, the noise floor), or switch parts of the clipping
+off after the load (`--strip`). The noise floor is ±1.5 %, except for
+the 1.2 ms button hover, which moved by up to ±14 %. With the block, the
+large document has 212 clipping controls instead of 32: 60 Toggles and
+their inputs (`clip_contents`), 30 TextFields (`clip_contents`), and the
+30 TextField labels (`clip_contents`, `clip_text` and elision).
+
+On f6696c6, from two runs of 80 rounds (A/B ratio of the medians):
+
+| op | A/B |
+| --- | ---: |
+| set_class churn (card) | 1.040 / 1.045 |
+| set_text + relayout | 1.058 / 1.055 |
+| resize relayout | 1.062 / 1.065 |
+| load review.uxml | 1.046 / 1.044 |
+| load runtime.uxml | 1.020 / 1.022 |
+| load wl_settings.uxml | 1.013 / 1.006 |
+
+Splitting it up:
+
+- **Godot's clipping costs nothing measurable.** Switching
+  `clip_contents` off after the load (`--strip=contents`) changed no op
+  (ratios 0.99 to 1.01). `Control.set_clip_contents` only queues a
+  redraw. Writing the position and size of 150 controls takes the same
+  time with and without the clip (1.71 against 1.73 ms). Drawing costs
+  the same as well. In `bench/render_cost.gd` (windowed, three
+  alternating runs), a frame of the large document took 0.75 to 0.91 ms
+  with the clip block and 0.83 to 1.04 ms with the a2a1544 theme, which
+  has no such block. Clipping only when the content overflows would
+  therefore save nothing, so the clip stays unconditional.
+- **A meta check per text control and layout pass.** Once any control
+  of a document clips text (`UxmlStyleApplier.clip_texts > 0`), the
+  native measurer asked every Label and Button whether it carries the
+  `uxml_clip_text` meta, once per pass. An engine call from the native
+  core costs about 0.5 us, and the large document has about 900 text
+  controls. That is 0.4 to 0.5 ms per layout, 3 to 4 % of a relayout.
+  Every Label and Button measured 0.4 to 0.8 us slower, clipped or not
+  (timed per element in the native measurer with temporary
+  instrumentation).
+- **Measuring clipped text.** A clipped Label is measured with
+  `clip_text` switched off and then on again. An elided Label also has
+  its full text swapped in and back out. One such measure took 5 to
+  7 us instead of under 1 us: 0.2 ms per layout for the 30 TextField
+  labels.
+- **The elision pass** that runs after each layout checks the 30 labels
+  against its memo: 0.12 to 0.16 ms per layout (about 1 %).
+- **Apply at load.** `overflow` puts a control on the visual-property
+  path. That path also ran the opacity, transform, cursor, filter and
+  material steps, each of which returned at once: 17 us per control
+  and apply, about 0.5 ms of a review.uxml load. Reading the border
+  insets through per-side temporary arrays took 5 us of that.
+
+### What changed
+
+- The native layout keeps, per control and across layouts, whether the
+  control clips its text (`LayoutIn::cliptext`), like its other
+  cross-layout caches (`maxc`, `unfit`, `margins`). Only `apply()` sets
+  or removes `uxml_clip_text`, so an entry is dropped whenever its
+  control is applied again: the re-applied controls of a layout
+  (`force`) and of a paint-only restyle (`place_only`; `overflow` is
+  paint-only). The per-pass memo stays for the layout that does not
+  place.
+- Both measurers keep the full-text measure of clipped text in the
+  `uxml_clip_full` meta: [full text, clipped minimum size, full minimum
+  size]. A hit needs the same full text and the same minimum size with
+  `clip_text` on. That size follows the font height, the stylebox
+  margins and `custom_minimum_size`: a `custom_minimum_size` that would
+  change the full size also changes the clipped one. `apply()` and new
+  insets drop the meta, as they drop `uxml_maxc`.
+- `_apply_visual` makes each step's own early-out test before calling
+  it, so the result is the same. Opacity runs only when it is declared
+  or the alpha is not 1. The transform runs only when it is declared or
+  enabled. Cursor, filter and material run only when they are declared
+  or were set before. `_px_insets` reads the eight entries directly and
+  skips the absent ones.
+- `update_elision` runs its memo test without copying the keys. The work
+  for a control whose memo misses moved into `_elide_one`.
+- `tests/test_visual.gd` (`test_clipped_text_measure_follows_changes`)
+  compares four clipped controls with a fresh load of the same final
+  state, on both paths. The changes it makes are: text set on the
+  control, `set_text` that elides, `set_text` on an elided Label, a new
+  font size, `overflow` switched off and on again (a paint-only
+  restyle), and a resize. With the native cache drops disabled, the
+  `overflow: visible` steps fail.
+
+Tried and dropped:
+
+- The elision pass's memo test in the native core (`elide_stale`) took
+  84 us for the 30 labels, as long as the GDScript loop (64 us). The
+  engine calls (text, size, font size) dominate either way.
+- Skipping the cascade's new `unset` comparison, and its font-size
+  percentage step for elements without their own font-size, was tested
+  in-process with a temporary switch. It changed `cascade resolve(big)`
+  by 0 to 2 % and no steady-state op, so the cascade is unchanged.
+
+### Results
+
+**In-process A/B on this branch** (`bench/clip_ab.gd`, two runs of 80
+rounds, A/B ratio):
+
+| op | f6696c6 | branch |
+| --- | ---: | ---: |
+| set_class churn (card) | 1.040 / 1.045 | 1.023 / 1.032 |
+| set_text + relayout | 1.058 / 1.055 | 1.013 / 1.023 |
+| resize relayout | 1.062 / 1.065 | 1.017 / 1.009 |
+| hover toggle (button) | 1.002 / 0.998 | 1.002 / 0.985 |
+| load review.uxml | 1.046 / 1.044 | 1.041 / 1.031 |
+| load runtime.uxml | 1.020 / 1.022 | 1.015 / 1.022 |
+| load Options.uxml | 0.998 / 0.986 | 0.998 / 1.005 |
+| load wl_settings.uxml | 1.013 / 1.006 | 1.014 / 1.006 |
+
+On the steady-state layouts, the theme's clipping now costs 1 to 2 %
+(it cost 4 to 6.5 %). On loads it costs 2 to 4 %, almost as much as
+before: the first measure of each clipped label, the first elision and
+the applies remain.
+
+**a2a1544 (pre-corpus), f6696c6 (main) and this branch**:
+`bench/bench.gd -- --quick` and `bench/workloads.gd -- --quick`, each
+with and without `-- --no-theme`, in separate worktrees. Each of 15
+rounds ran every script and mode for a2a1544, then f6696c6, then the
+branch. The tables give the median of the 15 medians (ms, native core).
+Other agents' Godot and Unity processes loaded the machine during the
+runs.
+
+`bench.gd`, theme:
+
+| op | a2a1544 | f6696c6 | branch | branch / a2a1544 | branch / f6696c6 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| parse_uxml(big) | 22.121 | 22.346 | 21.943 | 0.992 | 0.982 |
+| parse_uss(3 sheets) | 5.242 | 5.216 | 5.187 | 0.990 | 0.994 |
+| loader(big) | 43.340 | 45.153 | 44.447 | 1.026 | 0.984 |
+| cascade resolve(big) | 87.246 | 88.194 | 88.204 | 1.011 | 1.000 |
+| cascade resolve(big, hover) | 95.657 | 97.030 | 97.048 | 1.015 | 1.000 |
+| load_document(big) full | 636.391 | 653.716 | 650.964 | 1.023 | 0.996 |
+| load_document(runtime.uxml) | 20.665 | 21.404 | 20.986 | 1.016 | 0.980 |
+| load_document(review.uxml) | 32.057 | 34.704 | 33.469 | 1.044 | 0.964 |
+| load_document(Options.uxml) | 17.226 | 17.986 | 17.532 | 1.018 | 0.975 |
+| load_document(Menu.uxml) | 3.375 | 3.471 | 3.476 | 1.030 | 1.001 |
+| hover toggle (button) | 1.152 | 1.193 | 1.144 | 0.993 | 0.959 |
+| hover toggle (card, desc sel) | 2.051 | 2.014 | 2.068 | 1.008 | 1.027 |
+| hover move (card i -> i+1) | 1.850 | 1.942 | 1.898 | 1.026 | 0.977 |
+| focus toggle (list item) | 1.563 | 1.639 | 1.558 | 0.997 | 0.951 |
+| set_class churn (card) | 14.144 | 15.503 | 14.850 | 1.050 | 0.958 |
+| set_text + refresh | 183.634 | 187.229 | 183.859 | 1.001 | 0.982 |
+| set_text + relayout | 12.119 | 13.887 | 12.912 | 1.065 | 0.930 |
+| resize relayout | 13.020 | 14.342 | 13.503 | 1.037 | 0.942 |
+| idle restyle (no change) | 0.780 | 0.837 | 0.834 | 1.069 | 0.996 |
+| transition frame (bg color) | 0.970 | 0.968 | 0.922 | 0.951 | 0.952 |
+| transition frame (width) | 11.140 | 12.407 | 11.608 | 1.042 | 0.936 |
+| hud frame (8 labels + refresh) | 2.885 | 2.829 | 2.822 | 0.978 | 0.998 |
+| hud frame (8 labels + relayout) | 0.541 | 0.509 | 0.522 | 0.965 | 1.026 |
+| hud frame (8 labels, no refresh) | 0.037 | 0.037 | 0.037 | 1.000 | 1.000 |
+| hud hover toggle | 0.274 | 0.269 | 0.284 | 1.036 | 1.056 |
+| geomean ratio | | | | 1.015 | 0.982 |
+
+`bench.gd`, no theme:
+
+| op | a2a1544 | f6696c6 | branch | branch / a2a1544 | branch / f6696c6 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| parse_uxml(big) | 23.069 | 22.234 | 22.404 | 0.971 | 1.008 |
+| parse_uss(3 sheets) | 5.351 | 5.357 | 5.377 | 1.005 | 1.004 |
+| loader(big) | 43.881 | 44.460 | 45.627 | 1.040 | 1.026 |
+| cascade resolve(big) | 87.571 | 90.254 | 89.396 | 1.021 | 0.990 |
+| cascade resolve(big, hover) | 96.760 | 97.942 | 98.835 | 1.021 | 1.009 |
+| load_document(big) full | 586.901 | 587.887 | 590.141 | 1.006 | 1.004 |
+| load_document(runtime.uxml) | 17.145 | 17.276 | 17.019 | 0.993 | 0.985 |
+| load_document(review.uxml) | 27.741 | 28.124 | 28.188 | 1.016 | 1.002 |
+| load_document(Options.uxml) | 12.643 | 12.815 | 12.514 | 0.990 | 0.977 |
+| load_document(Menu.uxml) | 2.648 | 2.773 | 2.552 | 0.964 | 0.920 |
+| hover toggle (button) | 1.166 | 1.111 | 1.115 | 0.956 | 1.004 |
+| hover toggle (card, desc sel) | 1.771 | 1.777 | 1.768 | 0.998 | 0.995 |
+| hover move (card i -> i+1) | 1.643 | 1.708 | 1.672 | 1.018 | 0.979 |
+| focus toggle (list item) | 1.382 | 1.398 | 1.420 | 1.027 | 1.016 |
+| set_class churn (card) | 14.782 | 14.716 | 14.904 | 1.008 | 1.013 |
+| set_text + refresh | 159.290 | 156.608 | 158.752 | 0.997 | 1.014 |
+| set_text + relayout | 13.466 | 13.313 | 13.591 | 1.009 | 1.021 |
+| resize relayout | 14.284 | 14.337 | 14.294 | 1.001 | 0.997 |
+| idle restyle (no change) | 0.802 | 0.805 | 0.790 | 0.985 | 0.981 |
+| transition frame (bg color) | 0.919 | 0.853 | 0.917 | 0.998 | 1.075 |
+| transition frame (width) | 12.466 | 12.208 | 12.376 | 0.993 | 1.014 |
+| hud frame (8 labels + refresh) | 2.541 | 2.526 | 2.494 | 0.982 | 0.987 |
+| hud frame (8 labels + relayout) | 0.530 | 0.481 | 0.529 | 0.998 | 1.100 |
+| hud frame (8 labels, no refresh) | 0.038 | 0.035 | 0.040 | 1.053 | 1.143 |
+| hud hover toggle | 0.254 | 0.266 | 0.252 | 0.992 | 0.947 |
+| geomean ratio | | | | 1.001 | 1.008 |
+
+`workloads.gd`, theme:
+
+| op | a2a1544 | f6696c6 | branch | branch / a2a1544 | branch / f6696c6 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| settings: load + first layout | 71.505 | 75.261 | 73.299 | 1.025 | 0.974 |
+| settings: switch tab (display none/flex) | 8.041 | 8.925 | 8.599 | 1.069 | 0.963 |
+| settings: hover row | 0.374 | 0.362 | 0.403 | 1.078 | 1.113 |
+| inventory: load + first layout | 92.677 | 94.025 | 93.643 | 1.010 | 0.996 |
+| inventory: hover slot | 0.617 | 0.639 | 0.628 | 1.018 | 0.983 |
+| inventory: select slot (set_class) | 1.370 | 1.301 | 1.394 | 1.018 | 1.071 |
+| inventory: count change + relayout | 1.108 | 1.083 | 1.109 | 1.001 | 1.024 |
+| dialog: load + first layout | 9.893 | 10.401 | 10.270 | 1.038 | 0.987 |
+| dialog: typewriter char + relayout | 0.359 | 0.356 | 0.386 | 1.075 | 1.084 |
+| dialog: hover choice | 0.140 | 0.141 | 0.132 | 0.943 | 0.936 |
+| list1k: load + first layout | 1590.055 | 1594.553 | 1596.778 | 1.004 | 1.001 |
+| list1k: hover row | 1.126 | 1.200 | 1.189 | 1.056 | 0.991 |
+| list1k: update one row + relayout | 18.172 | 18.379 | 18.599 | 1.023 | 1.012 |
+| listview10k: load + 10k items + first layout | 72.325 | 73.433 | 73.681 | 1.019 | 1.003 |
+| listview10k: scroll 3 rows (rebind + relayout) | 2.694 | 2.802 | 2.916 | 1.082 | 1.041 |
+| listview10k: hover row | 0.312 | 0.293 | 0.319 | 1.022 | 1.089 |
+| listview10k: update all visible items (refresh_list) | 2.163 | 2.223 | 2.264 | 1.047 | 1.018 |
+| geomean ratio | | | | 1.031 | 1.016 |
+
+`workloads.gd`, no theme:
+
+| op | a2a1544 | f6696c6 | branch | branch / a2a1544 | branch / f6696c6 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| settings: load + first layout | 62.527 | 62.598 | 62.823 | 1.005 | 1.004 |
+| settings: switch tab (display none/flex) | 6.642 | 6.726 | 6.694 | 1.008 | 0.995 |
+| settings: hover row | 0.338 | 0.366 | 0.335 | 0.991 | 0.915 |
+| inventory: load + first layout | 84.607 | 85.730 | 85.693 | 1.013 | 1.000 |
+| inventory: hover slot | 0.572 | 0.553 | 0.589 | 1.030 | 1.065 |
+| inventory: select slot (set_class) | 1.221 | 1.239 | 1.278 | 1.047 | 1.031 |
+| inventory: count change + relayout | 0.978 | 1.020 | 0.962 | 0.984 | 0.943 |
+| dialog: load + first layout | 8.740 | 8.976 | 8.973 | 1.027 | 1.000 |
+| dialog: typewriter char + relayout | 0.340 | 0.316 | 0.355 | 1.044 | 1.123 |
+| dialog: hover choice | 0.135 | 0.126 | 0.129 | 0.956 | 1.024 |
+| list1k: load + first layout | 1253.504 | 1258.451 | 1254.339 | 1.001 | 0.997 |
+| list1k: hover row | 1.130 | 1.207 | 1.135 | 1.004 | 0.940 |
+| list1k: update one row + relayout | 13.684 | 13.955 | 14.019 | 1.024 | 1.005 |
+| listview10k: load + 10k items + first layout | 62.121 | 63.236 | 62.592 | 1.008 | 0.990 |
+| listview10k: scroll 3 rows (rebind + relayout) | 2.440 | 2.441 | 2.471 | 1.013 | 1.012 |
+| listview10k: hover row | 0.229 | 0.227 | 0.240 | 1.048 | 1.057 |
+| listview10k: update all visible items (refresh_list) | 2.038 | 2.119 | 2.118 | 1.039 | 1.000 |
+| geomean ratio | | | | 1.014 | 1.005 |
+
+What the tables show, with the theme on, against f6696c6: set_text +
+relayout −7 %, resize relayout −6 %, transition frame (width) −6 %,
+set_class churn −4 %, hover toggle (button) −4 %, review.uxml load
+−4 %, settings load −3 %. Without the theme no control clips text, so
+the branch's changes barely run: the geomeans are 1.008 (`bench.gd`) and
+1.005 (`workloads.gd`). Single ops spread as untouched code does, for
+example Menu.uxml load 0.92, transition frame (bg color) 1.075 and
+dialog typewriter 1.12.
+
+**Against a2a1544** the theme's layout ops are still 4 to 6.5 % slower
+(set_text + relayout 1.065, set_class churn 1.050, transition frame
+(width) 1.042, resize relayout 1.037), and so is the review.uxml load
+(1.044). Without the theme they are flat (0.99 to 1.02). A second run
+of 10 rounds split that gap. It ran three versions with the theme on:
+a2a1544, this branch with a2a1544's four theme files, and this branch.
+
+| op | a2a1544 | branch, old theme | branch | branch / a2a1544 | theme share |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| set_text + relayout | 12.241 | 12.622 | 12.796 | 1.045 | 1.014 |
+| resize relayout | 12.679 | 13.348 | 13.710 | 1.081 | 1.027 |
+| set_class churn (card) | 14.163 | 14.505 | 14.764 | 1.042 | 1.018 |
+| transition frame (width) | 11.116 | 11.269 | 11.808 | 1.062 | 1.048 |
+| load_document(review.uxml) | 31.805 | 32.934 | 33.428 | 1.051 | 1.015 |
+| load_document(Menu.uxml) | 3.130 | 3.309 | 3.438 | 1.098 | 1.039 |
+| transition frame (bg color) | 0.865 | 0.921 | 0.962 | 1.112 | 1.045 |
+
+The theme share (branch / branch with the old theme) agrees with the
+in-process A/B of the current theme against a2a1544's theme on this
+branch (`--theme-b`): set_class churn 1.022, set_text + relayout 1.016,
+resize relayout 1.013, review.uxml load 1.038. The rest of the gap
+appears only when comparing separate processes. It is of the same size
+as the drift of ops that neither change touches: Menu.uxml (nothing
+clipped) and the paint-only transition read 4 to 11 % slower in the
+same rounds. The cascade's new steps were measured in-process at 0 to
+2 % of a full resolve and nothing per steady-state op (see above). The
+remaining gap is therefore treated as noise, not a measured cost.
+
+Correctness, on the final state of the branch (each run on its own):
+`tests/run_tests.py` 2202 checks across 345 tests (main: 2184 / 344;
+the new visual test adds 18 checks); `bench/parity.gd` UNITY PARITY
+169/170 (structure 4188/4188, geometry 13955/13956, style
+281164/281165, element properties 4895/4895, import diagnostics
+86/86), PARITY 32 match / 12 differ, as on main; `bench/equiv.gd` 1530
+(native) / 1295 (`--gdscript`), `bench/equiv_layout.gd` 216 / 216,
+`bench/equiv_runtime.gd` 1400 / 1400, `bench/equiv_parse.gd`
+2783 / 2783, 0 failures each.
+
+What remains:
+
+- The theme's clipping still costs 1 to 2 % on layouts and 2 to 4 % on
+  loads of documents with many clipped fields (in-process). On layouts
+  the cost is the elision memo test (about 4 us per elided-capable
+  label and layout, mostly engine calls) and the cached measure of
+  clipped text (about 3 us per clipped label, also engine calls). On
+  loads it is the first measure of each clipped label (two `clip_text`
+  switches), the first elision pass and `UxmlClip` for the bordered
+  popup inputs.
+- Every Label and Button still pays one `uxml_clip_text` meta check in
+  the first layout after it is applied.
+- Both layouts of a steady-state op (the timed restyle and the settling
+  layout in the next frame) still do this work; the settling layout is
+  older than this branch and outside the timed region.
