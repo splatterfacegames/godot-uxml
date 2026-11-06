@@ -1,0 +1,8 @@
+.t { position: absolute; margin: 0; padding: 0; color: rgb(20, 20, 20); }
+#color { color: rgb(200, 30, 120); }
+#outline { -unity-text-outline-width: 1px; -unity-text-outline-color: rgb(255, 160, 0); }
+#shadow { text-shadow: 2px 2px 0 rgb(120, 120, 255); }
+#shadow-blur { text-shadow: 2px 2px 4px rgb(0, 0, 0); }
+.box { width: 90px; height: 50px; background-color: rgb(225, 235, 245); }
+.wrapbox { width: 90px; height: 66px; white-space: normal; background-color: rgb(245, 235, 225); }
+.ell { width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background-color: rgb(230, 245, 230); }

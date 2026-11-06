@@ -1,0 +1,12 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[sub_resource type="Shader" id="Shader_inv"]
+code = "shader_type canvas_item;
+// Invert.shader: the colour inverted, alpha kept.
+void fragment() {
+	COLOR.rgb = vec3(1.0) - COLOR.rgb;
+}
+"
+
+[resource]
+shader = SubResource("Shader_inv")

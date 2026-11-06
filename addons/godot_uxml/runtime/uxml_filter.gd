@@ -52,7 +52,12 @@ vec4 color_op(vec4 c, int i) {
 	c = m * c;
 	c.rgb += vec3(op_v[i].x);
 	c.rgb = mix(c.rgb, vec3(1.0) - c.rgb, op_v[i].y);
-	return clamp(c, vec4(0.0), vec4(1.0));
+	// Each of Unity's passes ends in valid premultiplied color (measured:
+	// invert() then blur() does not spread white from the transparent
+	// pixels around the element, which invert turns to rgb 1, alpha 0).
+	c = clamp(c, vec4(0.0), vec4(1.0));
+	c.rgb = min(c.rgb, vec3(c.a));
+	return c;
 }
 
 // Pair j of one axis: j = 0 is the center pixel; j > 0 merges pixels
@@ -370,7 +375,9 @@ static func apply_color_effect(effect: Array, c: Color) -> Color:
 	var inv: float = effect[2]
 	var rgb := Vector3(o.x + off, o.y + off, o.z + off)
 	rgb = rgb.lerp(Vector3.ONE - rgb, inv)
-	return Color(clampf(rgb.x, 0, 1), clampf(rgb.y, 0, 1), clampf(rgb.z, 0, 1), clampf(o.w, 0, 1))
+	var a := clampf(o.w, 0, 1)
+	# Valid premultiplied color, as FILTER_SHADER's color_op.
+	return Color(minf(clampf(rgb.x, 0, 1), a), minf(clampf(rgb.y, 0, 1), a), minf(clampf(rgb.z, 0, 1), a), a)
 
 
 ## Sample spacing of a blur with kernel radius `kernel`: 1 (exact) up to

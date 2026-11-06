@@ -75,7 +75,8 @@ func _case_files(dir: String, rel: String = "") -> Dictionary:
 	if d == null:
 		return out
 	for f in d.get_files():
-		out[rel + f] = FileAccess.get_file_as_string(dir + "/" + f)
+		# Bytes: a case can have images beside its sheets.
+		out[rel + f] = FileAccess.get_file_as_bytes(dir + "/" + f)
 	for sub in d.get_directories():
 		out.merge(_case_files(dir + "/" + sub, rel + sub + "/"))
 	return out
@@ -433,10 +434,13 @@ func _negative(c: Dictionary, r: Dictionary) -> bool:
 	return ok
 
 
-func _write(path: String, text: String) -> void:
+func _write(path: String, content: Variant) -> void:
 	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
 	var f := FileAccess.open(path, FileAccess.WRITE)
-	f.store_string(text)
+	if content is PackedByteArray:
+		f.store_buffer(content)
+	else:
+		f.store_string(content)
 	f.close()
 
 
@@ -1370,6 +1374,41 @@ func _ext_style_diffs(us: Dictionary, st: Dictionary, el: UxmlElement, styles: D
 			got = pc["color"] if pc["ok"] else Color(1, 0, 1, 0.5)
 		_check(out, diffs, _color_eq(got, _ucolor(String(us["-unity-text-outline-color"]))),
 			"-unity-text-outline-color: ours %s vs Unity %s" % [_fmt(got), us["-unity-text-outline-color"]])
+	# filter: Unity's function list (`blur(3)`, `hue-rotate(1.570796)`,
+	# `tint(RGBA(0.000, 1.000, 0.588, 1.000))`) against the parsed value.
+	if us.has("filter"):
+		var v := _ov(st, "filter")
+		var got: Array = []
+		var pf := UssValues.parse_filter(v)
+		for fn in pf["funcs"] if pf["ok"] else []:
+			got.append(_filter_fn(String(fn["name"]), fn["params"]))
+		var want: Array = []
+		for s in us["filter"]:
+			want.append(_canon_unity_filter(String(s)))
+		_check(out, diffs, got == want, "filter: ours %s vs Unity %s" % [got, us["filter"]])
+	# -unity-material: the material asset's name (prop() values are
+	# compared by pixels, bench/pixels.py).
+	if us.has("-unity-material"):
+		var v := _ov(st, "-unity-material")
+		var got := "null"
+		if not v.is_empty():
+			var pm := UssValues.parse_material(v)
+			var ref := String(pm["ref"]) if pm["ok"] else ""
+			if not ref.is_empty():
+				got = ref.trim_prefix("url(").trim_prefix("resource(").trim_suffix(")") \
+					.replace("\"", "").replace("'", "").get_file().get_basename()
+				# Unity's MaterialDefinition text: `Name { _P=value, ... }`.
+				var ps := PackedStringArray()
+				for pp in pm["props"]:
+					var pv = pp["value"]
+					if pv is Color:
+						ps.append("%s=RGBA(%.3f, %.3f, %.3f, %.3f)" % [pp["name"], pv.r, pv.g, pv.b, pv.a])
+					else:
+						ps.append("%s=%s" % [pp["name"], str(pv)])
+				if not ps.is_empty():
+					got += " { " + ", ".join(ps) + " }"
+		_check(out, diffs, got == String(us["-unity-material"]),
+			"-unity-material: ours %s vs Unity %s" % [got, us["-unity-material"]])
 	# Background placement.
 	var bg := {}
 	for axis in ["x", "y"]:
@@ -1507,6 +1546,32 @@ func _ext_style_diffs(us: Dictionary, st: Dictionary, el: UxmlElement, styles: D
 			want.append(_canon_tr(uk, str(part)))
 		_check(out, diffs, got == want, "%s: ours %s vs Unity %s" % [uk, got, want])
 	return diffs
+
+
+## One filter function as text, numbers to 3 decimals, a colour as
+## r,g,b,a to 3 decimals: `blur(3.000)`, `tint(0.000,1.000,0.588,1.000)`.
+static func _filter_fn(name: String, params: Array) -> String:
+	var ps := PackedStringArray()
+	for p in params:
+		if p is Color:
+			ps.append("%.3f,%.3f,%.3f,%.3f" % [p.r, p.g, p.b, p.a])
+		else:
+			ps.append("%.3f" % float(p))
+	return "%s(%s)" % [name, ",".join(ps)]
+
+
+## Unity's dump of a filter function in _filter_fn's form.
+static func _canon_unity_filter(s: String) -> String:
+	var open := s.find("(")
+	var name := s.substr(0, open)
+	var inner := s.substr(open + 1, s.length() - open - 2)
+	if inner.begins_with("RGBA("):
+		var c := inner.trim_prefix("RGBA(").trim_suffix(")").split(",")
+		var ps := PackedStringArray()
+		for x in c:
+			ps.append("%.3f" % String(x).strip_edges().to_float())
+		return "%s(%s)" % [name, ",".join(ps)]
+	return "%s(%.3f)" % [name, inner.to_float()]
 
 
 static func _canon_tr(prop: String, s: String) -> String:

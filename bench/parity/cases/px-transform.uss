@@ -1,0 +1,14 @@
+.c { position: absolute; width: 60px; height: 40px; background-color: rgb(60, 120, 220); border-width: 2px; border-color: rgb(0, 0, 0); }
+#r15 { rotate: 15deg; }
+#r45 { rotate: 45deg; }
+#r90 { rotate: 90deg; }
+#scale { scale: 1.3 0.7; }
+#half-px { translate: 0.5px 0.5px; }
+#origin { rotate: 30deg; transform-origin: left top; }
+#nested { rotate: -20deg; }
+#nested-kid { position: absolute; left: 10px; top: 10px; width: 30px; height: 15px; background-color: rgb(250, 200, 0); rotate: 40deg; scale: 1.2; }
+#round-rot { border-radius: 12px; rotate: 30deg; }
+#flip { scale: -1 1; border-left-color: rgb(255, 0, 0); border-left-width: 6px; }
+#skinny { width: 2px; height: 50px; border-width: 0; rotate: 30deg; }
+#scale-small { scale: 0.5; }
+#translate-pct { translate: 10% -20%; rotate: 10deg; }

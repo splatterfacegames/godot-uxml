@@ -1,0 +1,19 @@
+.c { position: absolute; width: 80px; height: 48px; }
+.wide { height: 32px; }
+#stretch { background-image: url("checker.png"); }
+#fit { background-image: url("checker.png"); -unity-background-scale-mode: scale-to-fit; background-color: rgb(200, 200, 200); }
+#crop { background-image: url("checker.png"); -unity-background-scale-mode: scale-and-crop; }
+#tiles { background-image: url("checker.png"); background-size: 16px 16px; background-repeat: repeat; background-position: left top; }
+#repeat-x { background-image: url("checker.png"); background-size: 20px 20px; background-repeat: repeat-x; background-position: right bottom; background-color: rgb(220, 220, 220); }
+#offset { background-image: url("checker.png"); background-size: 16px 16px; background-repeat: no-repeat; background-position: left 10px top 5px; background-color: rgb(220, 220, 220); }
+#space { background-image: url("checker.png"); background-size: 20px 20px; background-repeat: space; }
+#round-rep { background-image: url("checker.png"); background-size: 20px 20px; background-repeat: round; }
+#tint { background-image: url("checker.png"); -unity-background-image-tint-color: rgb(128, 128, 255); }
+#slice { background-image: url("frame.png"); -unity-slice-left: 6; -unity-slice-top: 6; -unity-slice-right: 6; -unity-slice-bottom: 6; }
+#slice-scale { background-image: url("frame.png"); -unity-slice-left: 6; -unity-slice-top: 6; -unity-slice-right: 6; -unity-slice-bottom: 6; -unity-slice-scale: 2px; }
+#slice-tiled { background-image: url("frame.png"); -unity-slice-left: 6; -unity-slice-top: 6; -unity-slice-right: 6; -unity-slice-bottom: 6; -unity-slice-type: tiled; }
+#radius { background-image: url("checker.png"); border-radius: 14px; }
+#on-color { background-image: url("disc.png"); background-color: rgb(255, 230, 200); }
+#border-img { background-image: url("checker.png"); border-width: 4px; border-color: rgb(0, 0, 0); }
+#center-small { background-image: url("disc.png"); background-size: 20px 20px; background-repeat: no-repeat; background-position: center; background-color: rgb(40, 40, 40); }
+#image { --unity-image: url("checker.png"); -unity-background-scale-mode: scale-to-fit; background-color: rgb(250, 240, 200); }

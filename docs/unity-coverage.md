@@ -15,7 +15,9 @@ Unity ground truth: the cases in `bench/parity/cases/` are dumped in Unity
 6000.3.24f1 (`tools/unity-dump`) and compared with every resolved style
 value, geometry through transforms, structure and import diagnostics
 (`bench/parity.gd`, docs/parity.md). The "Unity cases" column names the
-dumps that check a row; 169 of 170 cases match exactly.
+dumps that check a row; 176 of 177 cases match exactly. `bench/pixels.py`
+also compares what Unity and godot-uxml draw for every case (docs/parity.md,
+"Pixels"); the `px-*` cases cover the paint properties.
 
 ## USS properties
 
@@ -28,22 +30,22 @@ dumps that check a row; 169 of 170 cases match exactly.
 | `margin*` (including `auto`), `padding*`, `border-*-width` | done (on the pixel grid: margins and padding rounded, a nonzero border at least 1px, as Unity lays them out) | `lay-percent`, `lay-fraction`, `uss-shorthand`, `border-box` |
 | `position`, `top`, `right`, `bottom`, `left` | done | `lay-absolute`, `absolute-offsets`, `nested-absolute` |
 | `aspect-ratio` | done (a Label cannot shrink below its Godot minimum height) | `lay-minmax` |
-| `background-color`, `background-image`, `border-*-color`, `border-*-radius` | done | `uss-shorthand`, `uss-background`, `lay-percent` |
+| `background-color`, `background-image`, `border-*-color`, `border-*-radius` | done, drawn as Unity draws them (pixels): per-side colours, elliptic corners clamped per axis, the background under the border, the image between the background colour and the border and clipped to a rounded box (`UxmlBoxStyle`, design.md "Box drawing"); initial border colour transparent. Limit: a 9-sliced or placed image is not clipped to rounded corners | `uss-shorthand`, `uss-background`, `lay-percent`, `px-border`, `px-background` |
 | `color`, `font-size`, `-unity-font`, `-unity-font-definition`, `-unity-font-style`, `-unity-text-align` | done (`font-size` % computed against the parent, as in Unity) | `uss-text`, `uss-text-inherit`, `text-size`, `text-align` |
-| `-unity-slice-left/right/top/bottom`, `-unity-background-image-tint-color` | done (Unity reads `3px` as 3 and `1.6` as 1, with a warning; so does godot-uxml) | `uss-slice`, `uss-background` |
+| `-unity-slice-left/right/top/bottom`, `-unity-background-image-tint-color` | done (Unity reads `3px` as 3 and `1.6` as 1, with a warning; so does godot-uxml) | `uss-slice`, `uss-background`, `px-background` (pixels within 1px) |
 | `-unity-text-outline*` | done | `uss-text`, `uss-text-inherit` |
-| `opacity`, `overflow`, `-unity-overflow-clip-box` | done (rectangular clip only: no rounded-corner clipping) | `uss-visibility` |
-| `translate`, `rotate`, `scale`, `transform-origin` | done (z rotation only; z components ignored) | `uss-transform`, `tr-*` |
+| `opacity`, `overflow`, `-unity-overflow-clip-box` | done: a box with a radius clips its children to its rounded inner outline, as Unity does (`UxmlClip`, design.md "Opacity, overflow, clip box"); limit: a filter inside a rounded clip does not nest | `uss-visibility`, `px-clip` (pixels within 1px) |
+| `translate`, `rotate`, `scale`, `transform-origin` | done (z rotation only; z components ignored). Unity antialiases straight edges under rotation and at fractional positions, Godot does not (pixels: 99.8% within 1px) | `uss-transform`, `tr-*`, `px-transform` |
 | `cursor` | done (keywords map to the nearest Godot shape; the dumps check the keyword's Unity cursor id) | `uss-cursor`, `ed-*` |
 | `letter-spacing`, `word-spacing`, `-unity-paragraph-spacing` | done (em/100 units as in Unity; rounded to whole px; a percentage reads as px, as Unity reads it) | `uss-text`, `uss-text-inherit` |
-| `text-shadow`, `text-overflow`, `-unity-text-overflow-position`, `white-space` | done (blur is a Gaussian with sigma = blur / 2, Label only; no ellipsis on rich text) | `uss-text`, `uss-text-inherit`, `uss-text-wrap` |
+| `text-shadow`, `text-overflow`, `-unity-text-overflow-position`, `white-space` | done (blur is a Gaussian with sigma = blur / 2, Label only; no ellipsis on rich text) | `uss-text`, `uss-text-inherit`, `uss-text-wrap`, `px-text` (pixels: text placement and coverage only; the fonts differ) |
 | `background-position*`, `background-repeat`, `background-size`, `-unity-background-scale-mode` | done | `uss-background` |
 | `-unity-slice-type`, `-unity-slice-scale` | done | `uss-slice` |
 | `-unity-text-generator`, `-unity-editor-text-rendering-mode` | done (accepted; Godot has one text generator) | `uss-text`, `uss-text-inherit` |
 | `all` | done (`all: initial` beats every other declaration of the element, inline included; only `initial` is accepted, as in Unity) | `uss-all`, `uss-all-2` |
 | `transition`, `transition-*` | done | `tr-t100` ... `tr-t1200`, `tr-reverse`, `uss-shorthand` |
-| `filter` | done: every built-in function with Unity's math, chains, transitions; custom `filter()` maps to `UxmlFilterDefinition` (see design.md, "Filter" and "Custom filters"). Limits: no nested filters, one pass per custom filter, a custom function draws alone, blurs of one chain combine | not in the Unity corpus (dumped as an empty list everywhere): checked by tests only |
-| `-unity-material` | done: `url()`/`resource()` maps to a Godot `ShaderMaterial` (`.mat` -> `.tres` beside it), `prop()` values bind to uniforms, transitions (see design.md, "Material") | not in the Unity corpus (a material asset per case): checked by tests only |
+| `filter` | done: every built-in function with Unity's math, chains, transitions; custom `filter()` maps to `UxmlFilterDefinition` (see design.md, "Filter" and "Custom filters"). Each pass ends in valid premultiplied colour, as Unity's. Limits: no nested filters, one pass per custom filter, a custom function draws alone, blurs of one chain combine | `px-filter`: every built-in function (`blur`, `grayscale`, `contrast`, `hue-rotate` 90 and 180deg, `invert`, `opacity`, `sepia`, `tint`), chains with and without a blur, a translucent element, a rounded blurred box, blurred text: the parsed list matches Unity's (parity) and every box pixel is within 6 of 255 of Unity's render |
+| `-unity-material` | done: `url()`/`resource()` maps to a Godot `ShaderMaterial` (`.mat` -> `.tres` beside it), `prop()` values bind to uniforms, transitions (see design.md, "Material") | `px-material`: a UI Toolkit custom shader (`isCustomUITKShader`, Unity's `UnityUIE.cginc` vertex and fragment functions, then invert or a `_Tint` multiply) and its Godot `.tres` beside it; the material, `prop("_Tint" ...)`, inheritance by children and `none` on a child: the value matches Unity's (parity, prop values included) and the box pixels match (the one difference is a Label wider than its box, see docs/parity.md "Pixels") |
 | `-unity-text-auto-size` | done: best fit with the advanced text generator, both layout paths (see design.md, "Text auto size"). Whole-pixel font sizes | `uss-text`, `uss-text-inherit` (the computed value; the fitted size is Godot-font dependent) |
 
 ## USS syntax
@@ -179,7 +181,8 @@ with Unity dumps (`docs/parity.md`).
 
 | Control | Status |
 | --- | --- |
-| VisualElement, TemplateContainer, Label, TextElement, Image, Box | done (Label: rich text tags give a RichTextLabel) |
+| VisualElement, TemplateContainer, Label, TextElement, Image, Box | done (Label: rich text tags give a RichTextLabel; Image: `--unity-image`, `--unity-image-size`, `--unity-image-tint-color` as in Unity, and the `src`/`image` attribute) |
+| Button, Label text in a box too small for it | Button: done (the content margins fit the box, the text overflows as in Unity's render: `fit_button`). Label: Godot floors a Label at its text width, and at its line height below the glyph extent (`fit_label` covers one line down to that floor) |
 | Button, RepeatButton | done (theme box and states; rich text tags removed) |
 | Toggle, RadioButton, RadioButtonGroup, ToggleButtonGroup | done: part trees, theme, states, values, data binding. Differences to Unity: pixel-grid rounding of centred parts |
 | GroupBox, HelpBox, PopupWindow, Foldout, ProgressBar | done: part trees, theme, values, data binding |

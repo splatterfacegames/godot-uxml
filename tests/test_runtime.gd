@@ -940,8 +940,16 @@ func test_percent_padding_native_text() -> void:
 		if sb != null:
 			h.check(absf(sb.content_margin_left - 20.0) < 1.0,
 				"%s left margin = resolved 10%% of 200 (got %s)" % [n, sb.content_margin_left])
-			h.check(absf(sb.content_margin_top - 10.0) < 1.0,
-				"%s top margin = resolved 5%% of 200 (got %s)" % [n, sb.content_margin_top])
+			# The row is shrunk below the Button's text and padding, so the
+			# Button's vertical margins are fitted to its box (Unity draws
+			# the text over the box; UxmlStyleApplier.fit_button): only the
+			# Label keeps the resolved top padding as its margin.
+			if not c.has_meta(&"uxml_bfit"):
+				h.check(absf(sb.content_margin_top - 10.0) < 1.0,
+					"%s top margin = resolved 5%% of 200 (got %s)" % [n, sb.content_margin_top])
+			else:
+				h.check(sb.content_margin_top < 10.0 and absf(c.size.y - c.get_minimum_size().y) < 0.5,
+					"%s fitted: a top margin under the resolved 10 (got %s), the box at its text and margins" % [n, sb.content_margin_top])
 
 	doc.size = Vector2(800, 600)
 	await h.process_frame
@@ -1067,11 +1075,14 @@ func test_texture_stylebox_percent_insets() -> void:
 	await h.process_frame
 	var btn := doc.get_element("bgbtn") as Button
 	var sb := btn.get_theme_stylebox("normal")
-	h.check(sb is StyleBoxTexture, "background-image produces a texture stylebox")
+	# The theme's fill and border with the image between them, as Unity
+	# draws a Button with a background image: a UxmlBoxStyle and its image.
+	var img: StyleBox = (sb as UxmlBoxStyle).image if sb is UxmlBoxStyle else sb
+	h.check(img is StyleBoxTexture, "background-image produces a texture stylebox")
 	h.check(absf(sb.content_margin_left - 20.0) < 1.0,
 		"resolved percent padding lands on content_margin (got %s)" % sb.content_margin_left)
-	h.check(absf(sb.texture_margin_left) < 0.01,
-		"texture_margin nine-patch slicing untouched (got %s)" % sb.texture_margin_left)
+	h.check(absf((img as StyleBoxTexture).texture_margin_left) < 0.01,
+		"texture_margin nine-patch slicing untouched (got %s)" % (img as StyleBoxTexture).texture_margin_left)
 	h.check(sb.has_meta("uxml_margins"),
 		"margins meta present so measure does not double-count insets")
 
@@ -1084,7 +1095,8 @@ func test_texture_stylebox_percent_insets() -> void:
 	await h.process_frame
 	await h.process_frame
 	var sb2 := btn.get_theme_stylebox("normal")
-	h.check(sb2 is StyleBoxTexture and absf(sb2.content_margin_left - 40.0) < 1.0,
+	h.check((sb2 is StyleBoxTexture or (sb2 is UxmlBoxStyle and (sb2 as UxmlBoxStyle).image is StyleBoxTexture))
+		and absf(sb2.content_margin_left - 40.0) < 1.0,
 		"resize re-resolves texture stylebox content margins")
 	_unload(doc)
 

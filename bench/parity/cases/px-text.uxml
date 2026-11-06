@@ -1,0 +1,24 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Label name="color" text="Colour" class="t" style="left: 4px; top: 4px;" />
+  <ui:Label name="outline" text="Outline" class="t" style="left: 104px; top: 4px;" />
+  <ui:Label name="shadow" text="Shadow" class="t" style="left: 204px; top: 4px;" />
+  <ui:Label name="shadow-blur" text="Blur" class="t" style="left: 304px; top: 4px;" />
+  <ui:Label name="tl" text="TL" class="t box" style="left: 4px; top: 40px; -unity-text-align: upper-left;" />
+  <ui:Label name="mc" text="MC" class="t box" style="left: 104px; top: 40px; -unity-text-align: middle-center;" />
+  <ui:Label name="br" text="BR" class="t box" style="left: 204px; top: 40px; -unity-text-align: lower-right;" />
+  <ui:Label name="ml" text="ML" class="t box" style="left: 304px; top: 40px; -unity-text-align: middle-left;" />
+  <ui:Label name="wrap" text="Several words that wrap across lines" class="t wrapbox" style="left: 4px; top: 96px;" />
+  <ui:Label name="wrap-c" text="Centred words that wrap" class="t wrapbox" style="left: 104px; top: 96px; -unity-text-align: upper-center;" />
+  <ui:Label name="ell-end" text="Ellipsis at the end of text" class="t ell" style="left: 204px; top: 96px;" />
+  <ui:Label name="ell-start" text="Ellipsis at the start of text" class="t ell" style="left: 304px; top: 96px; -unity-text-overflow-position: start;" />
+  <ui:Label name="ell-mid" text="Ellipsis in the middle of text" class="t ell" style="left: 204px; top: 128px; -unity-text-overflow-position: middle;" />
+  <ui:Label name="clip" text="Clipped text that overflows" class="t ell" style="left: 304px; top: 128px; text-overflow: clip;" />
+  <ui:Label name="rich" text="&lt;b&gt;Bold&lt;/b&gt; &lt;color=#d00&gt;red&lt;/color&gt; &lt;i&gt;it&lt;/i&gt;" class="t" style="left: 4px; top: 170px;" />
+  <ui:Label name="bold" text="Bold style" class="t" style="left: 154px; top: 170px; -unity-font-style: bold;" />
+  <ui:Label name="italic" text="Italic style" class="t" style="left: 254px; top: 170px; -unity-font-style: italic;" />
+  <ui:Label name="big" text="Big 24px" class="t" style="left: 4px; top: 200px; font-size: 24px;" />
+  <ui:Label name="small" text="Small 10px" class="t" style="left: 154px; top: 200px; font-size: 10px;" />
+  <ui:Label name="spaced" text="Spaced" class="t" style="left: 254px; top: 200px; letter-spacing: 4px;" />
+  <ui:Label name="bg" text="On a background" class="t" style="left: 4px; top: 240px; background-color: rgb(40, 40, 60); color: rgb(255, 255, 255); padding: 4px;" />
+  <ui:Label name="alpha" text="Half alpha" class="t" style="left: 204px; top: 240px; color: rgba(0, 0, 0, 0.5);" />
+</ui:UXML>

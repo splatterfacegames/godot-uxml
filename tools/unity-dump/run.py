@@ -19,6 +19,10 @@ Case sources (both may be given):
 
   python tools/unity-dump/run.py [--unity PATH] [--out bench/parity/unity]
                                  [--only a,b] [--no-reference]
+                                 [--render bench/pixels/unity]
+
+--render also draws each case to <DIR>/<case>.png and <case>.notext.png
+(Unity runs with a graphics device for it; see UxmlDump.RenderCase).
 """
 import argparse
 import json
@@ -147,6 +151,8 @@ def main():
     ap.add_argument("--out", default=os.path.join(REPO, "bench", "parity", "unity"))
     ap.add_argument("--only", default="")
     ap.add_argument("--log", default=os.path.join(HERE, "Logs", "dump.log"))
+    ap.add_argument("--render", default="",
+                    help="also render each case to <DIR>/<case>.png and <case>.notext.png")
     args = ap.parse_args()
     only = set(x for x in args.only.split(",") if x)
 
@@ -170,6 +176,8 @@ def main():
            "-executeMethod", "UxmlDump.Run",
            "-dumpCases", "Assets/Cases", "-dumpOut", os.path.abspath(args.out),
            "-logFile", args.log]
+    if args.render:
+        cmd += ["-renderOut", os.path.abspath(args.render)]
     print("running %d cases through Unity..." % len(names))
     rc = subprocess.call(cmd)
     log = open(args.log, encoding="utf-8", errors="replace").read()

@@ -355,7 +355,10 @@ func test_background_styles() -> void:
 	h.eq((fit.box_texture_style as UxmlBackgroundStyle).size_type, "contain", "scale-to-fit -> contain")
 	var btn := doc.get_element("bgbtn") as Button
 	var sb := btn.get_theme_stylebox("normal")
-	h.check(sb is UxmlBackgroundStyle, "themed control gets the placement stylebox")
+	# The theme's fill and border with the image between them (Unity's
+	# order): a UxmlBoxStyle whose image is the placement stylebox.
+	h.check(sb is UxmlBoxStyle and (sb as UxmlBoxStyle).image is UxmlBackgroundStyle,
+		"themed control gets the placement stylebox")
 	h.eq(sb.content_margin_left, 7.0, "padding (6px) plus the theme border (1px) still insets the text")
 	h.check(sb.has_meta("uxml_margins"), "margins meta for the measurer")
 	var plain := doc.get_element("plainbg") as UxmlBox

@@ -285,6 +285,10 @@ pub struct LayoutIn {
     pub labels: Vec<Option<Gd<Label>>>,
     /// Rich text Labels (RichTextLabel): wrap-volatile like Labels.
     pub rich: Vec<Option<Gd<RichTextLabel>>>,
+    /// Buttons (Button and its subclasses): fitted to their box by the
+    /// placement (UxmlStyleApplier.fit_button) and, with children, not
+    /// measured.
+    pub buttons: Vec<bool>,
     /// Some control carries `uxml_clip_text` (overflow: hidden text); while
     /// false the measurer skips the meta check (UxmlStyleApplier.clip_texts).
     pub text_clip: bool,
@@ -351,6 +355,9 @@ pub struct Placement {
     /// call and the control height after it; a forced (re-applied)
     /// placement drops it.
     fit_seen: Vec<Option<(f32, f32)>>,
+    /// Buttons fitted by UxmlStyleApplier.fit_button at their last
+    /// placement.
+    bfit: Vec<bool>,
 }
 
 impl Placement {
@@ -467,6 +474,24 @@ impl Placement {
                 if let Some(a) = applier {
                     let mut a = a.clone();
                     a.call("apply_resolved_insets", &[c.to_variant(), start.to_variant(), end.to_variant()]);
+                }
+            }
+            // UxmlDocument._place_control: a Button floored at its minimum
+            // size gets content margins that fit its box
+            // (UxmlStyleApplier.fit_button); a fitted Button is fitted again
+            // for every placement.
+            if let Some(a) = applier {
+                if self.bfit.len() != io.controls.len() {
+                    self.bfit = vec![false; io.controls.len()];
+                }
+                if io.buttons[i] && (self.bfit[i] || c.get_size() != r.size) {
+                    let mut a = a.clone();
+                    let fitted = a.call("fit_button", &[c.to_variant(), r.size.to_variant(), start.to_variant(), end.to_variant()]);
+                    self.bfit[i] = fitted.try_to::<bool>().unwrap_or(false);
+                    // fit_button sets the stylebox margins (uxml_margins).
+                    if let Some(e) = io.margins.borrow_mut().get_mut(i) {
+                        *e = None;
+                    }
                 }
             }
         }
@@ -1380,7 +1405,10 @@ impl<'a> Pass<'a> {
                 ly = gmax(0.0, by - in_h);
             }
             let (nat, mtx, mty) = self.measure_content(i, Vector2::new(f(cw), f(ch)), lx, ly);
-            let chrome = self.measure_call(i, cw);
+            // UxmlDocument._measure_leaf: a text control with children
+            // measures nothing (Unity measures text on leaves only).
+            let textish = self.io.labels[i].is_some() || self.io.rich[i].is_some() || self.io.buttons[i];
+            let chrome = if textish { Vector2::ZERO } else { self.measure_call(i, cw) };
             bw = if w >= 0.0 { w } else { gmax(d(nat.x), d(chrome.x)) + in_w };
             bh = if h >= 0.0 { h } else { gmax(d(nat.y), d(chrome.y)) + in_h };
             if w < 0.0 && hint < 0.0 && mtx > NO_BOUND {

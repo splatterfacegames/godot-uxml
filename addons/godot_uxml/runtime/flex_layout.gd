@@ -153,6 +153,7 @@ var _val_m := {}             # el -> {arg -> result} replayed this pass
 static var _eid_seq := 0
 var _laid: Array = []        # elements laid out this pass, in order
 var _last_ent: Array = []    # the entry of the last _measure() return
+var _text_controls: Dictionary = {}  # elements whose chrome is not measured
 var _hs_m := {}              # el -> best-fit text in its subtree
 var _pure_m := {}            # el -> [argument, result] of its last pure measure
 var _mc_tx := NO_BOUND       # thresholds of the last _measure_content
@@ -194,6 +195,7 @@ static func compute(
 		l._xc = options.get("xcache")
 	l._hint_free = bool(options.get("hint_free", false))
 	l._hinted = options.get("hinted", {})
+	l._text_controls = options.get("text_controls", {})
 	l._grid = bool(options.get("pixel_grid", false))
 	if options.has("warned"):
 		l._warned = options["warned"]
@@ -791,7 +793,9 @@ func _measure(
 		var mty := _mc_ty
 		# Native chrome (e.g. a wrapped control's minimum size) can floor the
 		# auto size, but an authored px/% always wins.
-		var chrome := _measure_call(el, cw)
+		# A text control with children measures nothing: Unity measures
+		# text on leaves only (`text_controls`, from the document).
+		var chrome := Vector2.ZERO if _text_controls.has(el) else _measure_call(el, cw)
 		bw = w if w >= 0.0 else maxf(nat.x, chrome.x) + in_w
 		bh = h if h >= 0.0 else maxf(nat.y, chrome.y) + in_h
 		# A bound changes a container only through its children (and its

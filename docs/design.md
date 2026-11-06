@@ -1615,9 +1615,10 @@ give the same results; the reference computes every bounded measure.
 ### Style application
 
 `UxmlStyleApplier` maps computed styles to native theme overrides:
-`background-color`/borders/radii become `StyleBoxFlat` overrides,
-`background-image` a `StyleBoxTexture` (conflicts with other box styling
-are diagnosed), `color`/`font-size`/`font` → font color/size/resource,
+`background-color`/borders/radii become `StyleBoxFlat` overrides, or a
+`UxmlBoxStyle` where Unity draws the box differently (see "Box
+drawing"), `background-image` a `StyleBoxTexture` (inside a
+`UxmlBoxStyle` with the box's fill and border), `color`/`font-size`/`font` → font color/size/resource,
 `-unity-text-align` → alignment, `white-space` → autowrap,
 `display`/`visibility` → `visible`/`mouse_filter`/`focus_mode`,
 disabled → native `disabled`/`editable`. For wrapped fields the *wrapper*
@@ -1927,6 +1928,26 @@ rows keep `fixed-item-height`.
   extent). When that floor holds a fitted Label and a new box needs a
   larger deficit, the fit stays: a larger deficit does not change the
   size or the text, and the font does not change for each small box.
+- Godot floors a Button at its text plus its stylebox's content margins
+  (the USS border and padding). Unity draws the text over a box that is
+  too small for it, centred in the content box (measured: a 30px Button
+  with 10px padding, `states-disabled`). When the layout gives a Button
+  less than its minimum, `UxmlStyleApplier.fit_button` shrinks its
+  content margins on that axis, around the content box's centre on the
+  vertical axis (Godot centres a Button's text vertically) and by the
+  text alignment on the horizontal axis, so the Button takes the
+  laid-out size and the text sits where Unity draws it. The fitted
+  margins are also the `uxml_margins` the measurers subtract, so the
+  measure stays the text; the `uxml_bfit` meta (and, in the native
+  placement, a per-control flag) marks a fitted Button, which is fitted
+  again (or restored) at every placement. Both placements call it after
+  the inset hook. Limit: a text wider or taller than the whole box still
+  floors the Button (the margins cannot go below 0).
+- Unity measures text only on leaves (Yoga measures leaf nodes): a
+  Button or Label with children is as large as its children
+  (`ctl-button`, `b-child`). Both layouts skip the measure of such a
+  text control (`text_controls` in UxmlFlexLayout; the native layout
+  checks the control's class).
   The placement records the box height and the control height
   after each fit (`UxmlStyleApplier.fit_seen`); a placement that finds
   the same two heights does not fit again. The text changes the fit only
@@ -2315,8 +2336,15 @@ paths.
 - The default theme gives `.unity-disabled` opacity 0.5 (see "Default
   theme"). Only the element with the class resolves 0.5; its subtree dims
   through the element's `modulate`.
-- Limit: Unity clips children to rounded corners when the element has a
-  `border-radius`. The runtime clips to a rectangle.
+- An element with `overflow: hidden` and a `border-radius` clips its
+  children to its rounded inner outline, as Unity does with a stencil
+  mask (measured: `px-clip`). `UxmlClip` draws the outline (a
+  `UxmlBoxStyle` inner fill: the radii clamped as Unity clamps them, less
+  the clip insets, antialiased) into its clipping item and makes the item
+  a clip-only canvas group, whose material multiplies the children (as
+  drawn, opacity included) by the outline's coverage. The canvas group
+  is an offscreen pass per rounded clip. Limit: a filter inside a
+  rounded clip does not nest (Godot does not nest canvas groups).
 - Limit: input clipping uses the border box: a child area inside the
   border but outside the padding box can still get mouse input.
 
@@ -2479,8 +2507,47 @@ images need.
   `-unity-slice-scale` scales the slices through a draw transform.
 - An image without placement properties keeps the `StyleBoxTexture` /
   `box_texture` path.
-- Limit: a 9-sliced tile is not cropped at the box edge, and an image is
-  not clipped to rounded corners.
+- With a background colour, a border or a radius, the image draws inside
+  the element's `UxmlBoxStyle`, between the fill and the border, as
+  Unity draws it (before, the image replaced the fill and the border).
+  A stretched image in a rounded box is clipped to the box's outline
+  (measured: `px-background`).
+- Limit: a 9-sliced or placed image is not clipped to rounded corners,
+  and a 9-sliced tile is not cropped at the box edge.
+
+### Box drawing
+
+Unity 6000.3 draws a box (measured with `bench/pixels.py`, `px-border`)
+as follows; `UxmlBoxStyle` (`runtime/uxml_box_style.gd`) draws it the
+same way where `StyleBoxFlat` cannot, and `StyleBoxFlat` draws the rest
+(square corners, one border colour, no background under a border):
+
+- Border widths are on the pixel grid (`UxmlFlexLayout.grid_box`): a
+  1.5px border draws 2px wide. A border without a colour draws nothing
+  (the initial border and text outline colours are transparent).
+- Each side has its own colour. Two sides meet on the line from the box
+  corner to the point `max(width, radius)` in along each axis: the
+  border-width diagonal at a square corner, 45 degrees at a round corner
+  with thinner borders. The edge is hard. A pixel centre on the line goes
+  to the top or bottom side at the left corners and to the left or right
+  side at the right corners.
+- A corner is an ellipse: its radii are the USS radius clamped to half
+  the width and half the height (a 30x56 box with radius 30 has 15x28
+  corners; CSS would scale the radii to a 15px circle). The inner corner
+  has the radii less the adjacent border widths.
+- The background fills the whole box under the border: from half a pixel
+  inside the outer edge under an opaque side, to the outer edge under a
+  translucent one (seen through a translucent border, or through an
+  opaque border at an opacity below 1).
+- Curved edges are antialiased over one pixel across the edge (Unity's
+  arc coverage, `clamp(0.5 - distance)`): the arcs are tessellated with
+  their vertices slightly outside the arc, so the chords cut it and the
+  coverage of the edge pixels matches (measured to within 5 of 255).
+  Straight edges on the pixel grid stay hard.
+- The tessellation is built at the first draw for a rect and kept until
+  the rect changes; a draw is one `canvas_item_add_triangle_array`.
+- A Button without a USS box (a RepeatButton, `all: initial`) gets an
+  empty stylebox, not Godot's theme box.
 
 ### Cursor
 
@@ -2527,7 +2594,10 @@ The expected colors in `tests/test_visual63.gd` are pixels that Unity
   `contrast` (scale `c` with offset `(1 - c) / 2`, `c` at least 0) and
   `hue-rotate` (Unity's luminance matrix) use Unity's constants and
   clamps. Each pass clamps the color to 0..1, as Unity's 8-bit render
-  targets do. The composite clamps each color channel to the alpha, as
+  targets do, and each color channel to the alpha (valid premultiplied
+  color; measured: `invert()` then `blur()` spreads no white from the
+  transparent pixels around the element, which invert turns to rgb 1,
+  alpha 0; `px-filter`). The composite clamps each color channel to the alpha, as
   Unity's composite (color / alpha, clamped to 1, times alpha) does:
   transparent pixels stay transparent.
 - `blur(<length>)`: Unity's separable Gaussian, kernel radius

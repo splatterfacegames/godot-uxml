@@ -13,11 +13,34 @@ extends RefCounted
 ##
 ## Godot re-parents a child's canvas item when the child enters the tree,
 ## so the clip follows child_entered_tree; resized updates the rect.
+##
+## A box with a border radius clips to its rounded inner outline, as Unity
+## does (a stencil mask): the clip item draws the outline (UxmlBoxStyle's
+## inner fill) and is a clip-only canvas group, so the children draw where
+## the outline does, antialiased.
 
 var host: Control
 var item: RID
 ## Inset from the border box: left, top, right, bottom.
 var inset := Vector4.ZERO
+## Corner radii of the host's border box (top-left, top-right,
+## bottom-right, bottom-left); empty or all zero: a rectangle.
+var radii := PackedFloat64Array()
+var _mask: UxmlBoxStyle = null
+
+## The clip group's composite: the children as drawn (premultiplied, with
+## their opacity already in) times the outline's coverage, which the mask
+## carries in its red channel. The vertex colour's alpha is the host's
+## opacity, which the children already have, so it is not applied again.
+const MASK_SHADER := """
+shader_type canvas_item;
+render_mode unshaded, blend_premul_alpha;
+uniform sampler2D screen_texture : hint_screen_texture, repeat_disable, filter_nearest;
+void fragment() {
+	COLOR = textureLod(screen_texture, SCREEN_UV, 0.0) * COLOR.r;
+}
+"""
+static var _mask_material: ShaderMaterial = null
 
 
 func _init(p_host: Control) -> void:
@@ -39,6 +62,33 @@ func set_inset(v: Vector4) -> void:
 	_update_rect()
 
 
+## Clip to the rounded inner outline of a box with these corner radii (or
+## to the rectangle again with none).
+func set_radii(r: PackedFloat64Array) -> void:
+	if r == radii:
+		return
+	radii = r
+	var round := false
+	for v in r:
+		round = round or v > 0.0
+	if round:
+		_mask = UxmlBoxStyle.new()
+		_mask.bg_color = Color.WHITE
+		_mask.radii = r
+		_mask.fill_inner = true
+	else:
+		_mask = null
+	if round and _mask_material == null:
+		var sh := Shader.new()
+		sh.code = MASK_SHADER
+		_mask_material = ShaderMaterial.new()
+		_mask_material.shader = sh
+	RenderingServer.canvas_item_set_canvas_group_mode(item,
+		RenderingServer.CANVAS_GROUP_MODE_CLIP_ONLY if round else RenderingServer.CANVAS_GROUP_MODE_DISABLED)
+	RenderingServer.canvas_item_set_material(item, _mask_material.get_rid() if round else RID())
+	_update_rect()
+
+
 func _update_rect() -> void:
 	var r := Rect2(
 		Vector2(inset.x, inset.y),
@@ -46,6 +96,11 @@ func _update_rect() -> void:
 			maxf(0.0, host.size.x - inset.x - inset.z),
 			maxf(0.0, host.size.y - inset.y - inset.w)))
 	RenderingServer.canvas_item_set_custom_rect(item, true, r)
+	if _mask != null:
+		RenderingServer.canvas_item_clear(item)
+		_mask.widths = PackedFloat64Array([inset.y, inset.z, inset.w, inset.x])
+		_mask.invalidate()
+		_mask.draw(item, Rect2(Vector2.ZERO, host.size))
 
 
 func _on_child(ch: Node) -> void:
