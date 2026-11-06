@@ -1,0 +1,10 @@
+.par { width: 200px; height: 200px; color: rgb(0, 128, 0); font-size: 16px; letter-spacing: 2px; background-color: rgb(1, 2, 3); margin-left: 5px; }
+.c { width: 50px; height: 10px; }
+.red { color: red; }
+#w-inherit { width: inherit; }
+#bg-inherit { background-color: inherit; }
+#col-unset { color: unset; }
+#fs-unset { font-size: unset; }
+#ls-initial { letter-spacing: initial; }
+#m-inherit { margin-left: inherit; }
+#col-inherit { color: inherit; }

@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="c-text" class="b" />
+  <ui:VisualElement name="c-link" class="b" />
+  <ui:VisualElement name="c-resize" class="b">
+    <ui:VisualElement name="c-child" class="b" />
+  </ui:VisualElement>
+  <ui:VisualElement name="c-arrow" class="b" />
+  <ui:TextField name="c-field" value="x" />
+</ui:UXML>

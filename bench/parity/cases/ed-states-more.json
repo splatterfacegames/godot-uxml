@@ -1,0 +1,58 @@
+{
+ "editor": "dark",
+ "height": 500,
+ "actions": [
+  {
+   "op": "focus",
+   "target": "c-focus"
+  },
+  {
+   "op": "focus",
+   "target": "o-focus"
+  },
+  {
+   "op": "focus",
+   "target": "ts-focus"
+  },
+  {
+   "op": "focus",
+   "target": "m-focus"
+  },
+  {
+   "op": "force-state",
+   "target": "l-hover",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "ef-hover",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "tm-active",
+   "states": [
+    "hover",
+    "active"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "tt-checked-hover",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "g-hover",
+   "states": [
+    "hover"
+   ]
+  }
+ ]
+}

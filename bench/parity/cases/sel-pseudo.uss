@@ -1,0 +1,16 @@
+.p { height: 6px; margin-left: 1px; }
+.q { height: 6px; }
+.p:hover { margin-left: 2px; }
+.p:active { margin-right: 3px; }
+.p:inactive { padding-left: 4px; }
+.p:focus { margin-top: 5px; }
+.p:checked { margin-bottom: 6px; }
+.p:disabled { padding-right: 7px; }
+.p:enabled { padding-top: 8px; }
+.p:selected { padding-bottom: 9px; }
+.p:hover:active { border-left-width: 2px; }
+#hp:hover > .q { width: 20px; }
+:root { border-top-width: 3px; }
+:root .q { border-right-width: 4px; }
+.p:root { border-bottom-width: 5px; }
+#d:disabled .p { width: 30px; }

@@ -1,0 +1,4 @@
+.a { width: 50px !important; height: 10px; }
+#i1 { width: 70px; }
+.b { width: 20px !important; }
+.imp { margin-left: 9px !important; }

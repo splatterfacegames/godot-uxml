@@ -12,3 +12,6 @@
 /Packages/packages-lock.json
 *.csproj
 *.sln
+/Assets/GoldenCases/
+/Assets/GoldenCases.meta
+/Packages/com.uxml-preview.golden/

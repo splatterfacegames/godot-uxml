@@ -1,0 +1,2 @@
+.card { flex-direction: row; padding: 4px; background-color: rgb(230, 230, 230); }
+.title { flex-grow: 1; font-size: 14px; }

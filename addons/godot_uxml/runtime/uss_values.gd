@@ -64,6 +64,13 @@ static func _parse_length_uncached(text: String) -> Dictionary:
 	return {"kind": "invalid", "problem": 'unknown unit "%s"' % unit}
 
 
+## A number as USS text: no exponent, no trailing zeros ("27", "1.5").
+static func fmt_number(v: float) -> String:
+	var t := "%.4f" % v
+	t = t.rstrip("0").rstrip(".")
+	return "0" if t == "-0" or t.is_empty() else t
+
+
 ## Bare numbers such as `flex-grow: 1`. NAN when the text is not a number.
 ## Memoized by text: the cascade keeps author strings, so the same few
 ## hundred values are re-read on every layout/apply. Results are shared —
@@ -538,9 +545,14 @@ static func _bg_pos(v: String, vertical: bool) -> Dictionary:
 	var parts := UssProperties.split_value(v)
 	var kw := ""
 	var len_part := ""
+	# Unity keeps the keyword the background-position shorthand put on an
+	# axis, also one of the other axis (`bottom 4px right` gives x
+	# `bottom 4px`, measured: uss-background); top and left measure from the
+	# leading edge, bottom and right from the trailing edge.
+	var kws := ["left", "right", "top", "bottom"]
 	if parts.size() == 1:
 		var w := String(parts[0]).to_lower()
-		if w == "center" or w == lead or w == trail:
+		if w == "center" or kws.has(w):
 			kw = w
 		else:
 			kw = lead
@@ -548,7 +560,7 @@ static func _bg_pos(v: String, vertical: bool) -> Dictionary:
 	elif parts.size() == 2:
 		kw = String(parts[0]).to_lower()
 		len_part = parts[1]
-		if kw != lead and kw != trail:
+		if not kws.has(kw):
 			return _bad('%s: "%s" -- an offset needs %s or %s' % [prop, v, lead, trail])
 	else:
 		return _bad('%s: "%s" expects a keyword and/or one length' % [prop, v])
@@ -672,7 +684,8 @@ static func _cursor(v: String) -> Dictionary:
 static func spacing_px(text: String, font_size: float) -> float:
 	var l := parse_length(text)
 	match l["kind"]:
-		"px":
+		"px", "percent":
+			# Unity keeps only the number of a percentage (10% reads as 10).
 			return float(l["value"]) * font_size / 100.0
 		"auto":
 			return 0.0

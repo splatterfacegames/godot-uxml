@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="i1" class="a" />
+  <ui:VisualElement name="i2" class="a" style="width: 80px;" />
+  <ui:VisualElement name="i3" class="a b" />
+  <ui:Label name="i4" class="imp" text="Imp" />
+</ui:UXML>

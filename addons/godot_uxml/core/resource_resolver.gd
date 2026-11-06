@@ -7,7 +7,8 @@ extends RefCounted
 ##   project://database/Assets/UI/x.uss  -> <root>/Assets/UI/x.uss
 ##   project://database/Packages/p/x.uss -> <root>/Packages/p/x.uss
 ##   /Assets/UI/x.uss                    -> <root>/Assets/UI/x.uss
-##   Assets/UI/x.uss, Packages/p/x.uss   -> <root>/<same>
+##   Assets/UI/x.uss, Packages/p/x.uss   -> relative to `from`'s directory
+##                                        (Unity), else <root>/<same>
 ##   res://ui/x.uss, user://x.uss        -> as written, must stay under <root>
 ##   absolute filesystem path            -> as written, must stay under <root>
 ##   anything else                       -> relative to `from`'s directory,
@@ -99,6 +100,14 @@ func resolve(reference: String, from: String = "", kind: String = "") -> Diction
 		candidate = project_root + "/" + rel
 	elif ref.begins_with("/Assets/") or ref.begins_with("/Packages/"):
 		candidate = project_root + ref
+	elif (ref.begins_with("Assets/") or ref.begins_with("Packages/")) and not from.is_empty():
+		# Unity reads `Assets/x` and `Packages/x` without a leading slash as
+		# relative to the referencing file (measured: absolute-import-packages,
+		# imp-assets-noslash, imp-style-noslash). When no such file exists
+		# the project-rooted file is used.
+		candidate = from.get_base_dir() + "/" + ref
+		if not FileAccess.file_exists(collapse_path(candidate)):
+			candidate = project_root + "/" + ref
 	elif ref.begins_with("Assets/") or ref.begins_with("Packages/"):
 		candidate = project_root + "/" + ref
 	elif ref.begins_with("res://") or ref.begins_with("user://"):

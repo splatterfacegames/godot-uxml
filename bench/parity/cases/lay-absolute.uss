@@ -1,0 +1,18 @@
+.par { width: 200px; height: 120px; padding: 10px; border-width: 4px; margin: 6px; }
+.abs { position: absolute; }
+#rb { right: 5px; bottom: 6px; width: 20px; height: 10px; }
+#lr { left: 10px; right: 30px; height: 8px; top: 20px; }
+#tb { top: 40px; bottom: 50px; width: 12px; left: 0; }
+#pct { left: 50%; top: 50%; width: 10%; height: 10%; }
+#marg { left: 0; top: 0; margin: 7px; width: 10px; height: 10px; }
+#none { width: 15px; height: 15px; }
+#minmax { left: 0; right: 0; max-width: 60px; min-height: 9px; top: 70px; }
+#flow { width: 30px; height: 30px; }
+#neg { left: -5px; top: -5px; width: 10px; height: 10px; }
+.cpar { width: 100px; height: 60px; align-items: center; justify-content: center; margin: 6px; }
+#c-abs { width: 20px; height: 20px; }
+#c-flow { width: 10px; height: 10px; }
+.rpar { flex-direction: row; width: 120px; height: 40px; align-items: flex-end; justify-content: flex-end; margin: 6px; }
+#r-flow { width: 10px; height: 10px; }
+#r-abs { width: 20px; height: 20px; }
+#r-self { width: 8px; height: 8px; align-self: flex-start; }

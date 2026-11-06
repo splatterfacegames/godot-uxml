@@ -1,0 +1,15 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:Foldout name="fo-hover" text="Hover" />
+  <ui:Foldout name="fo-focus" text="Focus" />
+  <ui:Toggle name="tg-checked-hover" label="CH" value="true" />
+  <ui:RadioButton name="rb-focus" label="RF" />
+  <ui:RadioButton name="rb-hover" label="RH" value="true" />
+  <ui:TextField name="tf-dis-focus" label="DF" value="x" enabled="false" />
+  <ui:TextField name="tf-ro-focus" label="RO" value="y" readonly="true" />
+  <ui:Slider name="sl-dis" label="SD" value="5" low-value="0" high-value="10" enabled="false" />
+  <ui:DropdownField name="dd-dis" label="DD" choices="a,b" index="0" enabled="false" />
+  <ui:MinMaxSlider name="mm-dis" label="MM" min-value="2" max-value="6" low-limit="0" high-limit="10" enabled="false" />
+  <ui:ProgressBar name="pb-dis" value="40" enabled="false" />
+  <ui:Button name="b-dis-hover" text="DH" enabled="false" />
+  <ui:Toggle name="tg-dis-checked" label="DC" value="true" enabled="false" />
+</ui:UXML>

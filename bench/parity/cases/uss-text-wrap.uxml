@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:Label name="w-normal" class="t" text="wraps onto several lines of text here" />
+  <ui:Label name="w-prewrap" class="t" text="keeps   spaces and wraps the rest of it" />
+  <ui:Label name="w-pre" class="t" text="line one
+line two" />
+  <ui:Label name="w-auto" text="no width set so this fills the row and wraps when it needs to wrap around" style="white-space: normal;" />
+</ui:UXML>

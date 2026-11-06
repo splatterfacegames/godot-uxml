@@ -1,0 +1,45 @@
+{
+ "height": 700,
+ "actions": [
+  {
+   "op": "force-state",
+   "target": "fo-hover",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "focus",
+   "target": "fo-focus"
+  },
+  {
+   "op": "force-state",
+   "target": "tg-checked-hover",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "focus",
+   "target": "rb-focus"
+  },
+  {
+   "op": "force-state",
+   "target": "rb-hover",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "focus",
+   "target": "tf-ro-focus"
+  },
+  {
+   "op": "force-state",
+   "target": "b-dis-hover",
+   "states": [
+    "hover"
+   ]
+  }
+ ]
+}

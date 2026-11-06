@@ -1,0 +1,19 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="v-focus" focusable="true" tabindex="3" class="b" />
+  <ui:VisualElement name="v-ignore" picking-mode="Ignore" class="b" />
+  <ui:VisualElement name="v-tooltip" tooltip="Hello" class="b" />
+  <ui:VisualElement name="v-disabled" enabled="false" class="b">
+    <ui:Button name="b-in-disabled" text="In" />
+  </ui:VisualElement>
+  <ui:Button name="b-nofocus" text="NF" focusable="false" />
+  <ui:Button name="b-tab" text="Tab" tabindex="-1" />
+  <ui:Label name="l-rtl" text="RTL" language-direction="RTL" />
+  <ui:VisualElement name="v-hints" usage-hints="DynamicTransform, GroupTransform" view-data-key="k" class="b" />
+  <ui:Toggle name="t-nolabelclick" label="L" text="T" toggle-on-label-click="false" />
+  <ui:Foldout name="f-nolabelclick" text="F" toggle-on-label-click="false" />
+  <ui:Label name="l-rich" text="&lt;b&gt;Bold&lt;/b&gt; and &lt;color=red&gt;red&lt;/color&gt;" />
+  <ui:Label name="l-norich" text="&lt;b&gt;Bold&lt;/b&gt;" enable-rich-text="false" />
+  <ui:Label name="l-elided" text="A very long label text that is elided" display-tooltip-when-elided="true" style="width: 60px; overflow: hidden; text-overflow: ellipsis;" />
+  <ui:Label name="l-escape" text="Line\nTwo" parse-escape-sequences="true" />
+  <ui:Label name="l-noescape" text="Line\nTwo" />
+</ui:UXML>

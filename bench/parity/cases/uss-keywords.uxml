@@ -1,0 +1,11 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="par" class="par">
+    <ui:VisualElement name="w-initial" class="c" />
+    <ui:VisualElement name="w-auto" class="c" />
+    <ui:Label name="m-initial" text="M" />
+    <ui:Label name="c-initial" text="C" />
+    <ui:VisualElement name="mx-none" class="c" />
+    <ui:VisualElement name="unset" class="c" />
+    <ui:Button name="btn-initial" text="B" />
+  </ui:VisualElement>
+</ui:UXML>

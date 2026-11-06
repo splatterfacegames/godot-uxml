@@ -1,0 +1,31 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+<ui:VisualElement name="wrap">
+  <ui:VisualElement name="t1" class="b" />
+  <ui:VisualElement name="t2" class="b" />
+  <ui:VisualElement name="t3" class="b" />
+  <ui:VisualElement name="t4" class="b" />
+  <ui:VisualElement name="t5" class="b" />
+  <ui:VisualElement name="r1" class="b" />
+  <ui:VisualElement name="r2" class="b" />
+  <ui:VisualElement name="r3" class="b" />
+  <ui:VisualElement name="r4" class="b" />
+  <ui:VisualElement name="r5" class="b" />
+  <ui:VisualElement name="s1" class="b" />
+  <ui:VisualElement name="s2" class="b" />
+  <ui:VisualElement name="s3" class="b" />
+  <ui:VisualElement name="o1" class="b" />
+  <ui:VisualElement name="o2" class="b" />
+  <ui:VisualElement name="o3" class="b" />
+  <ui:VisualElement name="o4" class="b" />
+  <ui:VisualElement name="o5" class="b" />
+  <ui:VisualElement name="o6" class="b" />
+  <ui:VisualElement name="o7" class="b" />
+  <ui:VisualElement name="c1" class="b" />
+  <ui:VisualElement name="rp" class="b">
+    <ui:VisualElement name="rc" />
+  </ui:VisualElement>
+  <ui:VisualElement name="sp" class="b">
+    <ui:VisualElement name="sc" />
+  </ui:VisualElement>
+</ui:VisualElement>
+</ui:UXML>

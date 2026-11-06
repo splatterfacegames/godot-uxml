@@ -797,7 +797,7 @@ impl<'a> Pass<'a> {
                 let name = LAYOUT_PROPS[pid];
                 self.warn_once(i, name, format!("{name}: negative values are invalid; 0 used"));
             } else {
-                out[k] = r;
+                out[k] = if self.io.pixel_grid { grid_box(r, false) } else { r };
             }
         }
         out
@@ -833,7 +833,10 @@ impl<'a> Pass<'a> {
         for k in 0..4 {
             let pid = P_BOR + k;
             match self.recs[i].kinds[pid] {
-                K::Px => out[k] = gmax(0.0, self.recs[i].vals[pid]),
+                K::Px => {
+                    let v = self.recs[i].vals[pid];
+                    out[k] = if self.io.pixel_grid { grid_box(v, true) } else { gmax(0.0, v) };
+                }
                 K::Bad => {
                     let name = LAYOUT_PROPS[pid];
                     let m = format!("{}: {}", name, self.recs[i].probs[&pid]);
@@ -1694,10 +1697,13 @@ impl<'a> Pass<'a> {
                 let ch = kids[k];
                 let explicit = self.dim(ch, cross_prop, ac);
                 let car = self.ratio(ch);
-                let mut nat = if explicit >= 0.0 {
-                    explicit
-                } else if car > 0.0 {
+                // Yoga: an aspect ratio derives the cross size from the
+                // main size, over an explicit cross dimension
+                // (UxmlFlexLayout; measured: lay-minmax).
+                let mut nat = if car > 0.0 {
                     if row { it_main[k] / car } else { it_main[k] * car }
+                } else if explicit >= 0.0 {
+                    explicit
                 } else {
                     let (bxc, byc) = bnd(&it_m[k]);
                     let v = self.measure_b(ch, area.size, if row { it_main[k] } else { -1.0 }, bxc, byc).0;
@@ -2153,6 +2159,17 @@ fn round_node(c: &Cascade, i: usize, abs_l: f64, abs_t: f64, src: &[Option<Rect2
     ));
     for ch in c.children(i) {
         round_node(c, ch, al, at, src, out);
+    }
+}
+
+/// A margin, padding or border width on the pixel grid (UxmlFlexLayout.
+/// grid_box): margins and padding round to the nearest pixel, halves up; a
+/// nonzero border is at least one pixel wide (measured in Unity).
+fn grid_box(v: f64, border: bool) -> f64 {
+    if border {
+        if v <= 0.0 { 0.0 } else { gmax(1.0, pixel(v)) }
+    } else {
+        pixel(v)
     }
 }
 

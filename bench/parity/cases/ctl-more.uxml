@@ -1,0 +1,20 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:ProgressBar name="pb-title" title="Loading" value="30" />
+  <ui:ProgressBar name="pb-over" low-value="10" high-value="20" value="25" />
+  <ui:ProgressBar name="pb-neg" low-value="-50" high-value="50" value="0" title="Mid" />
+  <ui:RadioButtonGroup name="rg-choices" label="Pick" choices="One,Two,Three" value="1" />
+  <ui:RadioButtonGroup name="rg-none" choices="A,B" value="-1" />
+  <ui:Toggle name="t-textonly" text="Only text" value="true" />
+  <ui:Toggle name="t-labelonly" label="Only label" />
+  <ui:GroupBox name="gb" text="Group">
+    <ui:Label name="gb-label" text="Inside" />
+  </ui:GroupBox>
+  <ui:Box name="box"><ui:Label text="Boxed" /></ui:Box>
+  <ui:PopupWindow name="pw" text="Popup" />
+  <ui:Foldout name="fo-nested" text="Outer">
+    <ui:Foldout name="fo-inner" text="Inner" value="false" />
+  </ui:Foldout>
+  <ui:HelpBox name="hb-warn" text="Warning" message-type="Warning" />
+  <ui:HelpBox name="hb-err" text="Error" message-type="Error" />
+  <ui:HelpBox name="hb-none" text="None" message-type="None" />
+</ui:UXML>

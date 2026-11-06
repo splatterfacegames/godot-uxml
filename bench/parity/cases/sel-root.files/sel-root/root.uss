@@ -1,0 +1,3 @@
+:root { margin-top: 2px; }
+:root > .q { margin-left: 3px; }
+:root .q { margin-right: 4px; }

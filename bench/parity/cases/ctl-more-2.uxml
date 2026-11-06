@@ -1,0 +1,16 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:TwoPaneSplitView name="tp-v" orientation="Vertical" fixed-pane-index="1" fixed-pane-initial-dimension="30" style="height: 120px;">
+    <ui:Label name="tp-a" text="A" />
+    <ui:Label name="tp-b" text="B" />
+  </ui:TwoPaneSplitView>
+  <ui:TabView name="tv" reorderable="true" style="height: 80px;">
+    <ui:Tab name="tab-a" label="A" closeable="true"><ui:Label text="Content A" /></ui:Tab>
+    <ui:Tab name="tab-b" label="Bee"><ui:Label text="Content B" /></ui:Tab>
+  </ui:TabView>
+  <ui:ScrollView name="sv-h" mode="Horizontal" style="height: 50px;">
+    <ui:VisualElement style="width: 600px; height: 10px;" />
+  </ui:ScrollView>
+  <ui:ScrollView name="sv-both" mode="VerticalAndHorizontal" horizontal-scroller-visibility="AlwaysVisible" vertical-scroller-visibility="Hidden" style="height: 60px;">
+    <ui:VisualElement style="width: 100px; height: 10px;" />
+  </ui:ScrollView>
+</ui:UXML>

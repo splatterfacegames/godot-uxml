@@ -11,34 +11,40 @@ Status values:
 - **not USS**: a CSS feature that Unity also rejects. godot-uxml gives a
   diagnostic, as Unity does.
 
+Unity ground truth: the cases in `bench/parity/cases/` are dumped in Unity
+6000.3.24f1 (`tools/unity-dump`) and compared with every resolved style
+value, geometry through transforms, structure and import diagnostics
+(`bench/parity.gd`, docs/parity.md). The "Unity cases" column names the
+dumps that check a row; 169 of 170 cases match exactly.
+
 ## USS properties
 
-| Property | Status |
-| --- | --- |
-| `align-content`, `align-items`, `align-self`, `justify-content` | done |
-| `display`, `visibility` | done |
-| `flex`, `flex-basis`, `flex-direction`, `flex-grow`, `flex-shrink`, `flex-wrap` | done |
-| `width`, `height`, `min-*`, `max-*` | done |
-| `margin*` (including `auto`), `padding*`, `border-*-width` | done |
-| `position`, `top`, `right`, `bottom`, `left` | done |
-| `aspect-ratio` | done (a Label cannot shrink below its Godot minimum height) |
-| `background-color`, `background-image`, `border-*-color`, `border-*-radius` | done |
-| `color`, `font-size`, `-unity-font`, `-unity-font-definition`, `-unity-font-style`, `-unity-text-align` | done |
-| `-unity-slice-left/right/top/bottom`, `-unity-background-image-tint-color` | done |
-| `-unity-text-outline*` | done |
-| `opacity`, `overflow`, `-unity-overflow-clip-box` | done (rectangular clip only: no rounded-corner clipping) |
-| `translate`, `rotate`, `scale`, `transform-origin` | done (z rotation only; z components ignored) |
-| `cursor` | done (keywords map to the nearest Godot shape) |
-| `letter-spacing`, `word-spacing`, `-unity-paragraph-spacing` | done (em/100 units as in Unity; rounded to whole px) |
-| `text-shadow`, `text-overflow`, `-unity-text-overflow-position`, `white-space` | done (blur is a Gaussian with sigma = blur / 2, Label only; no ellipsis on rich text) |
-| `background-position*`, `background-repeat`, `background-size`, `-unity-background-scale-mode` | done |
-| `-unity-slice-type`, `-unity-slice-scale` | done |
-| `-unity-text-generator`, `-unity-editor-text-rendering-mode` | done (accepted; Godot has one text generator) |
-| `all` | done |
-| `transition`, `transition-*` | done |
-| `filter` | done: every built-in function with Unity's math, chains, transitions; custom `filter()` maps to `UxmlFilterDefinition` (see design.md, "Filter" and "Custom filters"). Limits: no nested filters, one pass per custom filter, a custom function draws alone, blurs of one chain combine |
-| `-unity-material` | done: `url()`/`resource()` maps to a Godot `ShaderMaterial` (`.mat` -> `.tres` beside it), `prop()` values bind to uniforms, transitions (see design.md, "Material") |
-| `-unity-text-auto-size` | done: best fit with the advanced text generator, both layout paths (see design.md, "Text auto size"). Whole-pixel font sizes |
+| Property | Status | Unity cases |
+| --- | --- | --- |
+| `align-content`, `align-items`, `align-self`, `justify-content` | done (`align-content: space-between / space-around` are not USS in 6000.3: `auto`, as in Unity) | `align-items`, `justify-content`, `flex-wrap`, `lay-wrap`, `uss-invalid` |
+| `display`, `visibility` | done | `uss-visibility`, `ctl-probe` |
+| `flex`, `flex-basis`, `flex-direction`, `flex-grow`, `flex-shrink`, `flex-wrap` | done (`flex: <basis>` is `0 1 <basis>`, as in Unity) | `flex-grow-shrink`, `flex-wrap`, `uss-shorthand`, `lay-wrap`, `lay-minmax` |
+| `width`, `height`, `min-*`, `max-*` | done | `lay-percent`, `lay-minmax`, `min-max-conflict` |
+| `margin*` (including `auto`), `padding*`, `border-*-width` | done (on the pixel grid: margins and padding rounded, a nonzero border at least 1px, as Unity lays them out) | `lay-percent`, `lay-fraction`, `uss-shorthand`, `border-box` |
+| `position`, `top`, `right`, `bottom`, `left` | done | `lay-absolute`, `absolute-offsets`, `nested-absolute` |
+| `aspect-ratio` | done (a Label cannot shrink below its Godot minimum height) | `lay-minmax` |
+| `background-color`, `background-image`, `border-*-color`, `border-*-radius` | done | `uss-shorthand`, `uss-background`, `lay-percent` |
+| `color`, `font-size`, `-unity-font`, `-unity-font-definition`, `-unity-font-style`, `-unity-text-align` | done (`font-size` % computed against the parent, as in Unity) | `uss-text`, `uss-text-inherit`, `text-size`, `text-align` |
+| `-unity-slice-left/right/top/bottom`, `-unity-background-image-tint-color` | done (Unity reads `3px` as 3 and `1.6` as 1, with a warning; so does godot-uxml) | `uss-slice`, `uss-background` |
+| `-unity-text-outline*` | done | `uss-text`, `uss-text-inherit` |
+| `opacity`, `overflow`, `-unity-overflow-clip-box` | done (rectangular clip only: no rounded-corner clipping) | `uss-visibility` |
+| `translate`, `rotate`, `scale`, `transform-origin` | done (z rotation only; z components ignored) | `uss-transform`, `tr-*` |
+| `cursor` | done (keywords map to the nearest Godot shape; the dumps check the keyword's Unity cursor id) | `uss-cursor`, `ed-*` |
+| `letter-spacing`, `word-spacing`, `-unity-paragraph-spacing` | done (em/100 units as in Unity; rounded to whole px; a percentage reads as px, as Unity reads it) | `uss-text`, `uss-text-inherit` |
+| `text-shadow`, `text-overflow`, `-unity-text-overflow-position`, `white-space` | done (blur is a Gaussian with sigma = blur / 2, Label only; no ellipsis on rich text) | `uss-text`, `uss-text-inherit`, `uss-text-wrap` |
+| `background-position*`, `background-repeat`, `background-size`, `-unity-background-scale-mode` | done | `uss-background` |
+| `-unity-slice-type`, `-unity-slice-scale` | done | `uss-slice` |
+| `-unity-text-generator`, `-unity-editor-text-rendering-mode` | done (accepted; Godot has one text generator) | `uss-text`, `uss-text-inherit` |
+| `all` | done (`all: initial` beats every other declaration of the element, inline included; only `initial` is accepted, as in Unity) | `uss-all`, `uss-all-2` |
+| `transition`, `transition-*` | done | `tr-t100` ... `tr-t1200`, `tr-reverse`, `uss-shorthand` |
+| `filter` | done: every built-in function with Unity's math, chains, transitions; custom `filter()` maps to `UxmlFilterDefinition` (see design.md, "Filter" and "Custom filters"). Limits: no nested filters, one pass per custom filter, a custom function draws alone, blurs of one chain combine | not in the Unity corpus (dumped as an empty list everywhere): checked by tests only |
+| `-unity-material` | done: `url()`/`resource()` maps to a Godot `ShaderMaterial` (`.mat` -> `.tres` beside it), `prop()` values bind to uniforms, transitions (see design.md, "Material") | not in the Unity corpus (a material asset per case): checked by tests only |
+| `-unity-text-auto-size` | done: best fit with the advanced text generator, both layout paths (see design.md, "Text auto size"). Whole-pixel font sizes | `uss-text`, `uss-text-inherit` (the computed value; the fitted size is Godot-font dependent) |
 
 ## USS syntax
 
@@ -46,21 +52,25 @@ Status values:
 | --- | --- |
 | Type, `.class`, `#name`, `*` selectors, compounds, selector lists | done |
 | Descendant and `>` child combinators | done: they walk the logical parent, as Unity does (an author child of a ScrollView matches `#view > .child`) |
-| `:hover`, `:active`, `:inactive`, `:focus`, `:checked`, `:disabled`, `:enabled`, `:selected`, `:root` | done |
-| `var()` custom properties, `@import`, inline `style` | done |
-| `url()`, `resource()` | done: `resource()` searches every `Resources` folder under `Assets/` and `Packages/` (see design.md, "`resource()` lookup") |
+| `:hover`, `:active`, `:inactive`, `:focus`, `:checked`, `:disabled`, `:enabled`, `:selected`, `:root` | done (measured, `sel-pseudo`, `sel-root`): `:selected` is `:checked`, `:inactive` matches elements that are not active, `:root` matches the element the sheet is attached to and only as the selector's subject |
+| `var()` custom properties, `@import`, inline `style` | done (`uss-var`, `tpl-overrides`, `inline-override`) |
+| `initial`, `unset` | done: `unset` inherits an inherited property and resets any other (Unity's importer warns about `unset` and applies it; godot-uxml gives the same diagnostic) |
+| `inherit` | not a Unity keyword: Unity reads it as the property's zero value (`width: inherit` is 0, `color: inherit` is transparent, `flex-direction: inherit` is `column`); godot-uxml does the same, with a diagnostic |
+| A value Unity cannot read (`align-items: bogus`, `width: abc`) | done as Unity: the declaration still wins, as the zero value of its type (enum index 0, 0px, 0, transparent); a diagnostic on the line where Unity's importer warns (`uss-invalid`) |
+| `!important` | parsed and ignored, as Unity does (no precedence; `uss-important`) |
+| `url()`, `resource()` | done: `resource()` searches every `Resources` folder under `Assets/` and `Packages/` (see design.md, "`resource()` lookup"). `Assets/x` and `Packages/x` without a leading slash resolve beside the referencing file, as in Unity (`absolute-import-packages`, `imp-assets-noslash`, `imp-style-noslash`) |
 | Inline `style` `url()` in template clones | done: resolves against the template file |
 | Rich text tags in Label text (`enable-rich-text`, `parse-escape-sequences`, `display-tooltip-when-elided`) | done (see docs/design.md, "Rich text", for dropped tags) |
 | `@media`, `@supports` | not USS |
 | `+` and `~` combinators, attribute selectors, `::` pseudo-elements, functional pseudo-classes | not USS |
-| `em`, `rem`, `vh`, `vw`, `pt` and other non-px/% lengths | not USS |
+| `em`, `rem`, `vh`, `vw`, `pt` and other non-px/% lengths | not USS: Unity's importer fails the whole sheet on such a unit, and so does godot-uxml (a diagnostic; none of the sheet's rules apply; `uss-invalid-unit`) |
 
 ## UXML structure
 
 | Feature | Status |
 | --- | --- |
 | `<Style src>` | done |
-| `Template`, `Instance`, `AttributeOverrides`, `content-container`, slots | done |
+| `Template`, `Instance`, `AttributeOverrides`, `content-container`, slots | done (`tpl-overrides`) |
 | Data binding: `data-source`, `data-source-path`, `data-source-type` | done (see "Data binding") |
 | `<Bindings>` / `<DataBinding>` UxmlObjects | done; the elements leave the tree at load |
 | `binding-path` | done: maps to a TwoWay binding of the element value on its data source |
@@ -71,7 +81,7 @@ Status values:
 
 | Attribute | Status |
 | --- | --- |
-| `name`, `class`, `style`, `enabled`, `focusable`, `tooltip`, `content-container` | done |
+| `name`, `class`, `style`, `enabled`, `focusable`, `tooltip`, `content-container` | done. The harness compares `enabled` (Unity's `enabledInHierarchy`, every element) and the `picking-mode` of plain elements with Unity; the dumps of `focusable`, `tabindex` and of the picking mode of controls (`ctl-attrs`) are not compared yet (tests check the runtime) |
 | `tabindex` | done: Unity focus ring order (positive first, then 0 in tree order; negative leaves the Tab ring) |
 | `picking-mode` | done: `Ignore` sets `mouse_filter` IGNORE; children stay pickable |
 | `view-data-key` | done: ScrollView and collection view scroll offset and selection, multi-column widths and sorting, TabView tab, TwoPaneSplitView pane size; `get_view_data()`/`set_view_data()`, restored on load and reload. Foldout open state: planned |

@@ -1,0 +1,11 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="par" class="par">
+    <ui:VisualElement name="w-inherit" class="c" />
+    <ui:VisualElement name="bg-inherit" class="c" />
+    <ui:Label name="col-unset" text="U" />
+    <ui:Label name="fs-unset" text="F" />
+    <ui:Label name="ls-initial" text="L" />
+    <ui:VisualElement name="m-inherit" class="c" />
+    <ui:Label name="col-inherit" class="red" text="I" />
+  </ui:VisualElement>
+</ui:UXML>

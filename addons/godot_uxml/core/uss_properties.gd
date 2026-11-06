@@ -389,7 +389,9 @@ static func _expand_flex(values: Array) -> Array:
 	if values.size() == 1:
 		if _is_number(a):
 			return [["flex-grow", a], ["flex-shrink", "1"], ["flex-basis", "0"]]
-		return [["flex-grow", "1"], ["flex-shrink", "1"], ["flex-basis", a]]
+		# Unity: `flex: <basis>` leaves flex-grow 0 (measured: uss-shorthand;
+		# CSS would grow 1).
+		return [["flex-grow", "0"], ["flex-shrink", "1"], ["flex-basis", a]]
 
 	var b: String = values[1]
 	if values.size() == 2:
@@ -468,3 +470,139 @@ static func expand_shorthand(property: String, value: String) -> Array:
 	for i in targets.size():
 		out.append([targets[i], values[i]])
 	return out
+
+
+# ---------------------------------------------------------------------------
+# Unity's reading of a declaration value (measured: uss-invalid,
+# uss-keywords-2, uss-keywords-3, uss-important, uss-text-inherit)
+# ---------------------------------------------------------------------------
+
+## Keyword properties: the keywords Unity reads, first the one of enum
+## index 0. A value Unity cannot read as one of them reads as index 0 (and
+## still wins the cascade): `align-items: bogus` is `auto`, `flex-direction:
+## inherit` is `column`.
+const ENUM_VALUES := {
+	"align-items": ["auto", "flex-start", "center", "flex-end", "stretch"],
+	"align-self": ["auto", "flex-start", "center", "flex-end", "stretch"],
+	"align-content": ["auto", "flex-start", "center", "flex-end", "stretch"],
+	"justify-content": ["flex-start", "center", "flex-end", "space-between", "space-around", "space-evenly"],
+	"flex-direction": ["column", "column-reverse", "row", "row-reverse"],
+	"flex-wrap": ["nowrap", "wrap", "wrap-reverse"],
+	"position": ["relative", "absolute"],
+	"display": ["flex", "none"],
+	"visibility": ["visible", "hidden"],
+	"overflow": ["visible", "hidden", "scroll"],
+	"white-space": ["normal", "nowrap", "pre", "pre-wrap"],
+	"text-overflow": ["clip", "ellipsis"],
+	"-unity-text-overflow-position": ["end", "start", "middle"],
+	"-unity-overflow-clip-box": ["padding-box", "content-box"],
+	"-unity-font-style": ["normal", "bold", "italic", "bold-and-italic"],
+	"-unity-text-align": ["upper-left", "upper-center", "upper-right", "middle-left",
+		"middle-center", "middle-right", "lower-left", "lower-center", "lower-right"],
+	"-unity-slice-type": ["sliced", "tiled"],
+	"-unity-text-generator": ["standard", "advanced"],
+	"-unity-editor-text-rendering-mode": ["sdf", "bitmap"],
+}
+## Lengths (StyleLength / Length): an unreadable value is 0px.
+const LENGTH_PROPS := {
+	"width": true, "height": true, "min-width": true, "min-height": true,
+	"max-width": true, "max-height": true, "flex-basis": true,
+	"top": true, "right": true, "bottom": true, "left": true,
+	"margin-top": true, "margin-right": true, "margin-bottom": true, "margin-left": true,
+	"padding-top": true, "padding-right": true, "padding-bottom": true, "padding-left": true,
+	"border-top-left-radius": true, "border-top-right-radius": true,
+	"border-bottom-right-radius": true, "border-bottom-left-radius": true,
+	"font-size": true,
+}
+## Lengths Unity keeps only the number of: `letter-spacing: 10%` resolves
+## to 10 (px).
+const NUMBER_LENGTH_PROPS := {
+	"letter-spacing": true, "word-spacing": true, "-unity-paragraph-spacing": true,
+	"-unity-slice-scale": true,
+}
+## Numbers (StyleFloat / StyleInt): an unreadable value is 0.
+const NUMBER_PROPS := {
+	"flex-grow": true, "flex-shrink": true, "opacity": true,
+	"border-top-width": true, "border-right-width": true,
+	"border-bottom-width": true, "border-left-width": true,
+	"-unity-text-outline-width": true,
+	"-unity-slice-left": true, "-unity-slice-right": true,
+	"-unity-slice-top": true, "-unity-slice-bottom": true,
+}
+## Colors: an unreadable value is transparent black.
+const COLOR_PROPS := {
+	"color": true, "background-color": true, "-unity-background-image-tint-color": true,
+	"border-top-color": true, "border-right-color": true,
+	"border-bottom-color": true, "border-left-color": true,
+	"-unity-text-outline-color": true,
+}
+const ZERO_COLOR := "rgba(0, 0, 0, 0)"
+
+static var _re_important := RegEx.create_from_string("\\s*!\\s*important\\s*$")
+
+
+## A declaration value without a trailing `!important`: Unity parses the
+## flag and ignores it (no precedence boost; measured, uss-important).
+static func strip_important(value: String) -> String:
+	if value.find("!") < 0:
+		return value
+	return _re_important.sub(value, "")
+
+
+## The value Unity reads for a longhand declaration: the value itself when
+## Unity can read it, otherwise the zero value of the property's type (enum
+## index 0, 0px, 0, transparent). `initial` and `unset` are keywords Unity
+## handles; `inherit` is not (it reads as the zero value). Returns the
+## value unchanged for every other property.
+static func unity_value(prop: String, value: String) -> String:
+	var v := value.strip_edges()
+	var lv := v.to_lower()
+	if lv == "initial" or lv == "unset":
+		return lv
+	var kw = ENUM_VALUES.get(prop)
+	if kw != null:
+		if (kw as Array).has(lv):
+			return lv
+		return kw[0]
+	if LENGTH_PROPS.has(prop):
+		if lv == "auto" or lv == "none":
+			return lv
+		var l := UssValues.parse_length(v)
+		return v if (l["kind"] == "px" or l["kind"] == "percent") else "0px"
+	if NUMBER_LENGTH_PROPS.has(prop):
+		# A percentage stays as written (Unity's computed value); readers
+		# take its number as px.
+		var l2 := UssValues.parse_length(v)
+		return v if (l2["kind"] == "px" or l2["kind"] == "percent") else "0px"
+	if prop == "translate":
+		return v if (lv == "none" or UssValues.parse_translate(v)["ok"]) else "0px 0px"
+	if NUMBER_PROPS.has(prop):
+		if not is_nan(UssValues.parse_number(v)):
+			return v
+		var l3 := UssValues.parse_length(v)
+		return v if l3["kind"] == "px" else "0"
+	if COLOR_PROPS.has(prop):
+		return v if UssValues.parse_color(v)["ok"] else ZERO_COLOR
+	return value
+
+
+## Why Unity cannot read a longhand value ("" when it can), for the parse
+## diagnostic that stands for Unity's import warning.
+static func unity_problem(prop: String, value: String) -> String:
+	var v := value.strip_edges()
+	if v.find("var(") >= 0:
+		return ""
+	var lv := v.to_lower()
+	# Values Unity's importer warns about but still reads (measured:
+	# uss-slice, uss-text-inherit).
+	if prop.begins_with("-unity-slice-") and prop != "-unity-slice-scale" and prop != "-unity-slice-type":
+		if lv != "initial" and lv != "unset" and not v.is_valid_int():
+			return '%s: Unity expects an integer, found "%s"; it reads %d' % [prop, v, int(UssValues.parse_length(v).get("value", 0.0))]
+	if NUMBER_LENGTH_PROPS.has(prop) and lv != "initial" and lv != "unset":
+		var l := UssValues.parse_length(v)
+		if l["kind"] == "percent" or (l["kind"] == "px" and not v.ends_with("px") and float(l["value"]) != 0.0):
+			return '%s: Unity expects a length, found "%s"; it reads %s px' % [prop, v, UssValues.fmt_number(float(l["value"]))]
+	var out := unity_value(prop, v)
+	if out == v or out == v.to_lower():
+		return ""
+	return '%s: Unity cannot read "%s"; it reads %s' % [prop, v, out]

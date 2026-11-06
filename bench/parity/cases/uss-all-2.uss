@@ -1,0 +1,8 @@
+.styled { width: 30px; height: 10px; margin-left: 3px; color: rgb(255, 0, 0); }
+#by-id { width: 70px; height: 11px; }
+.reset { all: initial; }
+.late { width: 45px; }
+.early { width: 55px; }
+.all-unset { all: unset; }
+#custom { --w: 12px; }
+#custom { width: var(--w); }

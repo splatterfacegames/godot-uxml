@@ -1,0 +1,3 @@
+:root { border-top-width: 3px; }
+:root > .q { border-left-width: 1px; }
+:root .q { border-right-width: 4px; }

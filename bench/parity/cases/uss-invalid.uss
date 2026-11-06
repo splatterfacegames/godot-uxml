@@ -1,0 +1,21 @@
+.w { width: 300px; height: 280px; }
+.b { width: 20px; height: 8px; margin-left: 1px; flex-direction: row; align-items: center; justify-content: center; }
+#ai { align-items: bogus; }
+#ac { align-content: bogus; flex-wrap: wrap; }
+#fd { flex-direction: bogus; }
+#pos { position: bogus; }
+#disp { display: bogus; }
+#jc { justify-content: bogus; }
+#ws { white-space: bogus; }
+#vis { visibility: bogus; }
+#ov { overflow: scroll; }
+#wd { width: abc; }
+#col { background-color: notacolor; }
+#op { opacity: abc; }
+#fg { flex-grow: abc; }
+#to { text-overflow: bogus; }
+#fs { -unity-font-style: bogus; }
+#al { -unity-text-align: bogus; }
+#fw { flex-wrap: bogus; }
+#tp { translate: abc; }
+#lbl-ws { white-space: bogus; }

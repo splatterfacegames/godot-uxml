@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Template name="Inner" src="inner.uxml" />
+  <ui:VisualElement name="frame" class="frame" style="border-width: 2px; padding: 3px;">
+    <ui:Label name="header" text="Header" />
+    <ui:VisualElement name="slot" content-container="slot" class="slot" style="min-height: 10px; padding-left: 8px;" />
+    <ui:Instance template="Inner" name="inner">
+      <ui:AttributeOverrides element-name="inner-label" text="From panel" />
+    </ui:Instance>
+  </ui:VisualElement>
+</ui:UXML>

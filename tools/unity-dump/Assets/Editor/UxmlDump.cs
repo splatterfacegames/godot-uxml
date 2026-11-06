@@ -25,7 +25,12 @@
 //                  {"op": "tree-items", "target": "tree", "items": [{"id": 1, "data": "a", "children": [...]}], "expand": true},
 //                  {"op": "scroll", "target": "sv", "x": 0, "y": 40},
 //                  {"op": "select", "target": "list", "indices": [1]},
-//                  {"op": "wheel", "x": 10, "y": 10, "dy": 1} ] }
+//                  {"op": "wheel", "x": 10, "y": 10, "dy": 1},
+//                  {"op": "add-class", "target": "name", "class": "on"},
+//                  {"op": "remove-class", "target": "name", "class": "on"},
+//                  {"op": "advance", "ms": 250} ] }
+// The panel runs on a fake clock that only "advance" moves, so a case can
+// sample a transition at an exact time.
 // "target" names an element by `name`; "path" (e.g. "0/1/0") reaches parts.
 
 using System;
@@ -147,6 +152,46 @@ public static class UxmlDump
         throw new Exception("no type " + full);
     }
 
+    // A fixed clock for the style animation system, so a case can sample a
+    // transition at a known time ("advance").
+    static long s_FakeMs = 100000;
+    public static long FakeMs() { return s_FakeMs; }
+    public static double FakeSeconds() { return s_FakeMs / 1000.0; }
+
+    static Delegate ClockFor(Type delegateType)
+    {
+        var ret = delegateType.GetMethod("Invoke").ReturnType;
+        var m = typeof(UxmlDump).GetMethod(ret == typeof(long) ? "FakeMs" : "FakeSeconds");
+        return Delegate.CreateDelegate(delegateType, m);
+    }
+
+    static void InstallClock(IPanel panel, List<Action> cleanup)
+    {
+        s_FakeMs = 100000;
+        var asm = typeof(VisualElement).Assembly;
+        var pt = asm.GetType("UnityEngine.UIElements.Panel");
+        var sp = pt.GetProperty("TimeSinceStartup", Any);
+        if (sp != null)
+        {
+            var old = sp.GetValue(null);
+            sp.SetValue(null, ClockFor(sp.PropertyType));
+            cleanup.Insert(0, () => sp.SetValue(null, old));
+        }
+        var ip = panel.GetType().GetProperty("TimeSinceStartupFunc", Any);
+        if (ip != null && ip.GetSetMethod(true) != null)
+        {
+            var old = ip.GetValue(panel);
+            ip.SetValue(panel, ClockFor(ip.PropertyType));
+            cleanup.Insert(0, () => { try { ip.SetValue(panel, old); } catch { } });
+        }
+    }
+
+    static void UpdateAnimations(IPanel panel)
+    {
+        var m = panel.GetType().GetMethod("UpdateAnimations", Any, null, Type.EmptyTypes, null);
+        if (m != null) m.Invoke(panel, null);
+    }
+
     static string DumpCase(string dir, string name)
     {
         var sc = ReadSidecar(Path.Combine(dir, name + ".json"));
@@ -219,6 +264,7 @@ public static class UxmlDump
             host.style.width = sc.width;
             host.style.height = sc.height;
             docRoot.Add(host);
+            InstallClock(panel, cleanup);
             vta.CloneTree(host);
             if (uss != null) host.styleSheets.Add(uss);
             if (sc.bind.Length > 0)
@@ -245,6 +291,18 @@ public static class UxmlDump
             w.Key("panel"); w.BeginObject(); w.Key("width"); w.Value(sc.width); w.Key("height"); w.Value(sc.height); w.EndObject();
             if (sc.editor.Length > 0) { w.Key("editor"); w.Value(sc.editor); }
             w.Key("actions"); w.BeginArray(); foreach (var l in log) w.Value(l); w.EndArray();
+            // Pseudo-states of the case host and of its ancestors (:root).
+            w.Key("ancestors"); w.BeginArray();
+            for (var a = (VisualElement)host; a != null; a = a.hierarchy.parent)
+            {
+                w.BeginObject();
+                w.Key("type"); w.Value(a.GetType().Name);
+                w.Key("name"); w.Value(a.name ?? "");
+                w.Key("pseudoStates"); w.Value(Convert.ToString(typeof(VisualElement).GetProperty("pseudoStates", Any).GetValue(a), CultureInfo.InvariantCulture));
+                w.Key("styleSheets"); w.Value(a.styleSheets.count);
+                w.EndObject();
+            }
+            w.EndArray();
             w.Key("focused");
             var focused = panel.focusController != null ? panel.focusController.focusedElement as VisualElement : null;
             if (focused != null && IsUnder(focused, host)) w.Value(PathOf(focused, host)); else w.Null();
@@ -436,6 +494,22 @@ public static class UxmlDump
                 var focused = panel.focusController.focusedElement as VisualElement;
                 if (focused != null) focused.Blur();
                 return "blur";
+            }
+            case "add-class":
+            case "remove-class":
+            {
+                if (target == null) return op + ": no target";
+                string cls = Convert.ToString(act["class"], CultureInfo.InvariantCulture);
+                if (op == "add-class") target.AddToClassList(cls); else target.RemoveFromClassList(cls);
+                return op + " " + cls + " " + PathOf(target, host);
+            }
+            case "advance":
+            {
+                // The style animation system reads the fake clock; the
+                // transitions that the last style update started run to it.
+                s_FakeMs += Convert.ToInt64(act["ms"], CultureInfo.InvariantCulture);
+                UpdateAnimations(panel);
+                return "advance to " + s_FakeMs;
             }
             case "force-state":
             {
@@ -696,6 +770,16 @@ public static class UxmlDump
             {
                 var lm = (Vector2)dm.Invoke(te, new object[] { float.NaN, VisualElement.MeasureMode.Undefined, float.NaN, VisualElement.MeasureMode.Undefined });
                 w.Key("layoutMeasure"); w.BeginObject(); w.Key("width"); w.Value(lm.x); w.Key("height"); w.Value(lm.y); w.EndObject();
+                if (te.hierarchy.parent != null)
+                {
+                    float pw = te.hierarchy.parent.contentRect.width;
+                    var am = (Vector2)dm.Invoke(te, new object[] { pw, VisualElement.MeasureMode.AtMost, float.NaN, VisualElement.MeasureMode.Undefined });
+                    w.Key("atMostMeasure"); w.BeginObject(); w.Key("at"); w.Value(pw); w.Key("width"); w.Value(am.x); w.Key("height"); w.Value(am.y); w.EndObject();
+                }
+                // At the laid-out content width (a wrapping text's height).
+                float cw = te.contentRect.width;
+                var em = (Vector2)dm.Invoke(te, new object[] { cw, VisualElement.MeasureMode.Exactly, float.NaN, VisualElement.MeasureMode.Undefined });
+                w.Key("contentMeasure"); w.BeginObject(); w.Key("at"); w.Value(cw); w.Key("width"); w.Value(em.x); w.Key("height"); w.Value(em.y); w.EndObject();
             }
         }
         WriteValueProperty(w, e);
@@ -822,6 +906,13 @@ public static class UxmlDump
                     object v = f.GetValue(cs);
                     w.Key(Kebab(n)); w.Value(Convert.ToString(v, CultureInfo.InvariantCulture));
                 }
+                // Values IResolvedStyle does not have, or has only in pixels.
+                foreach (var n in ComputedExtras)
+                {
+                    var f = cs.GetType().GetProperty(n, Any);
+                    if (f == null) continue;
+                    w.Key(Kebab(n)); w.Value(Fields(f.GetValue(cs)));
+                }
                 w.EndObject();
             }
         }
@@ -835,6 +926,53 @@ public static class UxmlDump
         "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "flexBasis",
         "left", "top", "right", "bottom", "translate",
     };
+
+    static readonly string[] ComputedExtras = {
+        "marginLeft", "marginTop", "marginRight", "marginBottom",
+        "paddingLeft", "paddingTop", "paddingRight", "paddingBottom",
+        "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius",
+        "fontSize", "letterSpacing", "wordSpacing", "unityParagraphSpacing",
+        "transformOrigin", "rotate", "scale", "textShadow", "unityTextAutoSize", "cursor", "aspectRatio",
+    };
+
+    // A computed value as text: a Length as authored ("50%"), a struct as
+    // its public fields and properties ("offset=(1.00, 2.00) blurRadius=3 ...").
+    static string Fields(object v)
+    {
+        if (v == null) return "null";
+        var t = v.GetType();
+        if (t.IsPrimitive || v is string || v is Enum || v is Length) return Convert.ToString(v, CultureInfo.InvariantCulture);
+        if (v is Color c) return string.Format(CultureInfo.InvariantCulture, "rgba({0}, {1}, {2}, {3})", Num(c.r * 255.0), Num(c.g * 255.0), Num(c.b * 255.0), Num(c.a));
+        if (v is Vector2 v2) return "(" + Num(v2.x) + ", " + Num(v2.y) + ")";
+        if (v is Vector3 v3) return "(" + Num(v3.x) + ", " + Num(v3.y) + ", " + Num(v3.z) + ")";
+        var parts = new List<string>();
+        var members = new List<KeyValuePair<string, Func<object>>>();
+        foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Public))
+        {
+            var ff = f;
+            members.Add(new KeyValuePair<string, Func<object>>(f.Name, () => ff.GetValue(v)));
+        }
+        foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (p.GetIndexParameters().Length > 0 || p.Name == "allowedAssetTypes") continue;
+            var pp = p;
+            members.Add(new KeyValuePair<string, Func<object>>(p.Name, () => pp.GetValue(v)));
+        }
+        foreach (var m in members)
+        {
+            var p = m;
+            object x;
+            try { x = m.Value(); } catch { continue; }
+            if (x is UnityEngine.Object uo) { parts.Add(p.Key + "=" + (uo == null ? "null" : uo.name)); continue; }
+            if (x == null) { parts.Add(p.Key + "=null"); continue; }
+            var xt = x.GetType();
+            string xs = (xt.IsPrimitive || x is string || x is Enum || x is Length || x is Color || x is Vector2 || x is Vector3 || x is Angle)
+                ? (x is float xf ? Num(xf) : x is Color || x is Vector2 || x is Vector3 ? Fields(x) : Convert.ToString(x, CultureInfo.InvariantCulture))
+                : "{" + Fields(x) + "}";
+            parts.Add(p.Key + "=" + xs);
+        }
+        return string.Join(" ", parts);
+    }
 
     static string Num(double d)
     {

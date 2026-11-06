@@ -726,6 +726,18 @@ UXML {
   margin-right: -2px;
 }
 
+.unity-composite-field__field-spacer {
+  visibility: hidden;
+}
+
+/* The object picker image is drawn at its own size: inert. */
+.unity-object-field__selector {
+  -unity-slice-left: 1;
+  -unity-slice-right: 1;
+  -unity-slice-top: 1;
+  -unity-slice-bottom: 1;
+}
+
 #unity-prefab-override-bars-container,
 #unity-live-property-bars-container {
   position: absolute;
@@ -814,6 +826,8 @@ UXML {
 
 .unity-toolbar-spacer--flexible {
   flex-grow: 1;
+  flex-basis: 0%;
+  width: auto;
 }
 
 .unity-toolbar-breadcrumbs {
@@ -898,4 +912,46 @@ UXML {
 
 .unity-search-field-base__cancel-button--off {
   background-image: none;
+}
+
+/* ---- Resolved values that change no box (measured with every resolved
+   style value: ed-*.json) ---------------------------------------------- */
+
+/* Editor cursors: text over text inputs, slide over dragger labels. */
+.unity-base-text-field__input,
+.unity-text-element__selectable {
+  cursor: text;
+}
+
+.unity-base-field__label--with-dragger {
+  cursor: slide-arrow;
+}
+
+/* Unity's slices of its field image (no image here: inert). */
+.unity-object-field-display {
+  -unity-slice-left: 4;
+  -unity-slice-right: 4;
+  -unity-slice-top: 4;
+  -unity-slice-bottom: 4;
+}
+
+.unity-composite-field__field-spacer {
+  visibility: hidden;
+}
+
+/* The object picker image is drawn at its own size: inert. */
+.unity-object-field__selector {
+  -unity-slice-left: 1;
+  -unity-slice-right: 1;
+  -unity-slice-top: 1;
+  -unity-slice-bottom: 1;
+}
+
+#unity-prefab-override-bars-container,
+#unity-live-property-bars-container {
+  overflow: hidden;
+}
+
+.unity-rendering-layer-mask-field {
+  flex-wrap: wrap;
 }

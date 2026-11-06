@@ -1,0 +1,3 @@
+:root { padding-bottom: 8px; }
+:root > .q { width: 20px; }
+:root .q { height: 9px; }

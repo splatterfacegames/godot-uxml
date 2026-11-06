@@ -127,6 +127,7 @@ static var _no_state := PackedFloat64Array()
 # calls (once per element/argument per pass) returns identical results, so
 # a text change or a deferred theme update can never be served stale.
 var _xc = null
+var _grid := false           # options["pixel_grid"]: box lengths on the pixel grid
 var _hint_free := false      # options["hint_free"]: only volatile measures read the hint
 ## options["hinted"]: non-volatile elements whose measure still reads the
 ## width hint (best-fit text, -unity-text-auto-size). A column with
@@ -193,6 +194,7 @@ static func compute(
 		l._xc = options.get("xcache")
 	l._hint_free = bool(options.get("hint_free", false))
 	l._hinted = options.get("hinted", {})
+	l._grid = bool(options.get("pixel_grid", false))
 	if options.has("warned"):
 		l._warned = options["warned"]
 	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
@@ -231,6 +233,15 @@ static func _round_node(el: UxmlElement, abs_l: float, abs_t: float, src: Dictio
 		_pixel(al + float(rr.size.x)) - _pixel(al), _pixel(at + float(rr.size.y)) - _pixel(at))
 	for c in el.children:
 		_round_node(c, al, at, src, out)
+
+
+## A margin, padding or border width on the pixel grid, as Unity lays it
+## out (measured, lay-fraction): margins and padding round to the nearest
+## pixel (halves up), a nonzero border is at least one pixel wide.
+static func grid_box(v: float, border: bool) -> float:
+	if border:
+		return 0.0 if v <= 0.0 else maxf(1.0, _pixel(v))
+	return _pixel(v)
 
 
 ## Yoga's roundValueToPixelGrid (no forced ceil/floor).
@@ -507,7 +518,7 @@ func _edges(el: UxmlElement, base_pid: int, cb_width: float, allow_negative: boo
 			var name2: String = PNAMES[pid]
 			_warn_once(el, name2, "%s: negative values are invalid; 0 used" % name2)
 		else:
-			out[k] = r
+			out[k] = grid_box(r, false) if _grid else r
 	return out
 
 
@@ -542,7 +553,7 @@ func _borders(el: UxmlElement) -> PackedFloat64Array:
 		var pid := P_BOR + k
 		match kinds[pid]:
 			K_PX:
-				out[k] = maxf(0.0, rec[2][pid])
+				out[k] = grid_box(rec[2][pid], true) if _grid else maxf(0.0, rec[2][pid])
 			K_BAD:
 				var name: String = PNAMES[pid]
 				_warn_once(el, name, "%s: %s" % [name, rec[4][pid]])
@@ -1564,10 +1575,12 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 			var explicit := _dim(child, cross_prop, ac)
 			var nat: float
 			var car := _ratio(child)
-			if explicit >= 0.0:
-				nat = explicit
-			elif car > 0.0:
+			# Yoga: an aspect ratio derives the cross size from the main
+			# size, over an explicit cross dimension (measured: lay-minmax).
+			if car > 0.0:
 				nat = it_main[k] / car if row else it_main[k] * car
+			elif explicit >= 0.0:
+				nat = explicit
 			else:
 				# For a row item the final main size is now known — measuring
 				# with it lets wrapped text report the height it really needs.

@@ -1,0 +1,15 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="scope" class="scope">
+    <ui:VisualElement name="v1" class="b" />
+    <ui:VisualElement name="v2" class="b" />
+    <ui:VisualElement name="v3" class="b" />
+    <ui:VisualElement name="v4" class="b" />
+    <ui:VisualElement name="v5" class="b" />
+    <ui:VisualElement name="v6" class="b" />
+    <ui:VisualElement name="v7" class="b" />
+    <ui:VisualElement name="inner" class="inner">
+      <ui:VisualElement name="v8" class="b" />
+    </ui:VisualElement>
+    <ui:Label name="v9" text="Var" />
+  </ui:VisualElement>
+</ui:UXML>

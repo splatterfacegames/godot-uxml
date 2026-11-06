@@ -1,0 +1,17 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="row" class="row">
+    <ui:VisualElement name="m04" class="b" />
+    <ui:VisualElement name="m25" class="b" />
+    <ui:VisualElement name="m26" class="b" />
+    <ui:VisualElement name="p04" class="b" />
+    <ui:VisualElement name="p15" class="b"><ui:VisualElement name="p15-in" class="in" /></ui:VisualElement>
+    <ui:VisualElement name="b04" class="b"><ui:VisualElement name="b04-in" class="in" /></ui:VisualElement>
+    <ui:VisualElement name="b15" class="b"><ui:VisualElement name="b15-in" class="in" /></ui:VisualElement>
+    <ui:VisualElement name="b06" class="b"><ui:VisualElement name="b06-in" class="in" /></ui:VisualElement>
+  </ui:VisualElement>
+  <ui:VisualElement name="col" class="col">
+    <ui:VisualElement name="c1" class="cb" />
+    <ui:VisualElement name="c2" class="cb" />
+    <ui:VisualElement name="c3" class="cb" />
+  </ui:VisualElement>
+</ui:UXML>

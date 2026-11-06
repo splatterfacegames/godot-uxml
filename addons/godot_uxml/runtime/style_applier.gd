@@ -2211,7 +2211,12 @@ func _apply_paragraph_spacing(c: Control, style: Dictionary, el: UxmlElement) ->
 ## when text-overflow is ellipsis, overflow is hidden and the text does
 ## not wrap (TextElement.isElided); the elided string is computed after
 ## layout by update_elision(), this records which controls take part.
+## update_elision's last pass per control: [text, width, position, font size].
+var _elide_memo := {}
+
+
 func _apply_elision(c: Control, style: Dictionary, el: UxmlElement) -> void:
+	_elide_memo.erase(c)
 	var is_text := c is Label or (c is Button and not c is OptionButton)
 	var ov0 := _str(style, "overflow")
 	var clip_text: bool = (is_text and (ov0 == "hidden" or ov0 == "scroll")
@@ -2264,12 +2269,21 @@ func _unelide(c: Control) -> void:
 ## form; the measurer swaps the full text back in to measure, so the
 ## intrinsic size is the full text's, as in Unity. Text that game code set
 ## in the meantime is taken as the new full text.
-func update_elision() -> void:
-	for c in elide.keys():
+func update_elision(only: Array = []) -> void:
+	for c in (elide.keys() if only.is_empty() else only):
+		if only.size() > 0 and not elide.has(c):
+			continue
 		if not is_instance_valid(c):
 			elide.erase(c)
+			_elide_memo.erase(c)
 			continue
 		var cur := String(c.get("text"))
+		# Nothing to redo when the text, the width and the position are
+		# those of the last pass (an apply of the control forgets the memo:
+		# a style can change the font).
+		var memo = _elide_memo.get(c)
+		if memo != null and memo[0] == cur and memo[1] == c.size.x and memo[2] == elide[c] and memo[3] == c.get_theme_font_size("font_size"):
+			continue
 		var full := cur
 		if c.has_meta("uxml_full_text") and cur == String(c.get_meta("uxml_elided")):
 			full = c.get_meta("uxml_full_text")
@@ -2291,6 +2305,7 @@ func update_elision() -> void:
 			if cur != shown:
 				c.set("text", shown)
 			_elided_tooltip(c, true, full)
+		_elide_memo[c] = [String(c.get("text")), c.size.x, elide[c], fs]
 
 
 ## display-tooltip-when-elided (default true): the full text becomes the

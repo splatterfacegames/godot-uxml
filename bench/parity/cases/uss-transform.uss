@@ -1,0 +1,27 @@
+#wrap { flex-direction: row; flex-wrap: wrap; }
+.b { width: 40px; height: 20px; margin: 8px; background-color: rgb(100, 100, 100); }
+#t1 { translate: 10px 20px; }
+#t2 { translate: 50% -25%; }
+#t3 { translate: 5px; }
+#t4 { translate: 0 10px 3px; }
+#t5 { translate: none; }
+#r1 { rotate: 45deg; }
+#r2 { rotate: 0.25turn; }
+#r3 { rotate: 1rad; }
+#r4 { rotate: 100grad; }
+#r5 { rotate: none; }
+#s1 { scale: 2; }
+#s2 { scale: 0.5 1.5; }
+#s3 { scale: none; }
+#o1 { transform-origin: left top; rotate: 30deg; }
+#o2 { transform-origin: 0 0; scale: 1.5; }
+#o3 { transform-origin: 100% 50%; scale: 0.5; }
+#o4 { transform-origin: right bottom; rotate: 10deg; }
+#o5 { transform-origin: 10px 20px; scale: 2 1; }
+#o6 { transform-origin: center; rotate: 90deg; }
+#o7 { transform-origin: 30%; scale: 1.2; }
+#c1 { translate: 4px 2px; rotate: 15deg; scale: 1.1 0.9; transform-origin: 25% 75%; }
+#rp { rotate: 30deg; }
+#rc { width: 10px; height: 10px; translate: 5px 5px; rotate: 30deg; }
+#sp { scale: 2; transform-origin: 0 0; }
+#sc { width: 10px; height: 10px; margin-left: 10px; scale: 0.5; }

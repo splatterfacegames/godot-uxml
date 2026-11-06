@@ -1,0 +1,23 @@
+:root { flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
+.wrap { flex-direction: row; flex-wrap: wrap; width: 60px; height: 70px; margin: 2px; background-color: rgb(220, 220, 220); }
+.it { width: 22px; height: 12px; margin: 1px; background-color: rgb(80, 80, 80); }
+#ac-flex-start { align-content: flex-start; }
+#ac-flex-end { align-content: flex-end; }
+#ac-center { align-content: center; }
+#ac-stretch { align-content: stretch; }
+#ac-stretch > .it { height: auto; min-height: 4px; }
+#ac-space-between { align-content: space-between; }
+#ac-space-around { align-content: space-around; }
+#rev { flex-wrap: wrap-reverse; }
+#rowrev { flex-direction: row-reverse; align-items: flex-end; }
+.jrow { flex-direction: row; width: 120px; height: 30px; margin: 2px; background-color: rgb(220, 220, 220); }
+#je { justify-content: space-evenly; }
+.m { margin-left: 6px; }
+#ja { justify-content: space-around; align-items: center; }
+#as { align-items: flex-end; }
+#as > .it { width: 10px; }
+.a1 { align-self: flex-start; }
+.a2 { align-self: center; }
+.a3 { align-self: stretch; height: auto; }
+.a4 { align-self: auto; }
+.a5 { align-self: flex-end; }

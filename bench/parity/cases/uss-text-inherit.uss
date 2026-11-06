@@ -1,0 +1,9 @@
+#outer { color: rgb(10, 20, 30); font-size: 18px; letter-spacing: 2px; word-spacing: 3px;
+  -unity-paragraph-spacing: 5px; white-space: normal; -unity-font-style: italic;
+  -unity-text-align: middle-right; text-shadow: 1px 2px 0 rgba(0, 0, 0, 0.5);
+  -unity-text-outline-width: 1px; -unity-text-outline-color: rgb(0, 255, 0);
+  visibility: visible; text-overflow: ellipsis; -unity-text-overflow-position: middle;
+  -unity-text-generator: advanced; -unity-editor-text-rendering-mode: bitmap;
+  -unity-text-auto-size: best-fit 6px 20px; opacity: 0.8; cursor: text; }
+#mid { font-size: 150%; letter-spacing: 10%; }
+.over { color: initial; font-size: 10px; white-space: nowrap; -unity-font-style: normal; letter-spacing: 0; }

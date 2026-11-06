@@ -1,0 +1,22 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="box" class="box">
+    <ui:VisualElement name="w50" />
+    <ui:VisualElement name="h25" />
+    <ui:VisualElement name="minw" />
+    <ui:VisualElement name="maxw" />
+    <ui:VisualElement name="marg" />
+    <ui:VisualElement name="pad"><ui:VisualElement name="pad-in" /></ui:VisualElement>
+    <ui:VisualElement name="mauto" />
+    <ui:VisualElement name="basis-row" class="row">
+      <ui:VisualElement name="fb" />
+      <ui:VisualElement name="fb-auto" />
+    </ui:VisualElement>
+    <ui:VisualElement name="rel" />
+    <ui:VisualElement name="radius" />
+  </ui:VisualElement>
+  <ui:VisualElement name="box2" class="box2">
+    <ui:VisualElement name="abs-pct" />
+    <ui:VisualElement name="minh-pct" />
+    <ui:VisualElement name="maxh-pct" />
+  </ui:VisualElement>
+</ui:UXML>

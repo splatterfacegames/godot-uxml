@@ -1,0 +1,26 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="wrap">
+    <ui:Label name="ell" class="t" text="A label that is far too long to fit" />
+    <ui:Label name="ell-start" class="t" text="A label that is far too long to fit" />
+    <ui:Label name="ell-mid" class="t" text="A label that is far too long to fit" />
+    <ui:Label name="ell-clip" class="t" text="A label that is far too long to fit" />
+    <ui:Label name="ws-normal" class="t" text="wraps onto several lines of text here" />
+    <ui:Label name="ws-nowrap" class="t" text="does not wrap onto several lines" />
+    <ui:Label name="ws-pre" class="t" text="keeps   spaces" />
+    <ui:Label name="ws-prewrap" class="t" text="keeps   spaces and wraps the rest of it" />
+    <ui:Label name="ls" class="t" text="Spaced" />
+    <ui:Label name="ws" class="t" text="Word spaced text" />
+    <ui:Label name="ps" class="t" text="Para spaced" />
+    <ui:Label name="shadow" class="t" text="Shadow" />
+    <ui:Label name="shadow2" class="t" text="Shadow2" />
+    <ui:Label name="outline" class="t" text="Outline" />
+    <ui:Label name="outline2" class="t" text="Outline2" />
+    <ui:Label name="bold" class="t" text="Bold" />
+    <ui:Label name="italic" class="t" text="Italic" />
+    <ui:Label name="bi" class="t" text="BoldItalic" />
+    <ui:Label name="gen" class="t" text="Advanced" />
+    <ui:Label name="bitmap" class="t" text="Bitmap" />
+    <ui:Label name="auto" class="t" text="Auto size" />
+    <ui:Label name="auto-none" class="t" text="Auto none" />
+  </ui:VisualElement>
+</ui:UXML>

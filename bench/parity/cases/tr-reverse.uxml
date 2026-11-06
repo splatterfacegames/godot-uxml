@@ -1,0 +1,20 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="wrap">
+    <ui:VisualElement name="lin" class="b" />
+    <ui:VisualElement name="ease" class="b" />
+    <ui:VisualElement name="eio" class="b" />
+    <ui:VisualElement name="col" class="b" />
+    <ui:VisualElement name="del" class="b" />
+    <ui:VisualElement name="tr" class="b" />
+    <ui:VisualElement name="rot" class="b" />
+    <ui:VisualElement name="sc" class="b" />
+    <ui:VisualElement name="all" class="b" />
+    <ui:Label name="disc" class="b" text="Disc" />
+    <ui:VisualElement name="bounce" class="b" />
+    <ui:Label name="fs" text="Font" />
+    <ui:VisualElement name="ms" class="b" />
+    <ui:VisualElement name="multi" class="b" />
+    <ui:VisualElement name="none" class="b" />
+    <ui:VisualElement name="neg" class="b" />
+  </ui:VisualElement>
+</ui:UXML>

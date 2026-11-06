@@ -171,6 +171,7 @@ static func _load_sheet(
 ) -> int:
 	var index := doc.sheets.size()
 	var parsed := UssParser.new().parse(text, origin)
+	_check_values(parsed, text, origin, doc, resolver)
 	doc.sheets.append({
 		"index": index,
 		"source": text,
@@ -219,6 +220,123 @@ static func _load_sheet(
 
 	chain.pop_back()
 	return index
+
+
+## Units Unity's USS importer reads; any other unit fails the import.
+const USS_UNITS := {"px": true, "%": true, "deg": true, "grad": true, "rad": true,
+	"turn": true, "s": true, "ms": true}
+static var _re_dim := RegEx.create_from_string(
+	"(?<![\\w#.\\-])[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?([a-zA-Z]+)")
+
+
+## Unity's import checks of a parsed sheet (measured: uss-invalid,
+## uss-invalid-unit). A dimension with a unit USS does not have (`10em`,
+## `5vh`) is an import error: Unity drops the whole sheet, so every rule
+## of the sheet is removed here too. A value Unity cannot read for its
+## property is a warning (the declaration still applies, as its type's
+## zero value: UssProperties.unity_value).
+static func _check_values(parsed: Dictionary, text: String, origin: String, doc: UxmlDocumentModel,
+		resolver: UxmlResourceResolver = null) -> void:
+	var failed := false
+	for item in parsed["items"]:
+		if item["kind"] != "rule":
+			continue
+		for decl in item["rule"]["declarations"]:
+			var prop: String = decl["property"]
+			if prop.begins_with("--"):
+				continue
+			var val := String(decl["value"])
+			var found: Array = _value_problems(prop, val)
+			if found.is_empty() and (resolver == null or val.find("url(") < 0):
+				continue
+			var at: int = int(decl.get("span", item["rule"].get("span", {})).get("start", 0))
+			for pr in found:
+				doc.warnings.append(UxmlDiagnostic.make(pr[0], pr[1], text, at, origin))
+				if pr[0] == "malformed":
+					failed = true
+			# Unity's importer resolves url() at import: a missing file is an
+			# import warning (the runtime reports it again where it applies).
+			if resolver != null and val.find("url(") >= 0 and val.find("var(") < 0:
+				var ref := UssValues.parse_url(val)
+				if ref.get("ok", false) and not String(ref.get("path", "")).is_empty():
+					var rr := resolver.resolve(String(ref["path"]), origin)
+					if rr["ok"] and not FileAccess.file_exists(String(rr["path"])) and not ResourceLoader.exists(String(rr["path"])):
+						doc.warnings.append(UxmlDiagnostic.make("missing-file",
+							'%s: url("%s") names no file (%s)' % [prop, ref["path"], rr["path"]], text, at, origin))
+	if failed:
+		var kept: Array = []
+		for item in parsed["items"]:
+			if item["kind"] != "rule":
+				kept.append(item)
+		parsed["items"] = kept
+
+
+static var _problem_cache := {}
+
+
+## The import diagnostics of one declaration, [[kind, message], ...]
+## (cached: sheets repeat their values). "malformed" is an unsupported
+## unit, which fails the whole sheet.
+static func _value_problems(prop: String, val: String) -> Array:
+	var key := prop + "\u001f" + val
+	var hit = _problem_cache.get(key)
+	if hit != null:
+		return hit
+	var out: Array = []
+	var unit := _bad_unit(val)
+	if not unit.is_empty():
+		out.append(["malformed",
+			'%s: "%s": unsupported unit "%s"; Unity fails the import of the whole sheet, so none of its rules apply' % [prop, val, unit]])
+	elif val.find("var(") < 0:
+		var lv := val.strip_edges().to_lower()
+		if lv.split(" ", false).has("unset") and prop != "all":
+			out.append(["invalid-value",
+				'%s: Unity\'s importer warns about "unset" (Expected ... but found \'unset\'); the keyword still applies' % prop])
+		var longhands := UssProperties.expand_shorthand(prop, UssProperties.strip_important(val))
+		if longhands.is_empty() or (prop == "all" and lv != "initial"):
+			out.append(["invalid-shorthand",
+				'%s: "%s" is not a valid value; the declaration is dropped (Unity accepts only `all: initial`)' % [prop, val]
+				if prop == "all" else '%s: "%s" -- wrong number of values; declaration dropped' % [prop, val]])
+		for pair in longhands:
+			var problem := UssProperties.unity_problem(pair[0], pair[1])
+			if not problem.is_empty():
+				out.append(["invalid-value", problem])
+	if _problem_cache.size() > 8192:
+		_problem_cache.clear()
+	_problem_cache[key] = out
+	return out
+
+
+## The first unit in `value` that USS does not have, "" when none (quoted
+## strings and url()/resource() arguments are not looked at).
+static func _bad_unit(value: String) -> String:
+	if value.find("(") >= 0 or value.find("\"") >= 0 or value.find("'") >= 0:
+		value = _strip_refs(value)
+	for m in _re_dim.search_all(value):
+		var u := m.get_string(1).to_lower()
+		if u == "e":
+			continue
+		if not USS_UNITS.has(u):
+			return m.get_string(0)
+	return ""
+
+
+static func _strip_refs(value: String) -> String:
+	var out := ""
+	var i := 0
+	while i < value.length():
+		var c := value[i]
+		if c == "\"" or c == "'":
+			var close := UssParser._find_quote_close(value, i)
+			i = value.length() if close < 0 else close
+			continue
+		if value.substr(i, 4) == "url(" or value.substr(i, 9) == "resource(":
+			var close2 := value.find(")", i)
+			i = value.length() if close2 < 0 else close2 + 1
+			continue
+		out += c
+		i += 1
+	return out
 
 
 ## Copy a resolver diagnostic and attach the file/position it came from.

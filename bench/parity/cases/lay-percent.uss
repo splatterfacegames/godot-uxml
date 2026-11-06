@@ -1,0 +1,18 @@
+.box { width: 300px; height: 200px; padding: 10px; border-width: 5px; }
+.row { flex-direction: row; height: 20px; }
+#w50 { width: 50%; height: 10px; }
+#h25 { height: 10%; width: 10px; }
+#minw { min-width: 40%; height: 5px; width: 10px; }
+#maxw { max-width: 20%; height: 5px; }
+#marg { margin-left: 10%; margin-top: 5%; height: 5px; width: 10px; }
+#pad { padding-left: 10%; padding-top: 2%; height: 20px; }
+#pad-in { flex-grow: 1; }
+#mauto { margin-left: auto; width: 30px; height: 5px; }
+#fb { flex-basis: 25%; }
+#fb-auto { flex-basis: auto; width: 15px; }
+#rel { left: 10%; top: 50%; width: 10px; height: 5px; }
+#radius { border-radius: 50%; width: 40px; height: 20px; }
+.box2 { position: absolute; left: 300px; top: 0; width: 100px; height: 200px; }
+#abs-pct { position: absolute; left: 25%; top: 10%; width: 50%; height: 20%; right: 10%; }
+#minh-pct { min-height: 15%; width: 10px; }
+#maxh-pct { max-height: 5%; height: 50px; width: 10px; }

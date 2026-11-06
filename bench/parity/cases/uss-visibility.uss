@@ -1,0 +1,13 @@
+:root { flex-direction: row; flex-wrap: wrap; }
+.b { width: 60px; height: 40px; margin: 4px; padding: 3px; border-width: 2px; }
+.c { width: 10px; height: 10px; }
+.big { width: 100px; height: 100px; }
+#op { opacity: 0.5; }
+#op-child { opacity: 0.5; }
+#op0 { opacity: 0; }
+#hid { visibility: hidden; }
+#hid-vis { visibility: visible; }
+#none { display: none; }
+#ovh { overflow: hidden; }
+#clipbox { overflow: hidden; -unity-overflow-clip-box: content-box; }
+#after { opacity: 1.5; }

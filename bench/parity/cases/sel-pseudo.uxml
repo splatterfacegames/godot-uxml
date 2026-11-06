@@ -1,0 +1,18 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="h" class="p" />
+  <ui:VisualElement name="a" class="p" />
+  <ui:VisualElement name="f" class="p" focusable="true" />
+  <ui:VisualElement name="ck" class="p" />
+  <ui:VisualElement name="d" class="p" enabled="false">
+    <ui:VisualElement name="d-child" class="p" />
+  </ui:VisualElement>
+  <ui:VisualElement name="e" class="p" />
+  <ui:VisualElement name="sel" class="p" />
+  <ui:VisualElement name="ha" class="p" />
+  <ui:VisualElement name="hp" class="p">
+    <ui:VisualElement name="hp-child" class="q" />
+  </ui:VisualElement>
+  <ui:Toggle name="tog" value="true" class="p" />
+  <ui:Button name="btn-dis" text="B" enabled="false" class="p" />
+  <ui:VisualElement name="r" class="q" />
+</ui:UXML>

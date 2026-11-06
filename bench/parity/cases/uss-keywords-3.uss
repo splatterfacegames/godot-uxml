@@ -1,0 +1,11 @@
+.par { width: 200px; flex-direction: row; opacity: 0.5; font-size: 20px; -unity-text-align: middle-center; flex-grow: 1; letter-spacing: 3px; }
+.c { width: 20px; height: 10px; flex-direction: row-reverse; opacity: 0.7; flex-grow: 2; position: absolute; display: flex; }
+#disp { display: inherit; }
+#fd { flex-direction: inherit; }
+#op { opacity: inherit; }
+#fs { font-size: inherit; }
+#al { -unity-text-align: inherit; }
+#fg { flex-grow: inherit; }
+#pos { position: inherit; }
+#ls { letter-spacing: inherit; }
+#ini { flex-direction: initial; opacity: initial; position: initial; }
