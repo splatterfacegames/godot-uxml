@@ -343,6 +343,12 @@ func _res(r, depth := 0):
 		return r.get_class()
 	if r is Texture2D:
 		return [r.get_class(), r.resource_path, r.get_size()]
+	if r is FontFile:
+		# (unity/fidelity) A font file by identity: its storage holds the
+		# whole font data and the glyph caches. Every text control now has a
+		# FontVariation over the theme font (Unity's line height), so a
+		# snapshot by value copied megabytes per control and step.
+		return [r.get_class(), r.resource_path, r.get_instance_id()]
 	var out := {"class": r.get_class()}
 	for p in r.get_property_list():
 		if not (p["usage"] & PROPERTY_USAGE_STORAGE):

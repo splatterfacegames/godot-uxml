@@ -351,23 +351,20 @@ impl Placement {
             if self.fit_h.len() != io.controls.len() {
                 self.fit_h = vec![f32::NAN; io.controls.len()];
             }
-            // fit_h: the height of the last fit_label call, positive when the
-            // Label got a fit, negative when it could not (wrapping or
-            // multi-line text); NaN: never called. A Label is fitted again
-            // for a new height, or when a restyle dropped its fit.
+            // fit_h: the height a Label was fitted for (NaN: not fitted). A
+            // one-line Label taller than its box is fitted; a fitted Label
+            // is fitted again for a new height, or when a restyle dropped
+            // its fit (UxmlDocument._place_control does the same).
             let sn_fit = self.sn_fit.get_or_insert_with(|| StringName::from("uxml_fit"));
             let fh = self.fit_h[i];
-            let call = if fh.is_nan() {
-                d(c.get_size().y) > d(r.size.y) + 0.01
-            } else if fh.abs() != r.size.y {
-                true
-            } else {
-                fh > 0.0 && !lbl.has_meta(&*sn_fit)
-            };
+            let fitted = fh > 0.0;
+            let floored = d(c.get_size().y) > d(r.size.y) + 0.01;
+            let call = (floored && (fitted || lbl.get_autowrap_mode() == godot::classes::text_server::AutowrapMode::OFF))
+                || (fitted && (fh != r.size.y || !lbl.has_meta(&*sn_fit)));
             if call {
                 let mut a = a.clone();
                 a.call("fit_label", &[c.to_variant(), r.size.to_variant()]);
-                self.fit_h[i] = if lbl.has_meta(&*sn_fit) { r.size.y } else { -r.size.y };
+                self.fit_h[i] = if lbl.has_meta(&*sn_fit) { r.size.y } else { f32::NAN };
             }
         }
         let Some((start, end)) = out.insets[i] else { return };
