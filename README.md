@@ -14,7 +14,9 @@ run in Godot without changes.
 
 **Familiar authoring, native result.** UXML and USS are a known, text-based
 UI format with a cascade, selectors, `var()` and flexbox layout. godot-uxml
-keeps the UXML and USS semantics and maps each element to a real Godot control. Focus,
+keeps the UXML and USS semantics and maps each element to a real Godot control.
+Each Unity control is made from the same part elements as in Unity, with a
+default theme that uses values measured in Unity 6000.3. Focus,
 keyboard navigation, controller input, theme fonts and signals operate as
 in any other Godot UI.
 
@@ -22,19 +24,24 @@ in any other Godot UI.
 only the elements that the change can affect. A paint-only change does
 not run layout again. The native core keeps style and layout data in Rust
 and places controls directly. On a screen with 1,531 elements, a hover
-restyle takes 1.0 ms. Before optimization, the same restyle took 8.5 s.
+restyle takes 1.1 ms. Before optimization, the same restyle took 8.5 s.
 See [Performance](#performance).
 
 **Large lists stay fast.** `ListView` makes only enough rows to fill the
 viewport and uses the rows again during a scroll. A list of 10,000 items
-loads in 57 ms and scrolls in 2 ms.
+loads in 72 ms and scrolls in 2.9 ms.
 
-**Verified.** The optimizations do not change behaviour.
+**Verified against Unity.** A dump tool runs each test case in Unity
+6000.3 and records every element, every rectangle and every resolved
+style value. godot-uxml matches Unity exactly in 123 of 127 cases. Over
+all cases, 3,261 of 3,261 elements, 69,004 of 69,004 style values and
+10,609 of 10,616 geometry values match. See [Fidelity](#fidelity).
+
+**Optimizations verified.** The optimizations do not change behaviour.
 Equivalence checks compare each optimized path with the original
-implementation, value by value, and find 0 differences. The cascade and
-parser are ports of the `uxml-preview` reference engine. A parity harness
-compares godot-uxml layout with the 44 golden cases of the reference
-engine. The test suite has 588 checks.
+implementation, value by value, and find 0 differences in 5,847 checks on
+the native core and 5,612 on the GDScript path. The test suite has 2,077
+checks.
 
 **Diagnostics, not silent failure.** Each unsupported feature, selector,
 property, attribute or control gives one diagnostic with file, line and
@@ -49,23 +56,42 @@ harness with negative cases. The addon contains no Slint code.
 ## Performance
 
 Test document: 1,531 elements, 3 stylesheets with approximately 250 rules,
-descendant and child selectors, `var()` and `:hover`/`:focus` rules.
-Machine: Intel Xeon W-2135, Windows 11, Godot 4.7.1. Values are medians.
+descendant and child selectors, `var()` and `:hover`/`:focus` rules. The
+default Unity theme is attached. Machine: Intel Xeon W-2135, Windows 11,
+Godot 4.7.1. Values are medians.
 
 | Operation | Original | GDScript (optimized) | Native core | Hand-built Godot UI |
 | --- | ---: | ---: | ---: | ---: |
-| Hover toggle | 8,479 ms | 8.6 ms | 1.0 ms | 0.03 ms |
-| Restyle, no change | 8,396 ms | 7.4 ms | 0.58 ms | — |
-| Window resize | 2,183 ms | 56 ms | 10.5 ms | 6.4 ms |
-| Class change | 8,991 ms | 93 ms | 11.2 ms | — |
-| Label text change and layout | — | 63 ms | 10.5 ms | 1.1 ms |
-| Document load | 9,839 ms | 836 ms | 392 ms | 267 ms (`.tscn`) |
-| HUD frame (37 elements, 8 labels) | 37.5 ms | 1.6 ms | 0.54 ms | — |
+| Hover toggle | 8,479 ms | 6.0 ms | 1.1 ms | 0.03 ms |
+| Restyle, no change | 8,396 ms | 5.5 ms | 1.0 ms | — |
+| Window resize | 2,183 ms | 112 ms | 13 ms | 6.4 ms |
+| Class change | 8,991 ms | 155 ms | 14 ms | — |
+| Label text change and layout | — | 98 ms | 13 ms | 1.1 ms |
+| Document load | 9,839 ms | 1,479 ms | 633 ms | 267 ms (`.tscn`) |
+| HUD frame (37 elements, 8 labels) | 37.5 ms | 2.0 ms | 0.58 ms | — |
 
-The "hand-built Godot UI" column uses the same screen made from Godot
-containers and `StyleBoxFlat` panels (1,678 nodes).
+The "original" column is the first implementation, before optimization
+and before the Unity theme. The "hand-built Godot UI" column uses the same
+screen made from Godot containers and `StyleBoxFlat` panels (1,678 nodes).
 
-Frame cost with a real renderer (Vulkan, RTX 5060 Ti):
+The Unity part trees, the theme and the Unity layout rules add cost: each
+Unity control is now several Godot controls. Theme rules compile one time
+and apply to each later load. Layout writes only the values that change.
+
+Typical game screens (`bench/workloads.gd`, native core):
+
+| Screen | Operation | Median |
+| --- | --- | ---: |
+| Settings (4 tabs × 12 rows) | load / switch tab / hover row | 72 / 8.5 / 0.43 ms |
+| Inventory (80 slots) | load / hover / select / count change | 92 / 0.75 / 1.6 / 1.3 ms |
+| Dialog | load / typewriter character / hover choice | 10 / 0.41 / 0.13 ms |
+| `ListView`, 10,000 items | load / scroll 3 rows / hover row | 72 / 2.9 / 0.33 ms |
+
+On these screens, a hover, selection or value update takes less than 2 ms
+with the native core.
+
+Frame cost with a real renderer (Vulkan, RTX 5060 Ti, measured before the
+Unity theme):
 
 | Scene | CPU time for each frame |
 | --- | ---: |
@@ -74,9 +100,7 @@ Frame cost with a real renderer (Vulkan, RTX 5060 Ti):
 | Hand-built Godot UI, same screen | 0.88 ms |
 
 Thus a godot-uxml screen costs approximately the same to draw as a
-hand-built screen. On typical game screens (settings, inventory, dialog,
-HUD), a hover, selection or value update takes less than 2 ms with the
-native core.
+hand-built screen.
 
 Method, all values and the correctness checks are in
 [docs/performance.md](docs/performance.md).
@@ -147,54 +171,66 @@ godot --path . --script res://examples/minimal/minimal.gd
 
 ## Unity coverage
 
-godot-uxml targets full support for Unity UI Toolkit 6000.3: every UXML
-element and attribute, every USS property, templates, transitions and
-data binding. [docs/unity-coverage.md](docs/unity-coverage.md) gives the
-status of each item. A summary:
+godot-uxml supports Unity UI Toolkit 6000.3: every UXML element and
+attribute, every USS property, templates, transitions, data binding and
+the editor controls. [docs/unity-coverage.md](docs/unity-coverage.md)
+gives the status of each item. A summary:
 
 - **Templates, transitions and data binding:** `<Template>`/`<Instance>`
   with attribute overrides and slots, USS `transition-*`, `<Bindings>`
-  and `binding-path`.
-- **Controls (Unity part trees and default theme):** `VisualElement`,
-  `TemplateContainer`, `Box`, `Label`, `TextElement`, `Image`, `Button`,
-  `RepeatButton`, `Toggle`, `RadioButton`, `RadioButtonGroup`,
-  `ToggleButtonGroup`, `GroupBox`, `HelpBox`, `PopupWindow`, `Foldout`,
-  `ProgressBar`, `ScrollView`, `Scroller`, `ListView`, `TreeView`,
-  `MultiColumnListView`, `MultiColumnTreeView`, `TabView`, `Tab`,
-  `TwoPaneSplitView`, `IMGUIContainer` (hosts a Godot draw callback).
-- **Controls (native Godot widgets):** `Slider`, `SliderInt`,
-  `TextField`, `DropdownField`.
+  and `binding-path`, two-way for value controls.
+- **Runtime controls (UnityEngine.UIElements):** all controls, from
+  `VisualElement`, `Label`, `Button` and `Toggle` to `Slider`,
+  `MinMaxSlider`, `TextField`, the numeric and vector fields,
+  `DropdownField`, `EnumField`, `ScrollView`, `ListView`, `TreeView`, the
+  multi-column views, `TabView` and `TwoPaneSplitView`. `IMGUIContainer`
+  holds a Godot draw callback.
+- **Editor controls (UnityEditor.UIElements):** `ColorField`,
+  `CurveField`, `GradientField`, `ObjectField`, the mask, layer and tag
+  fields, the `Toolbar` family, `PropertyField` and `InspectorElement`,
+  with the Unity dark and light editor skins. Godot equivalents replace
+  Unity assets: Godot `Curve`, `Gradient`, resources, physics layers and
+  global groups.
+- **UXML attributes:** all VisualElement attributes, for example
+  `tabindex`, `picking-mode`, `view-data-key`, `tooltip` and
+  `data-source-path`.
 - **Selectors:** type, `.class`, `#name`, `*`, compounds, descendant and
-  `>` child combinators, comma groups.
-- **Pseudo-classes:** `:hover`, `:active`, `:inactive`, `:focus`,
-  `:checked`, `:disabled`, `:enabled`, `:selected`, `:root`.
+  `>` child combinators, comma groups, all Unity pseudo-classes.
 - **Values:** `var()` custom properties, `@import`, inline `style`,
-  inheritance, shorthands.
-- **Layout:** flexbox (direction, wrap, grow, shrink, basis, alignment,
-  justification, gap), margins, padding, borders, `px` and `%` lengths.
-- **Paint:** background color and image, 9-slice backgrounds, image tint,
-  border colors and radii, fonts, text color and text outline, opacity,
-  overflow clipping, transforms, text spacing and shadow, rich text tags.
+  inheritance, shorthands, `all`, `url()` and `resource()`.
+- **Layout:** flexbox, absolute and relative position, `margin: auto`,
+  `aspect-ratio`, `px` and `%` lengths, and the Unity pixel-grid rounding.
+- **Paint:** backgrounds with position, size, repeat and 9-slice, borders
+  and radii, fonts, text outline and shadow, text auto-size, opacity,
+  overflow clipping, transforms, `filter`, `-unity-material`, rich text
+  tags.
 
 Some CSS features do not exist in USS: `@media`, `em`/`rem`/`vh` units,
 `+` and `~` combinators, attribute selectors and `::` pseudo-elements.
-Unity rejects these features. godot-uxml also rejects them and gives a
-diagnostic.
+Unity rejects these features. godot-uxml also rejects these features and
+gives a diagnostic.
+
+Godot cannot run Unity C# code. Thus custom C# controls and C# IMGUI code
+do not run. For IMGUI, a Godot draw callback is the replacement.
 
 ## Fidelity
 
-godot-uxml compares itself with Unity 6000.3 directly:
-`tools/unity-dump` runs UXML/USS cases through Unity's default runtime
-theme and records every element, control parts included.
-`bench/parity.gd` compares structure, geometry and resolved style.
-Controls with part trees (Button, Toggle, RadioButton, Foldout,
-ProgressBar, HelpBox, ScrollView, ListView, TreeView, the multi-column
-views, TabView, TwoPaneSplitView and more) build Unity's own part
-elements and use a default theme written from the measured values. Most remaining
-differences are Unity's pixel-grid rounding (at most half a pixel). The
-numbers and every known cause are in [docs/parity.md](docs/parity.md).
+The parity harness compares godot-uxml with Unity 6000.3 directly:
+`tools/unity-dump` runs UXML/USS cases in Unity, with the default runtime
+theme or the editor skins, and records every element, control parts
+included. `bench/parity.gd` compares structure, geometry and resolved
+style.
 
-Slider, TextField and DropdownField still use native Godot widgets.
+| Measure | Match |
+| --- | ---: |
+| Cases, exact | 123 of 127 |
+| Elements | 3,261 of 3,261 |
+| Resolved style values | 69,004 of 69,004 |
+| Geometry values | 10,609 of 10,616 |
+
+Of the 4 cases that differ, 1 differs only by pixel-grid rounding
+(0.2 px). [docs/parity.md](docs/parity.md) gives each difference and the
+cause.
 
 ## Tests and benchmarks
 
@@ -223,7 +259,10 @@ The script makes a release build and copies the binary into
 - [docs/design.md](docs/design.md): architecture, supported subset,
   diagnostics and API.
 - [docs/performance.md](docs/performance.md): benchmarks and method.
-- [docs/parity.md](docs/parity.md): comparison with the reference engine.
+- [docs/parity.md](docs/parity.md): comparison with Unity and with the
+  reference engine.
+- [docs/unity-coverage.md](docs/unity-coverage.md): status of each Unity
+  element, attribute and property.
 - [addons/godot_uxml/THIRD-PARTY-NOTICES.md](addons/godot_uxml/THIRD-PARTY-NOTICES.md):
   licenses and attribution (uxml-preview, godot-rust, Slint).
 
