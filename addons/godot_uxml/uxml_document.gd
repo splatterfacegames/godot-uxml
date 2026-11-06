@@ -160,6 +160,14 @@ var _behaviors: Dictionary = {}       # control UxmlElement -> UxmlBehaviors.Beh
 var _layout_hooks: Array = []
 
 var _scan_all := true                 # next restyle re-reads every element's attributes
+## Hidden subtrees kept out of the scene tree (see _park_hidden): parked
+## root element -> the Control it is a child of once shown.
+var _parked: Dictionary = {}
+var _native_bound: UssCascade = null  # cascade whose native layout has the controls
+## Keep the subtrees that are display:none when the document loads out of
+## the scene tree until they are shown (see _park_hidden). False keeps
+## every control in the tree from the load on.
+static var park_hidden := true
 var _transitions: UssTransitions = null  # running USS transitions (per load)
 
 ## Round the layout to the pixel grid as Unity does (Yoga's
@@ -265,6 +273,7 @@ func _notification(what: int) -> void:
 				vp.gui_focus_changed.disconnect(cb)
 	elif what == NOTIFICATION_PREDELETE:
 		_binding.clear()
+		_free_parked()
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +393,8 @@ func _clear() -> void:
 	for child in _root_box.get_children():
 		_root_box.remove_child(child)
 		child.queue_free()
+	_free_parked()
+	_native_bound = null
 	_controls.clear()
 	_natives.clear()
 	_by_name.clear()
@@ -465,15 +476,21 @@ func _index() -> void:
 
 	var factory := UxmlControlFactory.new(_resolver, _doc.path, _doc.source, _rt_warnings)
 	factory.element_paths = _doc.element_paths
+	var built: Array = []
 	for child in _doc.root.children:
 		if UssControls.is_non_visual(child.local):
 			continue
-		_root_box.add_child(factory.build(child))
+		built.append(factory.build(child))
 	_controls = factory.controls
 	_natives = factory.natives
 	_controls[_doc.root] = _root_box
 	for el in _controls:
 		_el_of[_controls[el]] = el
+	# The controls were built off the tree; hidden subtrees stay off it.
+	_park_hidden()
+	for c in built:
+		if not c.has_meta(&"uxml_parked"):
+			_root_box.add_child(c)
 	# Observable model: set_attribute() on any element restyles just it.
 	var on_changed := _on_model_changed
 	for el in _doc.root.walk():
@@ -597,6 +614,8 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		_cascade = UssCascade.new(_doc)
 		_full_apply = true
 		_force_layout = true
+	if _native_bound != _cascade:
+		_native_bound = _cascade
 		if _cascade._native != null and use_native_layout:
 			# Native flex pass: hand it the controls per preorder index.
 			var ctl: Array = []
@@ -648,6 +667,12 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	var flipped: Array = []
 	for fi in (ef[0] as PackedInt32Array):
 		flipped.append(cels[fi])
+	if not _parked.is_empty():
+		# A parked subtree that is shown enters the tree before its apply.
+		var cidx0: Dictionary = _cascade.index
+		for pel in _parked.keys():
+			if _gone[cidx0[pel]] == 0:
+				_unpark(pel)
 	# One applier per load: its warning dedupe and resource caches must
 	# survive restyles or every hover would re-report and re-load misses.
 	if _applier == null:
@@ -1098,13 +1123,161 @@ func _place_control(el: UxmlElement) -> void:
 
 
 # ---------------------------------------------------------------------------
+# Hidden subtrees out of the scene tree ("parked")
+# ---------------------------------------------------------------------------
+
+## Keep the authored subtrees that are display:none at load out of the
+## scene tree. Their controls, behaviors, bindings and diagnostics are made
+## exactly as for any other element, so everything that reads or writes
+## them works, but the root control of such a subtree is not added to its
+## parent: entering the tree is the engine's largest per-control cost
+## (about 14 us for a Control, 85 us for a Label, 130 us for a Button). The
+## subtree enters the tree in the restyle that shows it (before its apply
+## and layout), or when the public API hands out one of its controls or
+## the control of an ancestor (get_element, get_native, behavior and scroll
+## calls by name, get_focus_ring): a control the API returns always has its
+## whole subtree in the tree.
+##
+## The display flags are needed before the controls enter the tree, so the
+## cascade is created and resolved here instead of in the first restyle,
+## which then updates it incrementally like any later restyle (the
+## behaviors' states and attribute writes). Parts are not parked (behaviors
+## place and measure them), except a collapsed Foldout's content, nor are
+## pooled rows (collections recycle them); a
+## subtree under a Godot `theme` (on the document, an ancestor or an
+## element control) is not parked, as its controls would read the default
+## theme while out of the tree.
+func _park_hidden() -> void:
+	if not park_hidden or _theme_above(_root_box):
+		return
+	_cascade = UssCascade.new(_doc)
+	_cascade.update({})
+	# The first restyle re-reads only the elements whose attributes changed
+	# since (behaviors and bindings set them up through set_attribute), as
+	# every later restyle does.
+	_scan_all = false
+	var gone: PackedByteArray = _cascade.effective_flags()[2]
+	var idx: Dictionary = _cascade.index
+	var below := {}
+	for el in _cascade.els:
+		var parent = _parents.get(el)
+		if parent == null:
+			continue
+		if below.has(parent):
+			below[el] = true
+			continue
+		if gone[idx[el]] != 1 or _pooled.has(el) or not _parkable(el):
+			continue
+		var c: Control = _controls.get(el)
+		var pc: Control = _controls.get(parent)
+		if c == null or pc == null:
+			continue
+		below[el] = true
+		if pc != _root_box and _theme_above(pc):
+			continue
+		if c.get_parent() != null:
+			c.get_parent().remove_child(c)
+		c.set_meta(&"uxml_parked", true)
+		_parked[el] = pc
+
+
+## Authored elements, and the content of an authored Foldout (collapsed:
+## its behavior only sets the content's style). Other parts are placed,
+## measured or moved by their control's behavior.
+static func _parkable(el: UxmlElement) -> bool:
+	var owner := el.part_of
+	if owner == null:
+		return true
+	return el.part_role == "content" and owner.local == "Foldout" and owner.part_of == null
+
+
+## `n` or a Control or Window above it has a Godot `theme`.
+static func _theme_above(n: Node) -> bool:
+	while n != null:
+		if (n is Control and (n as Control).theme != null) or (n is Window and (n as Window).theme != null):
+			return true
+		n = n.get_parent()
+	return false
+
+
+## The named element, after putting its parked subtree (if any) and the
+## parked subtrees below it in the tree: for API calls that hand out its
+## control or act on it through its behavior.
+func _named(element_name: String) -> UxmlElement:
+	var el: UxmlElement = _by_name.get(element_name)
+	if el != null and not _parked.is_empty():
+		_expose(el)
+	return el
+
+
+## Put the parked subtrees at, above and below `el` in the tree.
+func _expose(el: UxmlElement) -> void:
+	for pel in _parked.keys():
+		var cur: UxmlElement = pel
+		while cur != null and cur != el:
+			cur = _parents.get(cur)
+		if cur == el:
+			_unpark(pel)
+	var up: UxmlElement = _parents.get(el)
+	while up != null:
+		if _parked.has(up):
+			_unpark(up)
+			return
+		up = _parents.get(up)
+
+
+## Add a parked subtree's root control to its parent control where it was
+## built: after the control of the nearest earlier sibling element that is
+## in the parent, else before the nearest later one, else after the
+## parent's own leading children (an Image's TextureRect).
+func _unpark(el: UxmlElement) -> void:
+	var pc: Control = _parked.get(el)
+	_parked.erase(el)
+	var c: Control = _controls.get(el)
+	if pc == null or c == null or not is_instance_valid(c) or not is_instance_valid(pc):
+		return
+	c.remove_meta(&"uxml_parked")
+	var at := -1
+	var parent: UxmlElement = _parents.get(el)
+	var sibs: Array = parent.children if parent != null else []
+	var i := sibs.find(el)
+	for k in range(i - 1, -1, -1):
+		var sc = _controls.get(sibs[k])
+		if sc != null and sc.get_parent() == pc:
+			at = sc.get_index() + 1
+			break
+	if at < 0:
+		for k in range(i + 1, sibs.size()):
+			var sc = _controls.get(sibs[k])
+			if sc != null and sc.get_parent() == pc:
+				at = sc.get_index()
+				break
+	if at < 0:
+		at = 0
+		while at < pc.get_child_count() and not _el_of.has(pc.get_child(at)):
+			at += 1
+	pc.add_child(c)
+	if c.get_index() != at:
+		pc.move_child(c, at)
+
+
+## Free the parked subtrees: no node in the tree holds them.
+func _free_parked() -> void:
+	for pel in _parked:
+		var c = _controls.get(pel)
+		if c != null and is_instance_valid(c) and c.get_parent() == null:
+			c.queue_free()
+	_parked = {}
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 ## The element's outer control, or null. For labeled fields this is the
 ## UxmlField wrapper; for Image the host box.
 func get_element(element_name: String) -> Control:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el := _named(element_name)
 	return null if el == null else _controls.get(el)
 
 
@@ -1117,7 +1290,7 @@ func get_element_by_name(element_name: String) -> Control:
 ## get_element for unwrapped controls and for part-tree containers
 ## (ScrollView, ListView, TabView, ...).
 func get_native(element_name: String) -> Control:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el := _named(element_name)
 	if el == null:
 		return null
 	var b = _behaviors.get(el)
@@ -1323,7 +1496,7 @@ func _load_template(el: UxmlElement, src: String) -> Array:
 
 
 func _behavior_of(element_name: String, kind: String = "") -> Variant:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el := _named(element_name)
 	if el == null:
 		return null
 	var b = _behaviors.get(el)
@@ -1485,7 +1658,7 @@ func scroll_to(element_name: String, child_name: String) -> void:
 
 
 func _scroll_behavior(element_name: String) -> Variant:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el := _named(element_name)
 	if el == null:
 		return null
 	if el.local != "ScrollView":
@@ -1715,6 +1888,8 @@ func set_view_data(data: Dictionary) -> void:
 
 ## The focus targets in Tab order, when the document uses tabindex.
 func get_focus_ring() -> Array:
+	for pel in _parked.keys():
+		_unpark(pel)
 	return _attrs.focus_ring()
 
 

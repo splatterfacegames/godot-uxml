@@ -1,0 +1,64 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:Style src="parking.uss" />
+  <ui:VisualElement name="hidden-first" class="hidden">
+    <ui:Label text="first, hidden" />
+  </ui:VisualElement>
+  <ui:VisualElement name="screen" class="screen">
+    <ui:VisualElement class="tabs">
+      <ui:Button name="tab-0" class="tab" text="One" />
+      <ui:Button name="tab-1" class="tab" text="Two" />
+      <ui:Button name="tab-2" class="tab" text="Three" />
+    </ui:VisualElement>
+    <ui:VisualElement name="page-0" class="page">
+      <ui:VisualElement name="row-0-0" class="row">
+        <ui:Label class="row-label" text="Volume" />
+        <ui:Slider name="vol" class="row-ctl" low-value="0" high-value="100" value="40" />
+      </ui:VisualElement>
+      <ui:VisualElement name="inline-hidden" style="display: none;">
+        <ui:Label name="inline-label" text="inline hidden" />
+      </ui:VisualElement>
+      <ui:VisualElement name="row-0-1" class="row">
+        <ui:Label class="row-label" text="Fullscreen" />
+        <ui:Toggle name="fs" class="row-ctl" value="true" />
+      </ui:VisualElement>
+      <ui:TabView name="tv" reorderable="true">
+        <ui:Tab name="tab-a" label="A"><ui:Label text="tab a" /></ui:Tab>
+        <ui:Tab name="tab-b" label="B"><ui:Label text="tab b" /></ui:Tab>
+        <ui:Tab name="tab-c" label="C"><ui:Button text="tab c" /></ui:Tab>
+      </ui:TabView>
+      <ui:Foldout name="opts" text="Advanced" value="false">
+        <ui:Label name="adv-label" text="advanced option" />
+        <ui:Toggle name="adv-toggle" label="Enable" />
+      </ui:Foldout>
+    </ui:VisualElement>
+    <ui:VisualElement name="page-1" class="page hidden">
+      <ui:VisualElement name="row-1-0" class="row">
+        <ui:Label class="row-label" text="Quality" />
+        <ui:DropdownField name="quality" class="row-ctl" choices="Low,Medium,High" value="Medium" />
+      </ui:VisualElement>
+      <ui:VisualElement class="clip">
+        <ui:VisualElement name="swatch-a" class="swatch faded" />
+        <ui:Label name="long" text="A long label inside a clipped box" />
+      </ui:VisualElement>
+      <ui:VisualElement name="nested-hidden" class="hidden">
+        <ui:Label text="nested hidden" />
+      </ui:VisualElement>
+      <ui:TextField name="player" label="Player" value="Ada" />
+    </ui:VisualElement>
+    <ui:VisualElement name="page-2" class="page hidden">
+      <ui:Foldout name="fold" text="More" value="false">
+        <ui:Label text="inside foldout" />
+      </ui:Foldout>
+      <ui:ScrollView name="scroll" style="height: 60px;">
+        <ui:Label text="one" />
+        <ui:Label text="two" />
+        <ui:Button name="deep-button" text="deep" />
+      </ui:ScrollView>
+      <ui:Image name="pic" style="width: 32px; height: 32px; background-color: blue;" />
+      <ui:RadioButtonGroup name="radios" choices="A,B,C" value="1" />
+    </ui:VisualElement>
+  </ui:VisualElement>
+  <ui:VisualElement name="hidden-last" class="hidden" tooltip="last">
+    <ui:Button text="last, hidden" />
+  </ui:VisualElement>
+</ui:UXML>

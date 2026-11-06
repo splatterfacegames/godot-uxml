@@ -421,11 +421,17 @@ sees the result of the steps before it.
    `<Bindings>` text attribute (`label`, `text`) gets its part at this
    step (see "Control parts"). The `<Bindings>` of the pooled rows are
    extracted next.
-5. Name index, controls (`UxmlControlFactory`), signal wiring.
-6. `UxmlBehaviors.attach_all`, then `UxmlCommonAttributes.setup`, then
+5. Name index, then the controls (`UxmlControlFactory`), built off the
+   scene tree.
+6. The cascade is created and resolved without runtime states, and the
+   subtrees that are `display: none` stay out of the scene tree (see
+   "Hidden subtrees out of the scene tree"); the other controls enter it.
+   Signal wiring.
+7. `UxmlBehaviors.attach_all`, then `UxmlCommonAttributes.setup`, then
    `UxmlBinding.setup`. The bindings write the first values through the
    behaviors, before the first restyle.
-7. The first restyle (cascade, transitions bookkeeping, applier, layout),
+8. The first restyle (incremental cascade update with the states and
+   attribute writes of step 7, transitions bookkeeping, applier, layout),
    then the restore of view data.
 
 | file | class | role |
@@ -466,7 +472,8 @@ sees the result of the steps before it.
 ### Control mapping
 
 Every element gets one Godot control, part elements included (see
-"Control parts"):
+"Control parts"; a hidden subtree's controls may wait out of the scene
+tree, see "Hidden subtrees out of the scene tree"):
 
 | element | control | `get_native` |
 | --- | --- | --- |
@@ -507,6 +514,49 @@ UXML `value` attribute of a DropdownField to a placeholder property, so
 `value` selects nothing (measured: `ctl-dropdown`). A `value` from code or
 from a binding selects by choice text.
 
+
+### Hidden subtrees out of the scene tree
+
+Entering the scene tree is the largest per-control cost of a load, and it
+is the engine's: about 14 us for a `Control`, 85 us for a `Label`, 130 us
+for a `Button` once the main loop runs (measured, docs/performance.md).
+A subtree that is `display: none` when the document loads (a settings
+page behind a tab, a hidden panel, an unselected Tab, a collapsed Foldout's
+content) is built like every other subtree (controls, signal wiring,
+behaviors, bindings, diagnostics), but its root control is not added to
+its parent: it is *parked* (`UxmlDocument._parked`). A parked subtree
+enters the tree:
+
+- in the restyle that shows it, before its controls are applied and laid
+  out, at the place it was built at (after the control of the nearest
+  earlier sibling element in the parent);
+- when the public API hands out one of its controls or the control of an
+  ancestor: `get_element`, `get_element_by_name`, `get_native`, the
+  behavior calls by name (lists, tabs, scrolling, split views, menus,
+  breadcrumbs), `scroll_to`, and `get_focus_ring` (all of them). A control
+  the API returns therefore always has its whole subtree in the tree.
+
+Parked: authored elements (not parts, which behaviors place, measure or
+move) and the content part of an authored Foldout; not the rows of a
+collection's pool. Nothing is parked when the document or an ancestor has
+a Godot `theme` (a parked control would read the default theme), or with
+`UxmlDocument.park_hidden = false`. A subtree is parked only at load;
+hiding it later keeps it in the tree.
+
+What a parked subtree changes is the node tree only: a parked control has
+no parent and is not inside the tree, and its parent's `get_children()`
+lacks it, until it enters. Walking the document's Godot nodes directly
+(rather than through the API) therefore does not see hidden subtrees that
+were never shown. Drawing, layout, computed styles, diagnostics, signals,
+values and every control the API returns are those of a load without
+parking (`tests/test_parking.gd` compares the controls' drawing state after
+every show and hide; `bench/park_render.gd` compares captured pixels).
+
+The cascade has to be resolved before the controls enter the tree, so it
+is created at step 6 instead of in the first restyle, and the first
+restyle updates it incrementally (the elements whose attributes the
+behaviors and bindings set through `set_attribute`, and the states they
+set) instead of re-reading every element.
 
 ### Data binding (runtime)
 
