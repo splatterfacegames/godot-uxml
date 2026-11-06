@@ -45,17 +45,25 @@ func _initialize() -> void:
 
 
 func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary, xcache: Dictionary) -> void:
-	var snap := {}
+	# The controls in the tree: a hidden subtree parked out of the tree
+	# (UxmlDocument._park_hidden) is never measured, and a size written to a
+	# control out of the tree is clamped to a minimum size the engine only
+	# keeps current inside the tree.
+	var ctl := {}
 	for el in d._controls:
-		snap[el] = d._controls[el].size
+		if d._controls[el].is_inside_tree():
+			ctl[el] = d._controls[el]
+	var snap := {}
+	for el in ctl:
+		snap[el] = ctl[el].size
 	var opts := {"source": d._doc.source, "file": d._doc.path,
 		"warned": {}}
 	var w1: Array = []
 	var a := RefFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w1, opts.duplicate())
 	var after_a := {}
-	for el in d._controls:
-		after_a[el] = d._controls[el].size
-		d._controls[el].size = snap[el]
+	for el in ctl:
+		after_a[el] = ctl[el].size
+		ctl[el].size = snap[el]
 	var opts2 := opts.duplicate()
 	opts2["warned"] = {}
 	opts2["volatile"] = d._volatile_measures()
@@ -120,8 +128,8 @@ func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary,
 	if bad.is_empty() and w1 != w2:
 		bad = "warnings differ: %s vs %s" % [w1, w2]
 	if bad.is_empty():
-		for el in d._controls:
-			if d._controls[el].size != after_a[el]:
+		for el in ctl:
+			if ctl[el].size != after_a[el]:
 				bad = "measurer side effects differ"
 				break
 	if not bad.is_empty():

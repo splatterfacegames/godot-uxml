@@ -40,6 +40,7 @@ func _initialize() -> void:
 		["res://tests/test_inputs.gd", "inputs"],
 		["res://tests/test_containers.gd", "containers"],
 		["res://tests/test_editor.gd", "editor"],
+		["res://tests/test_parking.gd", "parking"],
 	]:
 		if not only.is_empty() and entry[1] != only:
 			continue
