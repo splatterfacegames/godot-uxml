@@ -310,6 +310,32 @@ pub struct LayoutIn {
     /// Dropped like `maxc`, and when the placement fits the Label or sets a
     /// best-fit font size. Used only while `maxc_on`.
     pub unfit: std::cell::RefCell<Vec<Option<f64>>>,
+    /// The `uxml_margins` of each control's normal stylebox override
+    /// (None inside: no override or no meta) across layouts. Only the
+    /// style applier writes them (apply(), apply_resolved_insets), so an
+    /// entry is dropped when its control is re-applied (`force`) or its
+    /// inset hook runs. Used only while `maxc_on`.
+    pub margins: std::cell::RefCell<Vec<Option<Option<[f64; 4]>>>>,
+}
+
+impl LayoutIn {
+    /// The `uxml_margins` of control `c` (element i): through the
+    /// cross-layout cache while `maxc_on`.
+    fn margins_of(&self, i: usize, c: &Gd<Control>, sn_normal: &StringName, sn_margins: &StringName) -> Option<[f64; 4]> {
+        let on = self.maxc_on.get();
+        if on {
+            if let Some(Some(m)) = self.margins.borrow().get(i) {
+                return *m;
+            }
+        }
+        let m = read_margins(c, sn_normal, sn_margins);
+        if on {
+            if let Some(e) = self.margins.borrow_mut().get_mut(i) {
+                *e = Some(m);
+            }
+        }
+        m
+    }
 }
 
 /// Native placement state: the last layout and the insets last handed to
@@ -333,6 +359,12 @@ impl Placement {
     /// for unchanged insets on unchanged styleboxes, so they only run when
     /// the insets changed or the element was just re-applied (`force`).
     pub fn place(&mut self, io: &LayoutIn, i: usize, applier: &Option<Gd<Object>>, force: bool) {
+        if force {
+            // Re-applied: new styleboxes, font and size.
+            if let Some(e) = io.margins.borrow_mut().get_mut(i) {
+                *e = None;
+            }
+        }
         if i == 0 {
             return; // document root: the host box, never positioned
         }
@@ -352,8 +384,16 @@ impl Placement {
                 io.unfit.borrow_mut()[i] = None;
             }
         }
-        c.set_position(r.position);
-        c.set_size(r.size);
+        // A control already at its rect is not moved: setting the same
+        // position or size changes nothing, but costs about 1.3 us each
+        // (offset recomputation), and most controls keep their rect when a
+        // layout runs again.
+        if c.get_position() != r.position {
+            c.set_position(r.position);
+        }
+        if c.get_size() != r.size {
+            c.set_size(r.size);
+        }
         if let (Some(lbl), Some(a)) = (&io.labels[i], applier) {
             // UxmlDocument._place_control: Godot floors a Label at one text
             // line; Unity's box can be shorter (UxmlStyleApplier.fit_label).
@@ -403,6 +443,12 @@ impl Placement {
                 *e = None;
             }
             if let Some(e) = io.unfit.borrow_mut().get_mut(i) {
+                *e = None;
+            }
+        }
+        if changed {
+            // The hook below sets the stylebox margins (uxml_margins).
+            if let Some(e) = io.margins.borrow_mut().get_mut(i) {
                 *e = None;
             }
         }
@@ -535,6 +581,8 @@ impl<'a> Pass<'a> {
         let mut volatile = vec![false; n];
         let mut vw = vec![0.0; n];
         let mut hinted = vec![false; n];
+        let sn_normal = StringName::from("normal");
+        let sn_margins = StringName::from("uxml_margins");
         for i in 0..n {
             if let Some(ctl) = &io.controls[i] {
                 kinds[i] = if io.boxed[i] { CtlKind::Boxed } else { CtlKind::Plain };
@@ -549,7 +597,7 @@ impl<'a> Pass<'a> {
                 };
                 if wraps {
                     volatile[i] = true;
-                    vw[i] = d(ctl.get_size().x) - hpad(ctl, &StringName::from("normal"), &StringName::from("uxml_margins"));
+                    vw[i] = d(ctl.get_size().x) - hpad_of(io.margins_of(i, ctl, &sn_normal, &sn_margins));
                 }
             }
         }
@@ -1025,7 +1073,7 @@ impl<'a> Pass<'a> {
             // UxmlDocument._measure_leaf: the content width plus the USS
             // padding and border.
             let mut s = c.get_size();
-            s.x = f(content_w + hpad(&c, &self.sn_normal, &self.sn_margins));
+            s.x = f(content_w + hpad_of(self.sb_margins(i, &c)));
             let mut cm = c.clone();
             cm.set_size(s);
         }
@@ -1098,25 +1146,22 @@ impl<'a> Pass<'a> {
                 ms.y = f(fit_h);
             }
         }
-        if self.margins_m[i].is_none() {
-            let mut m: Option<[f64; 4]> = None;
-            if c.has_theme_stylebox_override(&self.sn_normal) {
-                if let Some(sb) = c.get_theme_stylebox(&self.sn_normal) {
-                    let sb: Gd<StyleBox> = sb;
-                    if sb.has_meta(&self.sn_margins) {
-                        let a = sb.get_meta(&self.sn_margins).to::<VarArray>();
-                        let g = |k: usize| a.at(k).try_to::<f64>().unwrap_or(0.0);
-                        m = Some([g(0), g(1), g(2), g(3)]);
-                    }
-                }
-            }
-            self.margins_m[i] = Some(m);
-        }
-        if let Some(Some(m)) = self.margins_m[i] {
+        if let Some(m) = self.sb_margins(i, &c) {
             ms.x = f(gmax(0.0, d(ms.x) - m[0] - m[2]));
             ms.y = f(gmax(0.0, d(ms.y) - m[1] - m[3]));
         }
         ms
+    }
+
+    /// The `uxml_margins` of element i's control, once per pass (and across
+    /// passes through LayoutIn::margins_of).
+    fn sb_margins(&mut self, i: usize, c: &Gd<Control>) -> Option<[f64; 4]> {
+        if let Some(m) = self.margins_m[i] {
+            return m;
+        }
+        let m = self.io.margins_of(i, c, &self.sn_normal, &self.sn_margins);
+        self.margins_m[i] = Some(m);
+        m
     }
 
     fn measure_call(&mut self, i: usize, hint: f64) -> Vector2 {
@@ -1140,7 +1185,7 @@ impl<'a> Pass<'a> {
             }
             let res = self.measure_leaf(i, hint);
             let ctl = self.io.controls[i].clone().unwrap();
-            let actual = d(ctl.get_size().x) - hpad(&ctl, &self.sn_normal, &self.sn_margins);
+            let actual = d(ctl.get_size().x) - hpad_of(self.sb_margins(i, &ctl));
             self.vset[i].insert(hint.to_bits(), (actual, res));
             self.vread[i].insert(actual.to_bits(), res);
             self.vw[i] = actual;
@@ -1246,15 +1291,24 @@ impl<'a> Pass<'a> {
         let ky = if sens & 2 != 0 { d(avail.y) } else { 0.0 };
         let kh = if sens & 4 != 0 { hint } else { -1.0 };
         let vl = self.vlist(i);
-        let entry: Vec<f64> = vl.iter().map(|&v| self.vw[v]).collect();
+        // Memo lookup: the entry widths are compared in place (most calls
+        // hit; collecting them first cost an allocation per call).
         for e in &self.meas_m[i] {
-            if e.kx == kx && e.ky == ky && e.kh == kh && e.bx == bx && e.by == by && e.entry == entry {
+            if e.kx == kx
+                && e.ky == ky
+                && e.kh == kh
+                && e.bx == bx
+                && e.by == by
+                && e.entry.len() == vl.len()
+                && vl.iter().zip(e.entry.iter()).all(|(&v, &w)| self.vw[v] == w)
+            {
                 for (k, &v) in vl.iter().enumerate() {
                     self.vw[v] = e.exit[k];
                 }
                 return (e.out, e.tx, e.ty, e.lin_w, e.lin_h);
             }
         }
+        let entry: Vec<f64> = vl.iter().map(|&v| self.vw[v]).collect();
         if by >= 0.0 {
             let r = self.measure_t(i, avail, hint, bx, -1.0);
             if below(r.2, r.4, by) {
@@ -2028,17 +2082,27 @@ fn unfitted_height(l: &Gd<Label>, sn_unfit: &StringName) -> f64 {
 
 /// UxmlDocument._hpad: the horizontal `uxml_margins` of the control's
 /// normal stylebox.
-fn hpad(c: &Gd<Control>, sn_normal: &StringName, sn_margins: &StringName) -> f64 {
+fn hpad_of(m: Option<[f64; 4]>) -> f64 {
+    match m {
+        Some(m) => m[0] + m[2],
+        None => 0.0,
+    }
+}
+
+/// The `uxml_margins` meta of the control's normal stylebox override, if
+/// both exist (UxmlDocument._measure_leaf / _hpad).
+fn read_margins(c: &Gd<Control>, sn_normal: &StringName, sn_margins: &StringName) -> Option<[f64; 4]> {
     if c.has_theme_stylebox_override(sn_normal) {
         if let Some(sb) = c.get_theme_stylebox(sn_normal) {
+            let sb: Gd<StyleBox> = sb;
             if sb.has_meta(sn_margins) {
                 let a = sb.get_meta(sn_margins).to::<VarArray>();
                 let g = |k: usize| a.at(k).try_to::<f64>().unwrap_or(0.0);
-                return g(0) + g(2);
+                return Some([g(0), g(1), g(2), g(3)]);
             }
         }
     }
-    0.0
+    None
 }
 
 /// flex_layout.gd _ext.
