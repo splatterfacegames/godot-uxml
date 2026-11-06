@@ -489,7 +489,7 @@ func _unity_section(cases: Array) -> bool:
 	var rows: Array = []
 	var tot := {"cases": 0, "match": 0, "elements": 0, "struct_ok": 0,
 		"geo": 0, "geo_ok": 0, "geo_half": 0, "style": 0, "style_ok": 0, "pixel_only": 0,
-		"diag": 0, "diag_ok": 0}
+		"diag": 0, "diag_ok": 0, "props": 0, "props_ok": 0}
 	var negatives_ok := true
 	for c in cases:
 		var dpath: String = UNITY_DIR + String(c["name"]) + ".json"
@@ -499,7 +499,7 @@ func _unity_section(cases: Array) -> bool:
 		var r := _run_unity(c, dump)
 		rows.append(r)
 		tot["cases"] += 1
-		for k in ["elements", "struct_ok", "geo", "geo_ok", "geo_half", "style", "style_ok", "diag", "diag_ok"]:
+		for k in ["elements", "struct_ok", "geo", "geo_ok", "geo_half", "style", "style_ok", "diag", "diag_ok", "props", "props_ok"]:
 			tot[k] += r[k]
 		if (r["status"] != "match" and r["struct_ok"] == r["elements"] and r["style_ok"] == r["style"]
 				and r["geo_ok"] + r["geo_half"] == r["geo"]):
@@ -529,9 +529,9 @@ func _unity_section(cases: Array) -> bool:
 	# Unity rounds every layout edge to the pixel grid (Yoga's
 	# RoundToPixelGrid); godot-uxml's layout keeps fractions. Differences of
 	# at most half a pixel are counted separately so other causes stand out.
-	print("UNITY PARITY: %d/%d cases match (%d more differ only by pixel-grid rounding); structure %d/%d elements, geometry %d/%d values (%d more within 0.5px), style %d/%d values, import diagnostics %d/%d; negative cases %s" % [
+	print("UNITY PARITY: %d/%d cases match (%d more differ only by pixel-grid rounding); structure %d/%d elements, geometry %d/%d values (%d more within 0.5px), style %d/%d values, element properties %d/%d, import diagnostics %d/%d; negative cases %s" % [
 		tot["match"], tot["cases"], tot["pixel_only"], tot["struct_ok"], tot["elements"], tot["geo_ok"], tot["geo"],
-		tot["geo_half"], tot["style_ok"], tot["style"], tot["diag_ok"], tot["diag"],
+		tot["geo_half"], tot["style_ok"], tot["style"], tot["props_ok"], tot["props"], tot["diag_ok"], tot["diag"],
 		"detected" if negatives_ok else "NOT DETECTED"])
 	return negatives_ok
 
@@ -701,7 +701,7 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		for ch in pe.children:
 			parents[ch] = pe
 	var out := {"name": name, "status": "match", "notes": [], "elements": 0, "struct_ok": 0, "geo_half": 0,
-		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0, "diag": 0, "diag_ok": 0, "pairs": []}
+		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0, "diag": 0, "diag_ok": 0, "props": 0, "props_ok": 0, "pairs": []}
 	var seen := {}
 	# Unity does not resolve styles under display:none; those elements are
 	# compared on structure only.
@@ -773,6 +773,35 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 			out["elements"] += 1
 	if not out["notes"].is_empty():
 		out["status"] = "differs"
+	# Element properties: enabledInHierarchy against the effective
+	# disabled state of the cascade (enabled="false" and its subtree, as
+	# Unity's SetEnabled); counted with the structure.
+	var dcas := UssCascade.new(doc)
+	dcas.update({"element_states": es}, true)
+	var dflags: PackedByteArray = dcas.disabled_flags()
+	for u in uels:
+		var pel = ours.get(String(u["path"]))
+		if pel == null or not u.has("enabledInHierarchy") or not dcas.index.has(pel):
+			continue
+		out["props"] += 1
+		var ours_en: bool = dflags[int(dcas.index[pel])] == 0
+		if ours_en == bool(u["enabledInHierarchy"]):
+			out["props_ok"] += 1
+		else:
+			out["notes"].append("%s enabledInHierarchy: ours %s vs Unity %s" % [_ulabel(u), ours_en, u["enabledInHierarchy"]])
+			out["status"] = "differs"
+		# picking-mode of the plain authored elements (the UXML attribute;
+		# a control picks with its own defaults, and its parts take the
+		# runtime's mouse handling).
+		var plain: bool = String(u["type"]) in ["VisualElement", "Label", "TextElement", "Image", "Box", "TemplateContainer"]
+		if (pel as UxmlElement).part_of == null and u.has("pickingMode") and plain:
+			out["props"] += 1
+			var pm := "Ignore" if str((pel as UxmlElement).get_attribute("picking-mode")) == "Ignore" else "Position"
+			if pm == String(u["pickingMode"]):
+				out["props_ok"] += 1
+			else:
+				out["notes"].append("%s pickingMode: ours %s vs Unity %s" % [_ulabel(u), pm, u["pickingMode"]])
+				out["status"] = "differs"
 	# Unity's USS import diagnostics (run.py adds them to the dump): each
 	# needs a godot-uxml diagnostic on the same line of the same sheet.
 	var ours_diag: Array = doc.warnings + UssStyleResolver.resolve(doc, {"element_states": es})["warnings"]

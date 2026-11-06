@@ -81,7 +81,7 @@ dumps that check a row; 169 of 170 cases match exactly.
 
 | Attribute | Status |
 | --- | --- |
-| `name`, `class`, `style`, `enabled`, `focusable`, `tooltip`, `content-container` | done. Unity dumps of `focusable`, `tabindex`, `picking-mode` and `enabled` (`ctl-attrs`) exist; the harness does not compare these element properties yet (tests check them) |
+| `name`, `class`, `style`, `enabled`, `focusable`, `tooltip`, `content-container` | done. The harness compares `enabled` (Unity's `enabledInHierarchy`, every element) and the `picking-mode` of plain elements with Unity; the dumps of `focusable`, `tabindex` and of the picking mode of controls (`ctl-attrs`) are not compared yet (tests check the runtime) |
 | `tabindex` | done: Unity focus ring order (positive first, then 0 in tree order; negative leaves the Tab ring) |
 | `picking-mode` | done: `Ignore` sets `mouse_filter` IGNORE; children stay pickable |
 | `view-data-key` | done: ScrollView and collection view scroll offset and selection, multi-column widths and sorting, TabView tab, TwoPaneSplitView pane size; `get_view_data()`/`set_view_data()`, restored on load and reload. Foldout open state: planned |

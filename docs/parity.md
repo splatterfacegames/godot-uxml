@@ -138,6 +138,9 @@ the rects as Unity's `worldBound` does, and compares:
   control sets many lengths of its parts from C#, and those parts are
   compared on resolved values and geometry. Slices are compared where
   godot-uxml draws no theme image of its own;
+- element properties: `enabledInHierarchy` of every element against the
+  effective disabled state of the cascade, and `pickingMode` of the plain
+  authored elements against their `picking-mode` attribute;
 - import diagnostics: every USS import warning of Unity needs a
   godot-uxml diagnostic on the same line of the same sheet, and every
   value diagnostic of godot-uxml (`invalid-value`, `invalid-shorthand`)
@@ -174,8 +177,8 @@ on structure only.
 ### Unity
 
 **169 of 170 cases match exactly. Structure: 4188/4188 elements.
-Geometry: 13955/13956 values. Style: 281164/281165 values. Import
-diagnostics: 86/86.** The one value that differs is a Unity-internal
+Geometry: 13955/13956 values. Style: 281164/281165 values. Element
+properties: 4895/4895. Import diagnostics: 86/86.** The one value that differs is a Unity-internal
 1px (`ctl-numeric`, below).
 
 On the 127 cases dumped before the corpus work: 126 of 127 match
@@ -236,10 +239,11 @@ Remaining difference:
 | --- | --- | --- |
 | text wider than the input | `ctl-numeric` (Hash128Field, 1px) | Unity-internal and not reproducible: Unity lays out an overflowing input text 1px wider than its own final measure (measure 261px, laid out 262px). The excess is not deterministic: the same 32-character text in a TextField laid out at 261px in one Unity run and 262px in another (the probe case `ctl-text-overflow`, since removed), and the resolved `flex-basis` of another input text of the same case (`0.125`) was 40 in one dump and 41 in the next, with an unchanged measure of 35 + 4 padding. The layout uses a text measure taken while TextCore still fills its dynamic font atlas, and the later measure that the dump records differs by a pixel. godot-uxml measures with Godot's fonts; the harness uses Unity's final measure. |
 
-Not compared yet: the element properties of the dump (`focusable`,
-`tabIndex`, `pickingMode`, `enabledSelf`) and control values beyond the
-ones the harness copies into the model (they are in the dumps, for
-example `ctl-attrs`). The `binding-path` display values of bound
+Not compared yet: `focusable`, `tabIndex` and the `pickingMode` of
+controls and parts (a control's defaults live in the runtime's control
+factory, not in the model), and control values beyond the ones the
+harness copies into the model; they are in the dumps (for example
+`ctl-attrs`) and the tests check the runtime. The `binding-path` display values of bound
 controls are compared only through the PropertyField and InspectorElement
 cases (`ed-propertyfield`, `ed-inspector`).
 
@@ -330,5 +334,5 @@ layout; the reference result of this section is unchanged (31 / 0 / 13).
   1px off its final text measure, and not the same in every run.
 - The dropdown menu is not in the Unity comparison: Unity puts it in the
   `overlay` of a dump, and the harness does not build the menu model.
-- The element properties of the dumps (focusable, tab index, picking
-  mode, enabled) are not compared yet.
+- `focusable`, `tabIndex` and the picking mode of controls are dumped
+  but not compared yet (they need the runtime controls in the harness).
