@@ -2303,7 +2303,17 @@ paths.
   `overflow: hidden` and no wrap also gets `clip_text`, so the authored
   box can be narrower than the text, as in Unity. The measurer turns
   `clip_text` off for the measurement, so the intrinsic size stays the
-  full text size.
+  full text size. Switching `clip_text` (and, for elided text, the text)
+  costs several microseconds of engine work per measure, so both
+  measurers keep the result in the `uxml_clip_full` meta for the full
+  text and the clipped minimum size (which follows the font height, the
+  stylebox and `custom_minimum_size`); an apply or new insets drop it.
+  Whether a control clips its text at all (`uxml_clip_text`) is a meta
+  check per Label and Button and pass once any control of the document
+  clips text; the native layout keeps the answer per control across
+  layouts and drops it when the control is applied again (a layout's
+  re-applied controls, or a paint-only restyle's), because only apply()
+  sets or removes the meta.
 - `-unity-overflow-clip-box: padding-box` (the default) clips inside the
   border, and `content-box` clips inside the padding. Godot clips a
   control at its border box, and the clip also removes the control's own
