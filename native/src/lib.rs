@@ -11,7 +11,15 @@ mod parse;
 struct UxmlNativeExtension;
 
 #[gdextension]
-unsafe impl ExtensionLibrary for UxmlNativeExtension {}
+unsafe impl ExtensionLibrary for UxmlNativeExtension {
+    fn on_stage_deinit(stage: InitStage) {
+        // The cascade's theme block cache holds Godot strings: drop it
+        // while the engine is still up.
+        if stage == InitStage::MainLoop || stage == InitStage::Scene {
+            cascade::clear_cache();
+        }
+    }
+}
 
 /// Capability probe: GDScript checks `ClassDB.class_exists("UxmlNative")`.
 #[derive(GodotClass)]

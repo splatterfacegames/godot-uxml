@@ -220,33 +220,244 @@ func _index_tree() -> void:
 # ---------------------------------------------------------------------------
 
 func _compile_rules() -> void:
-	var reported_root := false
+	var reported_root := [false]
 	var visited := {}
-	var flat: Array = []
 	for root in doc.style_roots:
-		UssStyleResolver._walk_sheet(doc, root["sheet"], root["scope"], visited, flat)
-	for f in flat:
-		var rule: Dictionary = f["rule"]
+		var si: int = root["sheet"]
+		if root["scope"] == null and _add_theme_block(si, visited, reported_root):
+			continue
+		var flat: Array = []
+		UssStyleResolver._walk_sheet(doc, si, root["scope"], visited, flat)
+		for f in flat:
+			_compile_flat(f, reported_root)
+
+
+## Checks one flattened rule (diagnostics) and adds it. `reported_root` is
+## a one-element Array: the :root note is reported once per document.
+func _compile_flat(f: Dictionary, reported_root: Array) -> void:
+	var rule: Dictionary = f["rule"]
+	var bad := UssSelector.unsupported_fragment(rule["selectors"])
+	if bad != "":
+		_rule_warnings.append(_unsupported_diag(bad, rule, f["sheet"]))
+		return
+	if not reported_root[0] and UssStyleResolver._has_root_pseudo(rule):
+		reported_root[0] = true
+		_rule_warnings.append(_root_diag(rule, f["sheet"]))
+	_add_rule(f)
+
+
+func _unsupported_diag(bad: String, rule: Dictionary, sheet: int) -> Dictionary:
+	return UxmlDiagnostic.make(
+		"unsupported-selector",
+		'"%s" is not supported in USS; the whole rule is ignored' % bad,
+		UssStyleResolver._sheet_source(doc, sheet),
+		rule["selector_span"]["start"],
+		UssStyleResolver._sheet_origin(doc, sheet)
+	)
+
+
+func _root_diag(rule: Dictionary, sheet: int) -> Dictionary:
+	return UxmlDiagnostic.make(
+		"version-dependent",
+		":root in USS names the element the stylesheet was applied to, not the document root as in CSS",
+		UssStyleResolver._sheet_source(doc, sheet),
+		rule["selector_span"]["start"],
+		UssStyleResolver._sheet_origin(doc, sheet)
+	)
+
+
+# --- theme blocks ---------------------------------------------------------
+# A theme sheet (UxmlTheme: "theme": true, no scope) is parsed once and
+# shared by every load, so what _compile_flat/_add_rule derive from it is
+# the same on every load except the sheet index and the offsets of its
+# rules and selectors in this cascade. Its compiled form is kept as a block
+# (per sheet origin, valid while the parsed items are the same Array) and
+# spliced in with array appends. The native cascade gets the block ids and
+# ranges (`_blocks`) and keeps its own converted form of each block, so
+# neither side converts the theme rules again on a later load.
+
+## origin path -> [items Array, block]. Block: see _theme_block.
+static var _theme_blocks := {}
+static var _next_block_id := 1
+## Per theme block spliced into this cascade: [block id, first rule,
+## rule count, first selector, selector count, sheet index].
+var _blocks: Array = []
+
+
+## Splices the block of sheet `si` when it is a theme sheet without
+## imports; false when the sheet takes the general path.
+func _add_theme_block(si: int, visited: Dictionary, reported_root: Array) -> bool:
+	if si < 0 or si >= doc.sheets.size():
+		return false
+	var sheet: Dictionary = doc.sheets[si]
+	if not bool(sheet.get("theme", false)):
+		return false
+	var in_scope: Dictionary = visited.get(null, {})
+	if in_scope.has(si):
+		return true  # _walk_sheet would add nothing
+	var b := _theme_block(sheet, si)
+	if b.is_empty():
+		return false
+	in_scope[si] = true
+	visited[null] = in_scope
+	for ev in b["events"]:
+		if ev[0] == 0:
+			_rule_warnings.append(_unsupported_diag(ev[1], ev[2], si))
+		elif not reported_root[0]:
+			reported_root[0] = true
+			_rule_warnings.append(_root_diag(ev[2], si))
+	var r0 := _rule_sheet.size()
+	var s0 := _sel_rule.size()
+	var items: PackedInt32Array = b["items"]
+	var nr := items.size()
+	var file: String = UssStyleResolver._sheet_origin(doc, si)
+	for k in nr:
+		_rule_sheet.append(si)
+		_rule_file.append(file)
+	_rule_item.append_array(items)
+	_rule_scope_idx.append_array(b["neg1"])
+	_rule_scope_lo.append_array(b["neg2"])
+	_rule_scope_hi.append_array(b["neg2"])
+	_rule_dprop.append_array(b["dprop"])
+	_rule_dval.append_array(b["dval"])
+	_rule_dflag.append_array(b["dflag"])
+	_rule_dexp.append_array(b["dexp"])
+	var srule: PackedInt32Array = b["sel_rule"]
+	var ns := srule.size()
+	for k in ns:
+		_sel_rule.append(r0 + srule[k])
+	_sel_parts.append_array(b["sel_parts"])
+	_sel_need.append_array(b["sel_need"])
+	_sel_spec.append_array(b["sel_spec"])
+	_sel_states.append_array(b["sel_states"])
+	_sel_entries.resize(s0 + ns)
+	_sel_origins.resize(s0 + ns)
+	_merge_buckets(_b_name, b["b_name"], s0)
+	_merge_buckets(_b_class, b["b_class"], s0)
+	_merge_buckets(_b_type, b["b_type"], s0)
+	for x in (b["b_any"] as PackedInt32Array):
+		_b_any.append(s0 + x)
+	for c in b["anc_classes"]:
+		_anc_classes[c] = true
+	for nm in b["anc_names"]:
+		_anc_names[nm] = true
+	_anc_states |= int(b["anc_states"])
+	for rq in b["reqs"]:
+		if not _anc_state_seen.has(rq[0]):
+			_anc_state_seen[rq[0]] = true
+			_anc_state_reqs.append(rq[1])
+	_blocks.append([b["id"], r0, nr, s0, ns, si])
+	return true
+
+
+static func _merge_buckets(dst: Dictionary, src: Dictionary, s0: int) -> void:
+	for key in src:
+		var l: PackedInt32Array = dst.get(key, PackedInt32Array())
+		for x in (src[key] as PackedInt32Array):
+			l.append(s0 + x)
+		dst[key] = l
+
+
+## The cached block of theme `sheet` (index `si` in this document), built
+## on first use; {} when the sheet has imports (general path).
+func _theme_block(sheet: Dictionary, si: int) -> Dictionary:
+	var origin: String = sheet.get("origin", "")
+	var sheet_items: Array = sheet["items"]
+	var hit = _theme_blocks.get(origin)
+	if hit != null and is_same(hit[0], sheet_items):
+		return hit[1]
+	for item in sheet_items:
+		if item["kind"] == "import":
+			return {}
+	# Built the way _compile_flat/_add_rule build these rules (layer 0, no
+	# scope); events are the diagnostics in rule order: [0, fragment, rule]
+	# for an unsupported selector, [1, null, rule] for the first :root.
+	var b := {
+		"id": _next_block_id, "events": [], "items": PackedInt32Array(),
+		"neg1": PackedInt32Array(), "neg2": PackedInt32Array(),
+		"dprop": [], "dval": [], "dflag": [], "dexp": [],
+		"sel_rule": PackedInt32Array(), "sel_parts": [], "sel_need": PackedInt64Array(),
+		"sel_spec": PackedInt64Array(), "sel_states": [],
+		"b_name": {}, "b_class": {}, "b_type": {}, "b_any": PackedInt32Array(),
+		"anc_classes": {}, "anc_names": {}, "anc_states": 0, "reqs": [],
+	}
+	_next_block_id += 1
+	var root_seen := false
+	var req_seen := {}
+	var events: Array = b["events"]
+	var b_items: PackedInt32Array = []
+	var neg1: PackedInt32Array = []
+	var neg2: PackedInt32Array = []
+	var sel_rule: PackedInt32Array = []
+	var sel_need: PackedInt64Array = []
+	var sel_spec: PackedInt64Array = []
+	var b_any: PackedInt32Array = []
+	var anc_states := 0
+	for i in sheet_items.size():
+		var item: Dictionary = sheet_items[i]
+		if item["kind"] != "rule":
+			continue
+		var rule: Dictionary = item["rule"]
 		var bad := UssSelector.unsupported_fragment(rule["selectors"])
 		if bad != "":
-			_rule_warnings.append(UxmlDiagnostic.make(
-				"unsupported-selector",
-				'"%s" is not supported in USS; the whole rule is ignored' % bad,
-				UssStyleResolver._sheet_source(doc, f["sheet"]),
-				rule["selector_span"]["start"],
-				UssStyleResolver._sheet_origin(doc, f["sheet"])
-			))
+			events.append([0, bad, rule])
 			continue
-		if not reported_root and UssStyleResolver._has_root_pseudo(rule):
-			reported_root = true
-			_rule_warnings.append(UxmlDiagnostic.make(
-				"version-dependent",
-				":root in USS names the element the stylesheet was applied to, not the document root as in CSS",
-				UssStyleResolver._sheet_source(doc, f["sheet"]),
-				rule["selector_span"]["start"],
-				UssStyleResolver._sheet_origin(doc, f["sheet"])
-			))
-		_add_rule(f)
+		if not root_seen and UssStyleResolver._has_root_pseudo(rule):
+			root_seen = true
+			events.append([1, null, rule])
+		var r := b_items.size()
+		b_items.append(i)
+		neg1.append(-1)
+		neg2.append(-2)
+		var cc = rule.get(CC)
+		if cc == null:
+			cc = _compile_rule(rule, 0)
+			rule[CC] = cc
+		b["dprop"].append(cc[0])
+		b["dval"].append(cc[1])
+		b["dflag"].append(cc[2])
+		b["dexp"].append(cc[3])
+		for sc in cc[4]:
+			var s := sel_rule.size()
+			sel_rule.append(r)
+			for c in sc[5]:
+				b["anc_classes"][c] = true
+			for nm in sc[6]:
+				b["anc_names"][nm] = true
+			anc_states |= int(sc[7])
+			for req in sc[8]:
+				var rk := "%s|%s|%s|%d" % [",".join(req[0]), ",".join(req[1]), ",".join(req[2]), req[3]]
+				if not req_seen.has(rk):
+					req_seen[rk] = true
+					b["reqs"].append([rk, req])
+			b["sel_parts"].append(sc[0])
+			sel_need.append(sc[1])
+			sel_spec.append(sc[2])
+			b["sel_states"].append(sc[3])
+			var bk: int = sc[4][0]
+			if bk == 0:
+				_bucket_add(b["b_name"], sc[4][1], s)
+			elif bk == 1:
+				_bucket_add(b["b_class"], sc[4][1], s)
+			elif bk == 2:
+				_bucket_add(b["b_type"], sc[4][1], s)
+			else:
+				b_any.append(s)
+	b["items"] = b_items
+	b["neg1"] = neg1
+	b["neg2"] = neg2
+	b["sel_rule"] = sel_rule
+	b["sel_need"] = sel_need
+	b["sel_spec"] = sel_spec
+	b["b_any"] = b_any
+	b["anc_states"] = anc_states
+	_theme_blocks[origin] = [sheet_items, b]
+	return b
+
+
+## Drop the cached theme blocks (UxmlTheme.clear_cache).
+static func clear_theme_blocks() -> void:
+	_theme_blocks.clear()
 
 
 func _add_rule(f: Dictionary) -> void:

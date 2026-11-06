@@ -1313,8 +1313,15 @@ structure sheet (`themes/unity-structure.uss`, the geometry of the
 container parts) ahead of the theme, also when `path` is empty, and, with
 the default theme, `themes/unity-default-containers.uss` after it. Other
 documents do not compile these rules. The compiled form of a theme rule
-(`UssCascade._compile_rule`) is kept on the shared parsed rule, so a load
-does not compile the theme again on the GDScript side.
+(`UssCascade._compile_rule`) is kept on the shared parsed rule, and the
+compiled rules of a whole theme sheet are kept as a block
+(`UssCascade._theme_block`) that a later load splices in with array
+appends. The native cascade converts each block once (`BaseTables` in
+`cascade.rs`, by the block id in `UssCascade._blocks`) and reads only the
+per-load fields (sheet index, file, scope, selector rule and
+specificity) from the GDScript tables; the origin Dictionaries of a
+block's selectors are kept per sheet index. A load therefore does not
+compile or convert the theme again on either side.
 `UssCascade` ranks every author rule above every theme rule
 (`AUTHOR_LAYER`, a bit in the compiled specificity key that the native
 cascade reads too). Unity does the same: an author `Button { margin: 0 }`
@@ -1534,7 +1541,10 @@ is a `StyleBox` base-class property, so this works for `StyleBoxTexture`
 backgrounds as well — `texture_margin_*` (nine-patch source slicing) is
 never touched, and the `uxml_margins` meta is recorded on texture
 styleboxes too so intrinsic measurement does not double-count the
-resolved padding.
+resolved padding. Only margins that differ are written (each write emits
+the stylebox's `changed`, which makes the control update its theme). The
+native layout keeps each control's `uxml_margins` across layouts until
+the control is applied again or its inset hook runs.
 
 ### Input, focus, pseudo-states
 
