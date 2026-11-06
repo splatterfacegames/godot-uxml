@@ -174,3 +174,4 @@ static func _attach_sheet(doc: UxmlDocumentModel, path: String, at: int = 0) -> 
 ## Drop cached parses (after editing a theme file at runtime).
 static func clear_cache() -> void:
 	_cache.clear()
+	UssCascade.clear_theme_blocks()

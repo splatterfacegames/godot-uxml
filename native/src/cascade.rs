@@ -52,6 +52,7 @@ const FK_TYPE: u64 = 1;
 const FK_NAME: u64 = 2;
 const FK_CLASS: u64 = 3;
 
+#[derive(Clone)]
 struct Compound {
     types: Vec<u32>,
     names: Vec<u32>,
@@ -61,10 +62,11 @@ struct Compound {
     child: bool,
 }
 
+#[derive(Clone)]
 struct Sel {
     rule: usize,
     spec: i64,
-    parts: Vec<Compound>,
+    parts: Rc<Vec<Compound>>,
     states: VarArray,
     need: u64,
     origins: Option<Rc<Vec<Variant>>>,
@@ -82,6 +84,7 @@ struct Decl {
     exp: Option<Rc<Vec<(u32, Variant)>>>,
 }
 
+#[derive(Clone)]
 struct Rule {
     scope_idx: i32,
     scope_lo: i32,
@@ -89,7 +92,39 @@ struct Rule {
     sheet: i64,
     item: i64,
     file: GString,
-    decls: Vec<Decl>,
+    decls: Rc<Vec<Decl>>,
+}
+
+/// The converted rules and selectors of one theme block (see
+/// `UssCascade._blocks`): rule `sheet`/`file` and selector `rule` are
+/// patched per cascade (selector `rule` is relative to the block here).
+/// Interned ids refer to the shared base tables (`BASE`).
+struct Block {
+    rules: Vec<Rule>,
+    sels: Vec<Sel>,
+}
+
+/// Interned strings and properties that every cascade starts from, and the
+/// theme blocks converted against them. Theme sheets are shared by every
+/// load (UxmlTheme), so their rules are converted once per block; a cascade
+/// clones the base tables and interns its document's own strings on top.
+/// The ids only need to be consistent within a cascade: nothing depends on
+/// their order.
+#[derive(Default)]
+struct BaseTables {
+    interned: HashMap<String, u32>,
+    props: Props,
+    blocks: HashMap<i64, Rc<Block>>,
+}
+
+thread_local! {
+    static BASE: std::cell::RefCell<BaseTables> = std::cell::RefCell::new(BaseTables::default());
+}
+
+/// Drops the converted theme blocks (they hold Godot strings; called before
+/// the engine shuts down).
+pub fn clear_cache() {
+    BASE.with(|b| *b.borrow_mut() = BaseTables::default());
 }
 
 struct Inline {
@@ -132,6 +167,7 @@ struct Elem {
     offset: i64,
 }
 
+#[derive(Clone, Default)]
 struct Props {
     names: Vec<GString>,
     keys: Vec<Variant>,
@@ -226,6 +262,39 @@ pub struct Cascade {
     empty_fc: Rc<Vec<Item>>,
     empty_customs: Rc<Customs>,
     pub last_old: VarArray,
+}
+
+/// The compiled rule tables of the GDScript cascade (read in setup).
+struct Tables {
+    r_scope_idx: PackedInt32Array,
+    r_lo: PackedInt32Array,
+    r_hi: PackedInt32Array,
+    r_sheet: PackedInt32Array,
+    r_item: PackedInt32Array,
+    r_file: PackedStringArray,
+    r_dprop: VarArray,
+    r_dval: VarArray,
+    r_dflag: VarArray,
+    r_dexp: VarArray,
+    s_rule: PackedInt32Array,
+    s_spec: PackedInt64Array,
+    s_parts: VarArray,
+    s_states: VarArray,
+}
+
+impl Tables {
+    /// Rule `r` with the given declarations.
+    fn rule_shell(&self, r: usize, decls: Rc<Vec<Decl>>) -> Rule {
+        Rule {
+            scope_idx: self.r_scope_idx.as_slice()[r],
+            scope_lo: self.r_lo.as_slice()[r],
+            scope_hi: self.r_hi.as_slice()[r],
+            sheet: self.r_sheet.as_slice()[r] as i64,
+            item: self.r_item.as_slice()[r] as i64,
+            file: self.r_file.as_slice()[r].clone(),
+            decls,
+        }
+    }
 }
 
 fn args(v: &[Variant]) -> VarArray {
@@ -501,6 +570,66 @@ impl Cascade {
             last_old: VarArray::new(),
         };
 
+        // The GDScript rule tables, and the theme blocks among them:
+        // (block id, first rule, rule count, first selector, selector count).
+        let t = Tables {
+            r_scope_idx: get("_rule_scope_idx").to::<PackedInt32Array>(),
+            r_lo: get("_rule_scope_lo").to::<PackedInt32Array>(),
+            r_hi: get("_rule_scope_hi").to::<PackedInt32Array>(),
+            r_sheet: get("_rule_sheet").to::<PackedInt32Array>(),
+            r_item: get("_rule_item").to::<PackedInt32Array>(),
+            r_file: get("_rule_file").to::<PackedStringArray>(),
+            r_dprop: get("_rule_dprop").to::<VarArray>(),
+            r_dval: get("_rule_dval").to::<VarArray>(),
+            r_dflag: get("_rule_dflag").to::<VarArray>(),
+            r_dexp: get("_rule_dexp").to::<VarArray>(),
+            s_rule: get("_sel_rule").to::<PackedInt32Array>(),
+            s_spec: get("_sel_spec").to::<PackedInt64Array>(),
+            s_parts: get("_sel_parts").to::<VarArray>(),
+            s_states: get("_sel_states").to::<VarArray>(),
+        };
+        let mut blocks: Vec<(i64, usize, usize, usize, usize)> = vec![];
+        if let Ok(arr) = get("_blocks").try_to::<VarArray>() {
+            for bv in arr.iter_shared() {
+                let a = bv.try_to::<VarArray>().ok()?;
+                let n = |k: usize| a.at(k).try_to::<i64>().unwrap_or(0);
+                let blk = (n(0), n(1) as usize, n(2) as usize, n(3) as usize, n(4) as usize);
+                if blk.1 + blk.2 > t.r_sheet.len() || blk.3 + blk.4 > t.s_rule.len() {
+                    return None;
+                }
+                blocks.push(blk);
+            }
+        }
+        // Convert the blocks the base does not have yet against the base
+        // tables (before anything of this document is interned), then start
+        // this cascade from a copy of the base tables.
+        let mut cached: Vec<Rc<Block>> = Vec::with_capacity(blocks.len());
+        BASE.with(|cell| {
+            let mut base = cell.borrow_mut();
+            if blocks.iter().any(|b| !base.blocks.contains_key(&b.0)) {
+                if base.blocks.len() > 64 {
+                    *base = BaseTables::default();
+                }
+                std::mem::swap(&mut c.interned, &mut base.interned);
+                std::mem::swap(&mut c.props, &mut base.props);
+                for &(id, r0, nr, s0, ns) in &blocks {
+                    if base.blocks.contains_key(&id) {
+                        continue;
+                    }
+                    let rules: Vec<Rule> = (r0..r0 + nr).map(|r| c.convert_rule(&t, r)).collect();
+                    let sels: Vec<Sel> = (s0..s0 + ns).map(|s| c.convert_sel(&t, s)).collect();
+                    base.blocks.insert(id, Rc::new(Block { rules, sels }));
+                }
+                std::mem::swap(&mut c.interned, &mut base.interned);
+                std::mem::swap(&mut c.props, &mut base.props);
+            }
+            c.interned = base.interned.clone();
+            c.props = base.props.clone();
+            for b in &blocks {
+                cached.push(base.blocks[&b.0].clone());
+            }
+        });
+
         // Line starts of the UXML source (code-point offsets, like Godot).
         let chars: Vec<char> = source.to_string().chars().collect();
         let mut newlines: Vec<usize> = vec![];
@@ -570,107 +699,81 @@ impl Cascade {
         c.lay_vals = vec![vec![None; crate::layout::LAYOUT_PROPS.len()]; n];
         c.lay_ver = vec![0; n];
 
-        // Compiled rules.
-        let r_scope_idx = get("_rule_scope_idx").to::<PackedInt32Array>();
-        let r_lo = get("_rule_scope_lo").to::<PackedInt32Array>();
-        let r_hi = get("_rule_scope_hi").to::<PackedInt32Array>();
-        let r_sheet = get("_rule_sheet").to::<PackedInt32Array>();
-        let r_item = get("_rule_item").to::<PackedInt32Array>();
-        let r_file = get("_rule_file").to::<PackedStringArray>();
-        let r_dprop = get("_rule_dprop").to::<VarArray>();
-        let r_dval = get("_rule_dval").to::<VarArray>();
-        let r_dflag = get("_rule_dflag").to::<VarArray>();
-        let r_dexp = get("_rule_dexp").to::<VarArray>();
-        for r in 0..r_sheet.len() {
-            let dp = r_dprop.at(r).to::<PackedStringArray>();
-            let dv = r_dval.at(r).to::<PackedStringArray>();
-            let df = r_dflag.at(r).to::<PackedInt32Array>();
-            let de = r_dexp.at(r).to::<VarArray>();
-            let mut decls = Vec::with_capacity(dp.len());
-            for d in 0..dp.len() {
-                let decl = c.make_decl(dp.as_slice()[d].clone(), dv.as_slice()[d].clone(), df.as_slice()[d], &de.at(d));
-                decls.push(decl);
+        // Compiled rules. Theme blocks come from the base cache; the
+        // per-cascade fields (scope, sheet, item, file, selector rule and
+        // specificity) are read from the GDScript tables for every rule.
+        let mut b = 0usize;
+        let mut r = 0usize;
+        let nr = t.r_sheet.len();
+        while r < nr {
+            if b < blocks.len() && blocks[b].1 == r {
+                let (_, r0, cnt, _, _) = blocks[b];
+                for k in 0..cnt {
+                    let decls = cached[b].rules[k].decls.clone();
+                    c.rules.push(t.rule_shell(r0 + k, decls));
+                }
+                r += cnt;
+                b += 1;
+                continue;
             }
-            c.rules.push(Rule {
-                scope_idx: r_scope_idx.as_slice()[r],
-                scope_lo: r_lo.as_slice()[r],
-                scope_hi: r_hi.as_slice()[r],
-                sheet: r_sheet.as_slice()[r] as i64,
-                item: r_item.as_slice()[r] as i64,
-                file: r_file.as_slice()[r].clone(),
-                decls,
-            });
+            let rule = c.convert_rule(&t, r);
+            c.rules.push(rule);
+            r += 1;
         }
-        let s_rule = get("_sel_rule").to::<PackedInt32Array>();
-        let s_spec = get("_sel_spec").to::<PackedInt64Array>();
-        let s_parts = get("_sel_parts").to::<VarArray>();
-        let s_states = get("_sel_states").to::<VarArray>();
-        for s in 0..s_rule.len() {
-            let parts_v = s_parts.at(s).to::<VarArray>();
-            let mut parts = Vec::with_capacity(parts_v.len());
-            for p in parts_v.iter_shared() {
-                let cp = p.to::<VarArray>();
-                parts.push(Compound {
-                    types: c.psa_ids(&cp.at(0)),
-                    names: c.psa_ids(&cp.at(1)),
-                    classes: c.psa_ids(&cp.at(2)),
-                    mask: cp.at(3).to::<i64>() as i32,
-                    root: cp.at(4).to::<bool>(),
-                    child: cp.at(5).to::<bool>(),
-                });
+        let mut b = 0usize;
+        let mut s = 0usize;
+        let ns = t.s_rule.len();
+        while s < ns {
+            if b < blocks.len() && blocks[b].3 == s {
+                let (_, _, _, s0, cnt) = blocks[b];
+                for k in 0..cnt {
+                    let mut sel = cached[b].sels[k].clone();
+                    sel.rule = t.s_rule.as_slice()[s0 + k] as usize;
+                    sel.spec = t.s_spec.as_slice()[s0 + k];
+                    c.sels.push(sel);
+                }
+                s += cnt;
+                b += 1;
+                continue;
             }
-            let mut need = 0u64;
-            for cp in parts.iter().take(parts.len().saturating_sub(1)) {
-                for &x in &cp.types {
-                    need |= fbits(FK_TYPE, x);
+            let sel = c.convert_sel(&t, s);
+            c.sels.push(sel);
+            s += 1;
+        }
+        // Buckets and ancestor features, from the selectors (the derivation
+        // of UssCascade._compile_rule / _add_rule: bucket by the rightmost
+        // compound's first name, else class, else type; ancestor classes,
+        // names and states from the other compounds).
+        for (si, sel) in c.sels.iter().enumerate() {
+            let right = &sel.parts[sel.parts.len() - 1];
+            let si = si as u32;
+            if let Some(&k) = right.names.first() {
+                c.b_name.entry(k).or_default().push(si);
+            } else if let Some(&k) = right.classes.first() {
+                c.b_class.entry(k).or_default().push(si);
+            } else if let Some(&k) = right.types.first() {
+                c.b_type.entry(k).or_default().push(si);
+            } else {
+                c.b_any.push(si);
+            }
+            for cp in sel.parts.iter().take(sel.parts.len() - 1) {
+                for &x in &cp.classes {
+                    let x = x as usize;
+                    if c.anc_classes.len() <= x {
+                        c.anc_classes.resize(x + 1, false);
+                    }
+                    c.anc_classes[x] = true;
                 }
                 for &x in &cp.names {
-                    need |= fbits(FK_NAME, x);
+                    let x = x as usize;
+                    if c.anc_names.len() <= x {
+                        c.anc_names.resize(x + 1, false);
+                    }
+                    c.anc_names[x] = true;
                 }
-                for &x in &cp.classes {
-                    need |= fbits(FK_CLASS, x);
-                }
-            }
-            c.sels.push(Sel {
-                rule: s_rule.as_slice()[s] as usize,
-                spec: s_spec.as_slice()[s],
-                parts,
-                states: s_states.at(s).to::<VarArray>(),
-                need,
-                origins: None,
-                entries: None,
-            });
-        }
-        for (field, target) in [("_b_name", 0), ("_b_class", 1), ("_b_type", 2)] {
-            let d = get(field).to::<VarDictionary>();
-            for (k, v) in d.iter_shared() {
-                let id = c.intern(&gs(&k).to_string());
-                let lst: Vec<u32> = v.to::<PackedInt32Array>().as_slice().iter().map(|&x| x as u32).collect();
-                match target {
-                    0 => c.b_name.insert(id, lst),
-                    1 => c.b_class.insert(id, lst),
-                    _ => c.b_type.insert(id, lst),
-                };
+                c.anc_states |= cp.mask;
             }
         }
-        c.b_any = get("_b_any").to::<PackedInt32Array>().as_slice().iter().map(|&x| x as u32).collect();
-        let ac = get("_anc_classes").to::<VarDictionary>();
-        for (k, _) in ac.iter_shared() {
-            let id = c.intern(&gs(&k).to_string()) as usize;
-            if c.anc_classes.len() <= id {
-                c.anc_classes.resize(id + 1, false);
-            }
-            c.anc_classes[id] = true;
-        }
-        let an = get("_anc_names").to::<VarDictionary>();
-        for (k, _) in an.iter_shared() {
-            let id = c.intern(&gs(&k).to_string()) as usize;
-            if c.anc_names.len() <= id {
-                c.anc_names.resize(id + 1, false);
-            }
-            c.anc_names[id] = true;
-        }
-        c.anc_states = get("_anc_states").to::<i64>() as i32;
         let mut reqs: Vec<(Vec<u32>, Vec<u32>, Vec<u32>, i32)> = vec![];
         for sel in &c.sels {
             for cp in sel.parts.iter().take(sel.parts.len().saturating_sub(1)) {
@@ -685,6 +788,56 @@ impl Cascade {
         }
         c.anc_state_reqs = reqs;
         Some(c)
+    }
+
+    fn convert_rule(&mut self, t: &Tables, r: usize) -> Rule {
+        let dp = t.r_dprop.at(r).to::<PackedStringArray>();
+        let dv = t.r_dval.at(r).to::<PackedStringArray>();
+        let df = t.r_dflag.at(r).to::<PackedInt32Array>();
+        let de = t.r_dexp.at(r).to::<VarArray>();
+        let mut decls = Vec::with_capacity(dp.len());
+        for d in 0..dp.len() {
+            let decl = self.make_decl(dp.as_slice()[d].clone(), dv.as_slice()[d].clone(), df.as_slice()[d], &de.at(d));
+            decls.push(decl);
+        }
+        t.rule_shell(r, Rc::new(decls))
+    }
+
+    fn convert_sel(&mut self, t: &Tables, s: usize) -> Sel {
+        let parts_v = t.s_parts.at(s).to::<VarArray>();
+        let mut parts = Vec::with_capacity(parts_v.len());
+        for p in parts_v.iter_shared() {
+            let cp = p.to::<VarArray>();
+            parts.push(Compound {
+                types: self.psa_ids(&cp.at(0)),
+                names: self.psa_ids(&cp.at(1)),
+                classes: self.psa_ids(&cp.at(2)),
+                mask: cp.at(3).to::<i64>() as i32,
+                root: cp.at(4).to::<bool>(),
+                child: cp.at(5).to::<bool>(),
+            });
+        }
+        let mut need = 0u64;
+        for cp in parts.iter().take(parts.len().saturating_sub(1)) {
+            for &x in &cp.types {
+                need |= fbits(FK_TYPE, x);
+            }
+            for &x in &cp.names {
+                need |= fbits(FK_NAME, x);
+            }
+            for &x in &cp.classes {
+                need |= fbits(FK_CLASS, x);
+            }
+        }
+        Sel {
+            rule: t.s_rule.as_slice()[s] as usize,
+            spec: t.s_spec.as_slice()[s],
+            parts: Rc::new(parts),
+            states: t.s_states.at(s).to::<VarArray>(),
+            need,
+            origins: None,
+            entries: None,
+        }
     }
 
     // ---------------------------------------------------------------------
