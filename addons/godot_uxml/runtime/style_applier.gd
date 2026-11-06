@@ -269,40 +269,96 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 		_apply_themed_inner(c, style, el, include_skin)
 
 
+## Per themed control without a background image: [the style entries of
+## _BOX_KEYS at its last apply, the box _stylebox built from them (or
+## null), that box's uxml_margins as built].
+var _box_memo: Dictionary = {}
+## The style properties _stylebox reads.
+const _BOX_KEYS := ["background-color",
+	"border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+	"border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+	"border-top-left-radius", "border-top-right-radius",
+	"border-bottom-right-radius", "border-bottom-left-radius",
+	"padding-top", "padding-right", "padding-bottom", "padding-left"]
+
+
+## `sb` (built by _stylebox with margins `built`) is on every slot of `c`
+## and still has the margins it was built with (apply_resolved_insets, the
+## only writer after _stylebox, writes only margins).
+static func _installed_as_built(c: Control, slots: Array, sb: StyleBox, built) -> bool:
+	if slots.is_empty() or built == null:
+		return false
+	for slot in slots:
+		if not c.has_theme_stylebox_override(slot) or c.get_theme_stylebox(slot) != sb:
+			return false
+	var b: Array = built
+	return (sb.get_meta("uxml_margins", null) == b and sb.content_margin_left == b[0]
+		and sb.content_margin_top == b[1] and sb.content_margin_right == b[2]
+		and sb.content_margin_bottom == b[3])
+
+
 func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include_skin: bool) -> void:
 	if include_skin:
-		var sb := _stylebox(style, el)
-		var tex := _texture(style, "background-image", el)
-		if sb == null and tex != null:
-			sb = _image_stylebox(tex, style, el)
-			# USS slicing never pads content: StyleBoxTexture would otherwise
-			# fall back to its texture margins as content margins.
-			for side in ["left", "top", "right", "bottom"]:
-				sb.set("content_margin_" + side, 0.0)
-		elif sb != null and tex != null:
-			# StyleBoxFlat cannot carry a texture; the image wins the fill.
-			# Padding (content margins) carries over to the texture box; only
-			# a visible flat background or border is lost, and diagnosed.
-			var flat := sb as StyleBoxFlat
-			if flat != null and (flat.bg_color.a > 0.0 or flat.border_width_left > 0
-					or flat.border_width_top > 0 or flat.border_width_right > 0
-					or flat.border_width_bottom > 0):
-				_warn_once_key(
-					"bg-image-plus-border", el,
-					"background-image combined with border/background styling: the image is drawn, border styling is not"
-				)
-			var tsb := _image_stylebox(tex, style, el)
-			for side in ["left", "top", "right", "bottom"]:
-				tsb.set("content_margin_" + side, sb.get("content_margin_" + side))
-			if sb.has_meta("uxml_margins"):
-				tsb.set_meta("uxml_margins", sb.get_meta("uxml_margins"))
-			sb = tsb
 		var slots := _stylebox_slots(c)
-		for slot in slots:
-			if sb != null:
-				c.add_theme_stylebox_override(slot, sb)
-			else:
-				c.remove_theme_stylebox_override(slot)
+		var sb: StyleBox = null
+		var keep := false
+		if style.has("background-image"):
+			_box_memo.erase(c)
+			sb = _stylebox(style, el)
+			var tex := _texture(style, "background-image", el)
+			if sb == null and tex != null:
+				sb = _image_stylebox(tex, style, el)
+				# USS slicing never pads content: StyleBoxTexture would otherwise
+				# fall back to its texture margins as content margins.
+				for side in ["left", "top", "right", "bottom"]:
+					sb.set("content_margin_" + side, 0.0)
+			elif sb != null and tex != null:
+				# StyleBoxFlat cannot carry a texture; the image wins the fill.
+				# Padding (content margins) carries over to the texture box; only
+				# a visible flat background or border is lost, and diagnosed.
+				var flat := sb as StyleBoxFlat
+				if flat != null and (flat.bg_color.a > 0.0 or flat.border_width_left > 0
+						or flat.border_width_top > 0 or flat.border_width_right > 0
+						or flat.border_width_bottom > 0):
+					_warn_once_key(
+						"bg-image-plus-border", el,
+						"background-image combined with border/background styling: the image is drawn, border styling is not"
+					)
+				var tsb := _image_stylebox(tex, style, el)
+				for side in ["left", "top", "right", "bottom"]:
+					tsb.set("content_margin_" + side, sb.get("content_margin_" + side))
+				if sb.has_meta("uxml_margins"):
+					tsb.set_meta("uxml_margins", sb.get_meta("uxml_margins"))
+				sb = tsb
+		else:
+			# Without an image the box is _stylebox's, a function of the
+			# style entries it reads: entries that are the same objects as
+			# at the last apply (shared, read-only cascade entries) give the
+			# same box, so it is not built again, and the installed box
+			# stays when it is still as built.
+			var inputs: Array = []
+			for k in _BOX_KEYS:
+				inputs.append(style.get(k))
+			var memo = _box_memo.get(c)
+			var same := memo != null
+			if same:
+				var was: Array = memo[0]
+				for k in inputs.size():
+					if not is_same(was[k], inputs[k]):
+						same = false
+						break
+			if same:
+				sb = memo[1]
+				keep = sb != null and _installed_as_built(c, slots, sb, memo[2])
+			if not keep and (not same or sb != null):
+				sb = _stylebox(style, el)
+				_box_memo[c] = [inputs, sb, null if sb == null else (sb.get_meta("uxml_margins") as Array).duplicate()]
+		if not keep:
+			for slot in slots:
+				if sb != null:
+					c.add_theme_stylebox_override(slot, sb)
+				else:
+					c.remove_theme_stylebox_override(slot)
 		_inset_memo.erase(c)
 		if sb != null and not slots.is_empty():
 			_estimate[c] = sb.get_meta("uxml_margins") if sb.has_meta("uxml_margins") else null
@@ -897,6 +953,8 @@ static func _font_key(f: Font) -> String:
 		return "-"
 	if f is FontVariation:
 		var v := f as FontVariation
+		if v.has_meta(_FONT_KEY):
+			return v.get_meta(_FONT_KEY)
 		return "v%s|%s|%s|%d|%d|%d|%d|%s|%s" % [_font_key(v.base_font), v.variation_embolden,
 			v.variation_transform, v.spacing_top, v.spacing_bottom, v.spacing_space, v.spacing_glyph,
 			v.variation_opentype, v.opentype_features]
@@ -911,6 +969,7 @@ static func with_spacing(base: Font, top: int, bottom: int) -> FontVariation:
 	var fv: FontVariation
 	if base is FontVariation:
 		fv = (base as FontVariation).duplicate()
+		fv.remove_meta(_FONT_KEY)  # the copy's content differs
 		fv.set_spacing(TextServer.SPACING_TOP, fv.get_spacing(TextServer.SPACING_TOP) + top)
 		fv.set_spacing(TextServer.SPACING_BOTTOM, fv.get_spacing(TextServer.SPACING_BOTTOM) + bottom)
 	else:
@@ -918,7 +977,15 @@ static func with_spacing(base: Font, top: int, bottom: int) -> FontVariation:
 		fv.base_font = base
 		fv.set_spacing(TextServer.SPACING_TOP, top)
 		fv.set_spacing(TextServer.SPACING_BOTTOM, bottom)
+	# This runtime does not change the font after this point: its content
+	# key is kept on it (fit_label looks the key of the line font up for
+	# every fit; formatting it cost about 16 us).
+	fv.set_meta(_FONT_KEY, _font_key(fv))
 	return fv
+
+
+## Meta: the _font_key of a FontVariation made by with_spacing.
+const _FONT_KEY := &"uxml_font_key"
 
 
 ## Max-content width of a wrapping Label (its longest paragraph, as one
