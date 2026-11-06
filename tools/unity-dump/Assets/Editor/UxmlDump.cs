@@ -195,6 +195,7 @@ public static class UxmlDump
     static string DumpCase(string dir, string name)
     {
         var sc = ReadSidecar(Path.Combine(dir, name + ".json"));
+        RenderClear = ClearFor(sc);
         var vta = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(dir + "/" + name + ".uxml");
         if (vta == null) throw new Exception("no VisualTreeAsset at " + dir + "/" + name + ".uxml");
         var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(dir + "/" + name + ".uss");
@@ -204,6 +205,7 @@ public static class UxmlDump
             VisualElement docRoot;
             IPanel panel;
             string themeName;
+            RenderTexture renderTarget = null;
             if (sc.editor.Length > 0)
             {
                 // An editor panel (EditorPanel.FindOrCreate, as a GUIView
@@ -233,7 +235,8 @@ public static class UxmlDump
             {
                 var theme = AssetDatabase.LoadAssetAtPath<ThemeStyleSheet>(ThemePath);
                 if (theme == null) throw new Exception("no default runtime theme at " + ThemePath);
-                var rt = new RenderTexture(sc.width, sc.height, 0);
+                // Depth and stencil: a rounded overflow clip draws a stencil mask.
+                var rt = new RenderTexture(sc.width, sc.height, 24);
                 var ps = ScriptableObject.CreateInstance<PanelSettings>();
                 ps.themeStyleSheet = theme;
                 ps.scaleMode = PanelScaleMode.ConstantPixelSize;
@@ -241,7 +244,9 @@ public static class UxmlDump
                 ps.referenceDpi = 96f;
                 ps.fallbackDpi = 96f;
                 ps.targetTexture = rt;
-                ps.clearColor = false;
+                ps.clearColor = true;
+                ps.colorClearValue = RenderClear;
+                renderTarget = rt;
                 var go = new GameObject("uxml-dump");
                 cleanup.Add(() => UnityEngine.Object.DestroyImmediate(go));
                 cleanup.Add(() => UnityEngine.Object.DestroyImmediate(ps));
@@ -328,12 +333,113 @@ public static class UxmlDump
                 WriteElement(w, child, host, "overlay/" + (oi++).ToString(CultureInfo.InvariantCulture));
             w.EndArray();
             w.EndObject();
+            string renderOut = Arg("-renderOut", "");
+            if (renderOut.Length > 0)
+            {
+                Directory.CreateDirectory(renderOut);
+                RenderCase(panel, host, sc, renderTarget, cleanup, Path.Combine(renderOut, name + ".png"), false);
+                HideText(panel.visualTree);
+                Validate(panel);
+                RenderCase(panel, host, sc, renderTarget, cleanup, Path.Combine(renderOut, name + ".notext.png"), true);
+            }
             return w.ToString();
         }
         finally
         {
             foreach (var c in cleanup) { try { c(); } catch { } }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Rendering (-renderOut <dir>): the panel as drawn, for bench/pixels.py.
+    // The case is drawn over an opaque clear colour into a render texture of
+    // the case size at pixelsPerPoint 1 and read back to an 8-bit RGBA PNG
+    // (gamma colour space, as the project). <name>.notext.png is the same
+    // panel with every text colour transparent, so the comparison can tell
+    // text pixels from box pixels.
+
+    // White under the runtime theme, the editor window colour under an
+    // editor skin (bench/pixels_render.gd uses the same).
+    static Color RenderClear = Color.white;
+    static Color ClearFor(Sidecar sc)
+    {
+        if (sc.editor == "light") return new Color32(200, 200, 200, 255);
+        if (sc.editor.Length > 0) return new Color32(56, 56, 56, 255);
+        return Color.white;
+    }
+
+    static void RenderCase(IPanel panel, VisualElement host, Sidecar sc, RenderTexture rt, List<Action> cleanup, string path, bool again)
+    {
+        if (rt == null)
+        {
+            rt = new RenderTexture(sc.width, sc.height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
+            var made = rt;
+            cleanup.Add(() => { made.Release(); UnityEngine.Object.DestroyImmediate(made); });
+        }
+        var prev = RenderTexture.active;
+        try
+        {
+            if (panel.contextType == ContextType.Player)
+            {
+                var util = typeof(VisualElement).Assembly.GetType("UnityEngine.UIElements.UIElementsRuntimeUtility");
+                util.GetMethod("RepaintPanel", Any).Invoke(null, new object[] { panel });
+                util.GetMethod("RenderPanel", Any).Invoke(null, new object[] { panel, false });
+            }
+            else
+            {
+                // An editor panel draws into the active render target with
+                // the GUI pixel matrix, as a GUIView repaint does.
+                RenderTexture.active = rt;
+                GL.Viewport(new Rect(0, 0, sc.width, sc.height));
+                GL.Clear(true, true, RenderClear);
+                GL.PushMatrix();
+                GL.LoadPixelMatrix(0, sc.width, sc.height, 0);
+                // The panel clears the target itself (clearSettings).
+                var csp = panel.GetType().GetProperty("clearSettings", Any);
+                var cs = csp.GetValue(panel);
+                cs.GetType().GetField("clearColor").SetValue(cs, true);
+                cs.GetType().GetField("color").SetValue(cs, RenderClear);
+                csp.SetValue(panel, cs);
+                var repaint = new Event { type = EventType.Repaint };
+                var pm = panel.GetType().GetMethod("Repaint", Any, null, new[] { typeof(Event) }, null);
+                pm.Invoke(panel, new object[] { repaint });
+                var rm = panel.GetType().GetMethod("Render", Any, null, Type.EmptyTypes, null);
+                rm.Invoke(panel, null);
+                GL.PopMatrix();
+            }
+            RenderTexture.active = rt;
+            var tex = new Texture2D(sc.width, sc.height, TextureFormat.RGBA32, false, false);
+            tex.ReadPixels(new Rect(0, 0, sc.width, sc.height), 0, 0, false);
+            tex.Apply();
+            File.WriteAllBytes(path, tex.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(tex);
+            Debug.Log("[uxml-dump] rendered " + path);
+        }
+        finally
+        {
+            RenderTexture.active = prev;
+        }
+    }
+
+    // Every text colour transparent (glyphs, outline, shadow, caret and
+    // selection), so only the boxes draw. Transitions stay as they are (a
+    // change of the transition lists would end the running ones); the fake
+    // clock does not move, so a colour that transitions keeps its value.
+    static void HideText(VisualElement root)
+    {
+        root.Query<VisualElement>().ForEach(e =>
+        {
+            e.style.color = Color.clear;
+            e.style.unityTextOutlineColor = Color.clear;
+            e.style.textShadow = new TextShadow { color = Color.clear };
+#pragma warning disable CS0618
+            if (e is TextElement te && te.selection != null)
+            {
+                te.selection.cursorColor = Color.clear;
+                te.selection.selectionColor = Color.clear;
+            }
+#pragma warning restore CS0618
+        });
     }
 
     static void ForceEditorScale(IPanel panel)

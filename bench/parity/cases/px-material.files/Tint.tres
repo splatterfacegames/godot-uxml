@@ -1,0 +1,13 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[sub_resource type="Shader" id="Shader_tint"]
+code = "shader_type canvas_item;
+// Tint.shader: the colour times _Tint.
+uniform vec4 _Tint : source_color = vec4(1.0);
+void fragment() {
+	COLOR.rgb *= _Tint.rgb;
+}
+"
+
+[resource]
+shader = SubResource("Shader_tint")

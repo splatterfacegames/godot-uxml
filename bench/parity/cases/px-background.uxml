@@ -1,0 +1,19 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="stretch" class="c" style="left: 8px; top: 8px;" />
+  <ui:VisualElement name="fit" class="c wide" style="left: 104px; top: 8px;" />
+  <ui:VisualElement name="crop" class="c wide" style="left: 200px; top: 8px;" />
+  <ui:VisualElement name="tiles" class="c" style="left: 296px; top: 8px;" />
+  <ui:VisualElement name="repeat-x" class="c" style="left: 8px; top: 72px;" />
+  <ui:VisualElement name="offset" class="c" style="left: 104px; top: 72px;" />
+  <ui:VisualElement name="space" class="c" style="left: 200px; top: 72px;" />
+  <ui:VisualElement name="round-rep" class="c" style="left: 296px; top: 72px;" />
+  <ui:VisualElement name="tint" class="c" style="left: 8px; top: 136px;" />
+  <ui:VisualElement name="slice" class="c" style="left: 104px; top: 136px;" />
+  <ui:VisualElement name="slice-scale" class="c" style="left: 200px; top: 136px;" />
+  <ui:VisualElement name="slice-tiled" class="c" style="left: 296px; top: 136px;" />
+  <ui:VisualElement name="radius" class="c" style="left: 8px; top: 200px;" />
+  <ui:VisualElement name="on-color" class="c" style="left: 104px; top: 200px;" />
+  <ui:VisualElement name="border-img" class="c" style="left: 200px; top: 200px;" />
+  <ui:VisualElement name="center-small" class="c" style="left: 296px; top: 200px;" />
+  <ui:Image name="image" class="c" style="left: 8px; top: 256px; height: 40px;" />
+</ui:UXML>

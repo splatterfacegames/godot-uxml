@@ -9,3 +9,4 @@ native/target/
 /tools/unity-dump/UserSettings/
 /tools/unity-dump/Assets/Cases/
 /tools/unity-dump/Assets/Cases.meta
+/bench/pixels/out/

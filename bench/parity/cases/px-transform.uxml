@@ -1,0 +1,16 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="r15" class="c" style="left: 20px; top: 20px;" />
+  <ui:VisualElement name="r45" class="c" style="left: 120px; top: 20px;" />
+  <ui:VisualElement name="r90" class="c" style="left: 220px; top: 20px;" />
+  <ui:VisualElement name="scale" class="c" style="left: 320px; top: 20px;" />
+  <ui:VisualElement name="half-px" class="c" style="left: 20px; top: 110px;" />
+  <ui:VisualElement name="origin" class="c" style="left: 120px; top: 110px;" />
+  <ui:VisualElement name="nested" class="c" style="left: 220px; top: 110px;">
+    <ui:VisualElement name="nested-kid" />
+  </ui:VisualElement>
+  <ui:VisualElement name="round-rot" class="c" style="left: 320px; top: 110px;" />
+  <ui:VisualElement name="flip" class="c" style="left: 20px; top: 200px;" />
+  <ui:VisualElement name="skinny" class="c" style="left: 120px; top: 200px;" />
+  <ui:VisualElement name="scale-small" class="c" style="left: 220px; top: 200px;" />
+  <ui:VisualElement name="translate-pct" class="c" style="left: 320px; top: 200px;" />
+</ui:UXML>

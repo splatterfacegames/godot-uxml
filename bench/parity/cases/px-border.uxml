@@ -1,0 +1,18 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="sides" class="c" style="left: 8px; top: 8px;" />
+  <ui:VisualElement name="round" class="c" style="left: 104px; top: 8px;" />
+  <ui:VisualElement name="corners" class="c" style="left: 200px; top: 8px;" />
+  <ui:VisualElement name="pill" class="c" style="left: 296px; top: 8px;" />
+  <ui:VisualElement name="circle" class="c" style="left: 8px; top: 76px;" />
+  <ui:VisualElement name="round-sides" class="c" style="left: 104px; top: 76px;" />
+  <ui:VisualElement name="thick" class="c" style="left: 200px; top: 76px;" />
+  <ui:VisualElement name="fraction" class="c" style="left: 296px; top: 76px;" />
+  <ui:VisualElement name="alpha" class="c" style="left: 8px; top: 144px;" />
+  <ui:VisualElement name="one-corner" class="c" style="left: 104px; top: 144px;" />
+  <ui:VisualElement name="over" class="c" style="left: 200px; top: 144px;" />
+  <ui:VisualElement name="lr" class="c" style="left: 296px; top: 144px;" />
+  <ui:VisualElement name="tall" class="c" style="left: 8px; top: 212px;" />
+  <ui:VisualElement name="no-bg" class="c" style="left: 104px; top: 212px;" />
+  <ui:VisualElement name="half-alpha-bg" class="c" style="left: 200px; top: 212px;" />
+  <ui:VisualElement name="mixed-alpha" class="c" style="left: 296px; top: 212px;" />
+</ui:UXML>

@@ -619,7 +619,8 @@ func _apply_text_outline(c: Control, style: Dictionary, el: UxmlElement) -> void
 	var col = _color(style, "-unity-text-outline-color", el)
 	if w > 0.0:
 		c.add_theme_constant_override("outline_size", maxi(1, roundi(w * 2.0)))
-		var oc: Color = col if col != null else Color.BLACK
+		# Unity's initial outline colour is transparent.
+		var oc: Color = col if col != null else Color.TRANSPARENT
 		c.add_theme_color_override("font_outline_color", oc)
 	else:
 		if c.has_theme_constant_override("outline_size"):
@@ -1344,7 +1345,9 @@ func _stylebox(style: Dictionary, el: UxmlElement) -> StyleBox:
 
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg if bg != null else Color.TRANSPARENT
-	sb.border_color = first_bcolor if first_bcolor != null else Color.BLACK
+	# Unity's initial border colour is transparent (measured: a border
+	# width without a colour draws nothing).
+	sb.border_color = first_bcolor if first_bcolor != null else Color.TRANSPARENT
 	sb.border_width_top = int(widths[0])
 	sb.border_width_right = int(widths[1])
 	sb.border_width_bottom = int(widths[2])

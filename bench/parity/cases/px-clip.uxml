@@ -1,0 +1,43 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="clip" class="c clipper" style="left: 8px; top: 8px;">
+    <ui:VisualElement class="kid" />
+  </ui:VisualElement>
+  <ui:VisualElement name="clip-round" class="c clipper" style="left: 104px; top: 8px;">
+    <ui:VisualElement class="kid" />
+  </ui:VisualElement>
+  <ui:VisualElement name="clip-border" class="c clipper" style="left: 200px; top: 8px;">
+    <ui:VisualElement class="kid" />
+  </ui:VisualElement>
+  <ui:VisualElement name="clip-content" class="c clipper" style="left: 296px; top: 8px;">
+    <ui:VisualElement class="kid" />
+  </ui:VisualElement>
+  <ui:VisualElement name="nested" class="c clipper" style="left: 8px; top: 88px;">
+    <ui:VisualElement name="nested-inner" class="clipper">
+      <ui:VisualElement class="kid" />
+    </ui:VisualElement>
+  </ui:VisualElement>
+  <ui:VisualElement name="visible" class="c" style="left: 104px; top: 88px;">
+    <ui:VisualElement class="kid" />
+  </ui:VisualElement>
+  <ui:VisualElement name="opacity" class="c" style="left: 200px; top: 88px;">
+    <ui:VisualElement class="o1" />
+    <ui:VisualElement class="o2" />
+  </ui:VisualElement>
+  <ui:VisualElement name="opacity-nested" class="c" style="left: 296px; top: 88px;">
+    <ui:VisualElement class="o1">
+      <ui:VisualElement class="o3" />
+    </ui:VisualElement>
+  </ui:VisualElement>
+  <ui:VisualElement name="rot-clip" class="c clipper" style="left: 8px; top: 176px;">
+    <ui:VisualElement class="kid" />
+  </ui:VisualElement>
+  <ui:VisualElement name="clip-round-thick" class="c clipper" style="left: 104px; top: 176px;">
+    <ui:VisualElement class="kid" />
+  </ui:VisualElement>
+  <ui:VisualElement name="scroll-clip" class="c" style="left: 200px; top: 176px;">
+    <ui:VisualElement class="kid" style="left: -20px; top: -20px;" />
+  </ui:VisualElement>
+  <ui:VisualElement name="op-clip" class="c clipper" style="left: 296px; top: 176px;">
+    <ui:VisualElement class="kid" />
+  </ui:VisualElement>
+</ui:UXML>

@@ -1,0 +1,18 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="none" class="c" style="left: 8px; top: 8px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="blur" class="c" style="left: 104px; top: 8px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="grayscale" class="c" style="left: 200px; top: 8px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="contrast" class="c" style="left: 296px; top: 8px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="hue" class="c" style="left: 8px; top: 80px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="invert" class="c" style="left: 104px; top: 80px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="opacity" class="c" style="left: 200px; top: 80px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="sepia" class="c" style="left: 296px; top: 80px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="tint" class="c" style="left: 8px; top: 152px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="chain" class="c" style="left: 104px; top: 152px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="blur-chain" class="c" style="left: 200px; top: 152px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="half" class="c half" style="left: 296px; top: 152px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="round-blur" class="c" style="left: 8px; top: 224px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:Label name="text-blur" text="Blurred" class="c" style="left: 104px; top: 224px;" />
+  <ui:VisualElement name="hue-180" class="c" style="left: 200px; top: 224px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="contrast-low" class="c" style="left: 296px; top: 224px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+</ui:UXML>

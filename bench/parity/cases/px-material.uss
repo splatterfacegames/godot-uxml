@@ -1,0 +1,9 @@
+.c { position: absolute; width: 80px; height: 64px; background-color: rgb(200, 100, 50); border-width: 2px; border-color: rgb(20, 20, 20); margin: 0; padding: 0; color: rgb(30, 30, 30); }
+.half { background-color: rgba(200, 100, 50, 0.5); }
+.kid { position: absolute; left: 20px; top: 16px; width: 36px; height: 24px; background-color: rgb(40, 160, 220); }
+#invert, #text, #round { -unity-material: url("Invert.mat"); }
+#round { border-radius: 16px; }
+#tint-white { -unity-material: url("Tint.mat"); }
+#tint-prop, #tint-alpha { -unity-material: url("Tint.mat") prop("_Tint" rgb(255, 128, 0)); }
+#none-kid { -unity-material: url("Invert.mat"); }
+.unset { -unity-material: none; }

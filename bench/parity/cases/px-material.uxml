@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="plain" class="c" style="left: 8px; top: 8px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="invert" class="c" style="left: 104px; top: 8px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="tint-white" class="c" style="left: 200px; top: 8px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="tint-prop" class="c" style="left: 296px; top: 8px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:Label name="text" text="Inverted text" class="c" style="left: 8px; top: 88px;" />
+  <ui:VisualElement name="round" class="c" style="left: 104px; top: 88px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="tint-alpha" class="c half" style="left: 200px; top: 88px;"><ui:VisualElement class="kid" /></ui:VisualElement>
+  <ui:VisualElement name="none-kid" class="c" style="left: 296px; top: 88px;"><ui:VisualElement class="kid unset" /></ui:VisualElement>
+</ui:UXML>

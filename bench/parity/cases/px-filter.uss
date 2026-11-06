@@ -1,0 +1,18 @@
+.c { position: absolute; width: 80px; height: 56px; background-color: rgb(200, 100, 50); border-width: 2px; border-color: rgb(20, 20, 20); margin: 0; padding: 0; }
+.half { background-color: rgba(200, 100, 50, 0.5); }
+.kid { position: absolute; left: 20px; top: 12px; width: 36px; height: 24px; background-color: rgb(40, 160, 220); }
+#blur { filter: blur(3px); }
+#grayscale { filter: grayscale(100%); }
+#contrast { filter: contrast(200%); }
+#hue { filter: hue-rotate(90deg); }
+#invert { filter: invert(100%); }
+#opacity { filter: opacity(50%); }
+#sepia { filter: sepia(1); }
+#tint { filter: tint(rgb(0, 255, 150)); }
+#chain { filter: grayscale(100%) invert(100%); }
+#blur-chain { filter: invert(100%) blur(2px); }
+#half { filter: contrast(150%); }
+#round-blur { border-radius: 16px; filter: blur(1.5px); }
+#text-blur { filter: blur(1px); color: rgb(255, 255, 255); font-size: 18px; }
+#hue-180 { filter: hue-rotate(180deg); }
+#contrast-low { filter: contrast(50%) sepia(50%); }

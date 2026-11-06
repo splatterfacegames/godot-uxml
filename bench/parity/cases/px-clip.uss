@@ -1,0 +1,15 @@
+.c { position: absolute; width: 80px; height: 64px; background-color: rgb(230, 230, 240); }
+.clipper { overflow: hidden; }
+.kid { position: absolute; left: 30px; top: 24px; width: 90px; height: 70px; background-color: rgb(220, 60, 60); border-width: 3px; border-color: rgb(30, 30, 30); }
+#clip-round { border-radius: 20px; }
+#clip-border { border-width: 6px; border-color: rgb(0, 0, 160); }
+#clip-content { border-width: 4px; border-color: rgb(0, 0, 160); padding: 8px; -unity-overflow-clip-box: content-box; }
+#nested-inner { position: absolute; left: 20px; top: 10px; width: 80px; height: 40px; background-color: rgb(200, 240, 200); }
+#nested-inner > .kid { left: 10px; top: 20px; }
+.o1 { position: absolute; left: 10px; top: 10px; width: 40px; height: 40px; background-color: rgb(0, 0, 255); opacity: 0.5; }
+.o2 { position: absolute; left: 30px; top: 20px; width: 40px; height: 40px; background-color: rgb(255, 0, 0); opacity: 0.5; }
+.o3 { position: absolute; left: 20px; top: 15px; width: 40px; height: 40px; background-color: rgb(255, 0, 0); }
+#rot-clip { rotate: 20deg; }
+#clip-round-thick { border-width: 6px; border-color: rgb(0, 120, 0); border-radius: 24px; }
+#scroll-clip { overflow: hidden; border-radius: 10px; border-width: 2px; border-color: rgb(0, 0, 0); }
+#op-clip { opacity: 0.6; border-radius: 12px; }
