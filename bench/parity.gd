@@ -271,7 +271,11 @@ func _settle(doc: UxmlDocumentModel, resolve: Callable, layout: Callable) -> Arr
 		var size_of := func(el: UxmlElement):
 			var r = rects.get(el)
 			return null if r == null else (r as Rect2).size
-		var changed := UxmlContainerParts.after_layout(doc.root, size_of)
+		var rect_of := func(el: UxmlElement):
+			return rects.get(el)
+		var bounds_of := func(el: UxmlElement):
+			return UxmlContainerParts.bounding_size(el, rect_of)
+		var changed := UxmlContainerParts.after_layout(doc.root, size_of, bounds_of)
 		for el in doc.root.walk():
 			if not UxmlContainerParts.is_collection(el.local) or el.part_of != null:
 				continue

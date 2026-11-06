@@ -885,7 +885,7 @@ To add a control (field and container controls next):
 | --- | --- |
 | `Slider`, `SliderInt` | [label with `unity-base-slider__label`, `unity-base-field__label--with-dragger`] input > `#unity-drag-container` > (`#unity-tracker` [> `#unity-fill` when `fill`], `#unity-dragger-border`, `#unity-dragger`), then `TextField#unity-text-field.unity-base-slider__text-field` when `show-input-field`; the control class `unity-base-slider--horizontal` or `--vertical` follows `direction` |
 | `MinMaxSlider` | [label] input > (`#unity-tracker`, `#unity-dragger` > (`#unity-thumb-min`, `#unity-thumb-max`)) |
-| `TextField` | [label] `TextInput#unity-text-input` (`--single-line` or `--multiline`) > `TextElement.unity-text-element--inner-input-field-component`; multiline: > `.unity-base-text-field__multiline-container` > the TextElement |
+| `TextField` | [label] `TextInput#unity-text-input` (`--single-line` or `--multiline`) > `TextElement.unity-text-element--inner-input-field-component`; multiline: > `.unity-base-text-field__multiline-container` > the TextElement; multiline with `vertical-scroller-visibility` `Auto` or `AlwaysVisible`: the input gets `--multiline--scroll-view` and holds `ScrollView.unity-scroll-view--inner-input-field-component` (mode VerticalAndHorizontal, horizontal Scroller hidden; viewport and content container get `--inner-input-field-component`) > ... > content container > `TextElement` with `--inner-input-field-component--scroll-view` and `--vertical-horizontal` |
 | numeric fields | [label, with `--with-dragger` except Hash128Field] `<Type>Input#unity-text-input` (`IntegerInput`, `LongInput`, `FloatInput`, `DoubleInput`, `UnsignedIntegerInput`, `UnsignedLongInput`, `Hash128Input`) > TextElement |
 | `Vector2Field` ... `Vector4Field`, int variants | [label] input > one FloatField or IntegerField per component (`#unity-x-input`, ... `.unity-composite-field__field`, the first also `--first`, labels X, Y, Z, W); two-field lines end with `.unity-composite-field__field-spacer` |
 | `RectField`, `RectIntField` | as the vectors, in two `.unity-composite-field__field-group` lines (x, y; `#unity-width-input`, `#unity-height-input` with labels W, H) |
@@ -957,9 +957,18 @@ KeyboardTextEditor):
   the composite value.
 - DropdownField, EnumField: a left press or `ui_accept` opens the menu
   (`UxmlPopupMenu`); the field is `:active` while the menu is open. The
-  menu is a UXML document with Unity's dropdown classes
-  (`unity-base-dropdown__container-outer`, `__item`, `__checkmark`,
-  `__label`); the selected item is `:checked`. A click chooses an item;
+  menu is a UXML document with Unity's GenericDropdownMenu tree
+  (`unity-base-dropdown` > `__container-outer` >
+  `ScrollView.unity-base-dropdown__container-inner` (VerticalAndHorizontal)
+  > content container > `__item` > `__item-content` > `__checkmark`,
+  `__label`); the selected item is `:checked`. The author sheets of the
+  field's document also style the menu (`UxmlDocument.shared_sheets`: the
+  sheets that style the whole document, scoped to the menu root, in the
+  same order), because Unity attaches the menu under the document root.
+  A menu taller than the space below the field opens above it when that
+  space is larger; the outer container gets the space as `max-height`
+  and the ScrollView scrolls (Unity's EnsureVisibilityInParent). The
+  keyboard highlight scrolls into view. A click chooses an item;
   `ui_up`/`ui_down` move the highlight (`:hover`), `ui_accept` chooses,
   `ui_cancel` or a click outside closes the menu. The menu opens above the
   field when the space below is too small.
@@ -987,18 +996,20 @@ Value types of `value_changed` and of `bind_read`:
 
 Deviations from Unity:
 
-- A multiline TextField with `vertical-scroller-visibility` `Auto` or
-  `AlwaysVisible` gets the multiline container, not Unity's inner
-  ScrollView; the TextEdit scrolls the text. The ScrollView part tree is
-  the task of the container controls.
-- The menu inner container is a VisualElement, not a ScrollView: a long
-  menu does not scroll.
-- Unity attaches the menu to the document root, so author sheets also
-  style the menu there. Here only the theme styles the menu.
+- The inner ScrollView of a multiline TextField is VerticalAndHorizontal.
+  Unity makes it Vertical for `white-space: normal` or `pre-wrap` (a
+  computed style that the part tree does not read at load). The TextEdit
+  is as large as its text (`scroll_fit_content_height` and
+  `scroll_fit_content_width`); `TextFieldBehavior` scrolls the
+  ScrollView so that the caret stays in the viewport (Unity's
+  UpdateScrollOffset).
+- The menu is a Godot Popup with its own document, not elements under the
+  document root; only the sheets are shared.
 - `select-all-on-mouse-up` and `auto-correction` are accepted without an
   effect (Godot's LineEdit selects on focus and has no auto-correction).
-- A text editor is a Godot LineEdit, so the line height follows Godot's
-  font metrics (a TextField is 42 px high at 14 px, Unity 39 px).
+- A text editor is a Godot LineEdit or TextEdit. With the default theme,
+  the line height is Unity's (see "Default theme"): a TextField is 39 px
+  high at 14 px, as in Unity.
 
 ### Container and collection parts
 
@@ -1034,8 +1045,10 @@ Rules of these trees:
   (Unity `Slider.AdjustDragElement`); a fraction of 1 or more hides the
   dragger. Multi-column views set the column and cell widths (fixed
   widths, then the stretchable columns share the rest, clamped to
-  `min-width`/`max-width`). The runtime runs these updates after every
-  layout (`UxmlDocument._after_layout`); a change lays out again, as in
+  `min-width`/`max-width`). A Tab outside a TabView gives its header
+  underline the width of the Tab (measured: `ctl-tabview`, a 400px
+  underline under an 81px header). The runtime runs these updates after
+  every layout (`UxmlDocument._after_layout`); a change lays out again, as in
   Unity.
 - Scrolling is a `translate` on `#unity-content-container` (Unity 6000.3
   measured: `ctl-scrollview-scrolled`). The dragger moves by `translate`
@@ -1044,13 +1057,32 @@ Rules of these trees:
   translate, and the viewport (`overflow: scroll`) clips the content and
   its input.
 - Collection rows are built at load: a pool of
-  `floor(pool_height / item height) + 2` rows (Unity creates
-  `floor(viewport / item height) + 2`), where `pool_height` is the
-  tallest viewport the document can get. Rows past the item count are
-  `display: none`. Item `i` lives in pool slot `i % pool`: a scroll
-  re-binds only the rows that left the view, and each row control moves
-  by `(item - slot) * item height` after the layout. The content
-  container has an inline height of `count * item height`.
+  `floor(pool_height / item height) + 2` rows, where `pool_height` is the
+  tallest viewport the document can get. Only `floor(viewport / item
+  height) + 2` rows are in use, as in Unity's FixedHeight Resize
+  (`CollectionBehavior.active_rows`, `get_list_rows`): the other rows
+  and the rows past the item count are `display: none` and unbound. A
+  resize changes the number of rows in use, never the elements, so a
+  resize costs no structure change. Item `i` lives in slot `i % rows in
+  use`: a scroll re-binds only the rows that left the view, and each row
+  control moves by `(item - slot) * item height` after the layout. The
+  content container has an inline height of `count * item height`.
+- `virtualization-method="DynamicHeight"` (Unity's
+  DynamicHeightVirtualizationController): rows have no inline height and
+  take the height of their item. After a layout the behavior registers
+  the height of each bound row. The expected height of an item that has
+  no height yet is the smallest registered height when it is below
+  `fixed-item-height`, else `fixed-item-height` (22 without). The content
+  container is as high as the registered heights plus the expected
+  heights of the other items, and has a top padding as high as the items
+  above the first row. Rows in use: `ceil(viewport / expected height) +
+  2`, at most the pool. The rows show items `first .. first + rows` in
+  order, so a scroll that changes the first item re-binds the rows and
+  lays out again; a scroll inside the same first item is paint-only.
+  When a registered height changes, the scroll offset moves so that the
+  first visible item keeps its place on screen. `scroll_to_item` follows
+  the registered heights until the item is in view (Unity schedules the
+  scroll again after the layout). Not modeled: Unity's stick-to-bottom.
 - A TabView reorder is the one change of shape after load: the header and
   the Tab move in the model and in the node order, and
   `UxmlDocument._structure_changed()` rebuilds the parent map and, on the
@@ -1311,6 +1343,23 @@ The theme also has the measured values of painted properties (see
   only when an author rule also sets `overflow: hidden`, as in Unity.
 - `.unity-help-box__icon { -unity-background-scale-mode: scale-to-fit }`.
 
+Line height. Unity lays one line of its default font (NotInter-Regular,
+an Inter clone) out `ceil(1.2099 x font-size)` high, with the baseline
+0.969 em below the line top (measured in every dump: 9px 11, 10px 13,
+14px 17, 16px 20, 18px 22, 20px 25). Godot's default font is taller (20px
+at 14px). Godot's `line_spacing` constant and LabelSettings change only
+the space between lines, not the height of one line or of a LineEdit, so
+they cannot give Unity's line height. A FontVariation can: with the
+default theme (`UxmlStyleApplier.unity_line_metrics`), a Label, Button,
+LineEdit, TextEdit or RichTextLabel without a `-unity-font` file gets a
+FontVariation of its font with whole-pixel top and bottom spacing for its
+font size (cached per font and size). One line is then Unity's height
+(17px at 14px), the baseline is at Unity's ascent, and the glyphs keep
+Godot's font. A TextField is 39px high and a Label 25px at 14px, as in
+Unity. A `-unity-font` file keeps its own metrics (Unity's metrics of
+another font are not known), and `-unity-text-auto-size` keeps the
+spacing of the authored size.
+
 ### Layout
 
 `UxmlFlexLayout` is pure geometry — no Control access except through the
@@ -1356,9 +1405,11 @@ Pixel grid: Unity rounds every layout to the pixel grid (Yoga's
 RoundToPixelGrid at one pixel per point). `UxmlDocument.pixel_grid`
 (default true) does the same in both layout paths
 (`UxmlFlexLayout.round_to_pixel_grid`, `round_node` in `layout.rs`). A
-position rounds alone; a size is the difference of the rounded
-absolute edges; the children start from the unrounded absolute position;
-halves round up. The rounding runs on the output only, so the cross-pass
+position is the rounded absolute position less the rounded absolute
+position of the parent; a size is the difference of the rounded absolute
+edges; the children start from the unrounded absolute position; halves
+round up. Measured: a Scroller button at 152.47 under a parent at 35.29
+is at 153 (`inventory`), not at round(152.47) = 152. The rounding runs on the output only, so the cross-pass
 cache keeps the unrounded results. `UxmlFlexLayout.compute` rounds only
 with `options["pixel_grid"]`; the reference-engine comparison in
 `bench/parity.gd` does not round, the Unity comparison does.
@@ -1375,28 +1426,64 @@ validated cross-pass cache, so unchanged subtrees cost a replay of their
 measurer calls rather than a recomputation; see `docs/performance.md`.
 
 ScrollView: its part tree lays out through these rules
-(`themes/unity-structure.uss`): the content container does not shrink, so
-it is as tall as its content inside the viewport. Two Yoga rules make
-that work, in the GDScript and the native layout alike:
+(`themes/unity-structure.uss`, overflow as Unity's ScrollView.cs sets it:
+the viewport `hidden`, the content container `scroll` without clipping,
+a VerticalAndHorizontal viewport `scroll`): the content container does
+not shrink, so it is as tall as its content inside the viewport. The
+scroll range is the height of the content's bounding box (Unity's
+`contentContainer.boundingBox`: the content box and the boxes of its
+children, margins excluded), less the viewport. Unity also counts deeper
+descendants that overflow their parents; godot-uxml stops at the
+children, so the update after a layout does not walk the whole content. Two
+Yoga rules make that work, in the GDScript and the native layout alike:
 
 - A container that a column stretches is measured at the stretched
   width (`_stretch_hint`). A row-wrap grid in a ScrollView thus gets the
-  height of all its lines. Leaves keep their measures, except best-fit
-  text.
-- `overflow: scroll` (the viewport): a scroll box whose cross size comes
-  from its content stays inside a definite cross size of its line.
+  height of all its lines.
+- The measure bounds below, with the `overflow: scroll` rules.
 
 The Scrollers are shown after the layout (see "Container and collection
 parts"). The `scroll_bar_width` option and parameter of the layout are no
-longer used. `bench/ref/ref_flex_layout.gd` has the same three changes
-(no ScrollView case, the two rules), so `bench/equiv_layout.gd` compares
-like with like.
+longer used. `bench/ref/ref_flex_layout.gd` has the same changes (no
+ScrollView case, the stretch rule, the measure bounds; each marked
+`(unity/fidelity)` or `(unity/controls-containers)`), so
+`bench/equiv_layout.gd` compares like with like.
 
-One Yoga rule is not modeled: the intrinsic measure of a container passes
-no width bound to its children (Yoga measures them at most as wide as the
-container). An auto-height ScrollView in a sized column therefore
-measures a row-wrap grid as one line when the column computes the
-ScrollView's own size (`inventory`: the header is 40px, Unity 35px).
+Measure bounds (Yoga's AtMost measure mode), in both layout paths and in
+`bench/ref/ref_flex_layout.gd`:
+
+- Every measure of a flex item gets the space its container has on each
+  axis, less the margins of the item (`bx`, `by` in `_measure`; -1 for
+  none). A container with an auto size passes its own bound on, less its
+  padding and border: its children measure at most that large, and its
+  lines wrap at that width. A row-wrap grid in an auto-height ScrollView
+  therefore measures all its lines (`inventory`).
+- A leaf measure is clamped to the bound, as Unity's TextElement and
+  Image clamp their measure (`TextUtilities.PostProcessMeasuredSize`). A
+  Label in a 20px TreeView row is 14px high (20 less 6px of margins), a
+  long field label shrinks to its `min-width` (`ctl-basefield`). A leaf
+  without a width hint is measured at the bound width (wrapping text).
+- An `overflow: scroll` container does not bound its children on its
+  main axis. An auto-sized scroll box stays inside its bound on its cross
+  axis, and on its main axis only when it and one of its children grow
+  (Yoga sizes the main axis to the content first). A row-wrap content
+  container in a short ScrollView is as tall as the viewport (`inventory`:
+  177px), a column content container keeps its content height.
+- Absolute children are measured without a bound.
+
+The memo and cross-pass cache key on the bounds (measure entries hold
+`bx` and `by`; layout entries have definite sizes and need no bound). A
+bound that cannot change a measure is dropped from the key (a definite
+width or height, a width hint of a container). Each measure entry keeps
+thresholds: the size at which a bound starts to change the measure (a
+leaf: its content size, compared as the clamp compares; a container: the
+largest child threshold plus margins, its lines when it wraps, and its
+own size when it is a scroll box). A bounded measure below the
+thresholds is the unbounded measure: always for the height bound, and
+for the width bound in a subtree without wrapping or best-fit text (a
+width bound changes their width hint). So a subtree is measured once,
+not once per distinct bound. Both layout paths and the reference engine
+give the same results; the reference computes every bounded measure.
 
 ### Style application
 
@@ -1685,12 +1772,38 @@ rows keep `fixed-item-height`.
   so container chrome is faithful.
 - Text measurement is Godot's (`get_combined_minimum_size`), not Unity's
   text engine — intrinsic label sizes can differ slightly. Auto-height
-  labels re-measure at their assigned width when wrapping.
-- Unity clamps a text measure to the space a Label has; godot-uxml
-  measures the full text. A Label in a 20px TreeView row or table cell
-  is therefore taller than Unity's (25px against 14px for a 14px font),
-  and a Label row keeps Godot's Label minimum height (24px for Unity's
-  20px `fixed-item-height`); rows still sit `fixed-item-height` apart.
+  labels re-measure at their assigned width when wrapping: the control
+  gets the content width plus its USS padding and border (the width the
+  placement gives it), so the text wraps at the content width. A wrapping
+  Label measures its max-content width (the longest paragraph as one
+  line, `UxmlStyleApplier.label_max_content`, the same in the native
+  measurer), so the layout gives it Unity's width (a HelpBox label is as
+  wide as its text, at most the space it has). The width is cached for
+  the text: in the `uxml_maxc` meta (GDScript; an apply or new insets
+  drop it) and, in the native layout, per control until the control is
+  applied again or gets new insets.
+- Godot floors a Label at one text line. When the layout gives a
+  one-line Label less height (a Label in a 20px TreeView row is 14px, a
+  Label row of a ListView is the item height), `UxmlStyleApplier.
+  fit_label` gives the Label a FontVariation of its font with a negative
+  bottom spacing as large as the deficit (whole pixels). The control then
+  has the laid-out size and the text keeps its baseline. The deficit is in
+  the `uxml_fit` meta; both measurers add it back, so the measure does not
+  change. The unfitted height is kept in the `uxml_unfit` meta (and, in
+  the native layout, per control) until an apply, new insets or a
+  best-fit font size drop it. A font override from a restyle ends the
+  fit; the next placement fits again. Some Labels stay taller than the
+  box after the fit (Godot does not shrink a line below the glyph
+  extent). When that floor holds a fitted Label and a new box needs a
+  larger deficit, the fit stays: a larger deficit does not change the
+  size or the text, and the font does not change for each small box.
+  The placement records the box height and the control height
+  after each fit (`UxmlStyleApplier.fit_seen`); a placement that finds
+  the same two heights does not fit again. The text changes the fit only
+  through its line count, and a new line count changes the control
+  height. An apply drops the record. Not fitted: wrapping Labels,
+  Labels with LabelSettings, multi-line text, and a Label narrower than
+  its text (Godot floors the width too; Unity lets the text overflow).
 - Godot `Control.size` clamps to `get_combined_minimum_size()` — a hard
   engine rule, not something styles can override. For our own wrappers
   this is neutralized: `UxmlBox`/`UxmlField` keep their intrinsic measure
@@ -2414,8 +2527,9 @@ Unity. Unity measured these rules in batch mode (6000.3.24f1):
   size is `min`.
 - Measurement: with no width constraint the text measures at `max` on
   one line. With a width constraint (an authored width, the width that a
-  row gives a flex item, or the width of a stretched item in a column)
-  the size fits that width, and a wrapping text wraps at that width. An
+  row gives a flex item, the width of a stretched item in a column, or
+  the measure bound: the width of the container, Yoga's AtMost) the size
+  fits that width, and a wrapping text wraps at that width. An
   authored px `height` constrains the height. The measured size is the
   text size at the fitted size.
 - Placement: after each layout the size fits the laid-out content box

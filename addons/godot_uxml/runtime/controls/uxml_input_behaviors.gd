@@ -1156,10 +1156,37 @@ class TextBehavior extends InputBehavior:
 ## end of editing.
 class TextFieldBehavior extends TextBehavior:
 	var _value := ""
+	var _sv: UxmlElement = null  # the inner ScrollView of a multiline field
 
 	func setup() -> void:
 		super.setup()
 		_value = text()
+		_sv = UxmlParts.find_part(el, "scroll-view")
+		if _sv != null and _ed is TextEdit:
+			(_ed as TextEdit).caret_changed.connect(_follow_caret)
+
+	## Unity TextInputBase.UpdateScrollOffset: the inner ScrollView scrolls
+	## so that the caret stays in the viewport.
+	func _follow_caret() -> void:
+		var b = doc._behaviors.get(_sv)
+		var vp := control_of(UxmlContainerParts.get_part(_sv, "viewport"))
+		if b == null or vp == null or not (_ed is TextEdit):
+			return
+		var te := _ed as TextEdit
+		var lh := float(te.get_line_height())
+		var p := te.get_caret_draw_pos()
+		var top := te.position + Vector2(p.x, p.y - lh)
+		var off: Vector2 = b.offset()
+		var vs := vp.size
+		if top.y < off.y:
+			off.y = top.y
+		elif top.y + lh > off.y + vs.y:
+			off.y = top.y + lh - vs.y
+		if top.x < off.x:
+			off.x = top.x
+		elif top.x + 1.0 > off.x + vs.x:
+			off.x = top.x + 1.0 - vs.x
+		b.set_offset(off)
 
 	func _commit(t: String) -> void:
 		if t == _value:
@@ -1623,7 +1650,7 @@ class PopupBehavior extends InputBehavior:
 		var anchor := control_of(part("input"))
 		if anchor == null:
 			anchor = native()
-		_menu = UxmlPopupMenu.open(anchor, items(), index(), doc.theme_path)
+		_menu = UxmlPopupMenu.open(anchor, items(), index(), doc.theme_path, doc)
 		_menu.chosen.connect(choose.bind(true))
 		_menu.popup_hide.connect(_on_menu_closed)
 		set_state(el, "active", true)

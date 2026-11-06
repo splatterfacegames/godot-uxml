@@ -239,6 +239,9 @@ static func content_style(content: UxmlElement) -> String:
 	var h: float = content.get_meta(&"uxml_height", -1.0)
 	if h >= 0.0:
 		out = "height: %s;" % px(h)
+	var p: float = content.get_meta(&"uxml_padding", 0.0)
+	if p > 0.0:
+		out = (out + " padding-top: %s;" % px(p)).strip_edges()
 	var t := _translate_style(content.get_meta(&"uxml_translate", Vector2.ZERO))
 	if not t.is_empty():
 		out = (out + " " + t).strip_edges()
@@ -279,9 +282,12 @@ static func _num_text(v: float) -> String:
 ## overflows, set its range to the scrollable size and its dragger to the
 ## visible fraction, and keep the offset inside the new range. The
 ## horizontal Scroller leaves room for the vertical one. `size_of(el)`
-## returns the laid-out size of an element (null for no layout). Returns
-## true when the model changed (the caller lays out again).
-static func update_scroll_view(el: UxmlElement, size_of: Callable) -> bool:
+## returns the laid-out size of an element (null for no layout).
+## `bounds_of(content)`, when valid, returns the size of the content's
+## bounding box (Unity `contentContainer.boundingBox`, see bounding_size);
+## else the content size is used. Returns true when the model changed (the
+## caller lays out again).
+static func update_scroll_view(el: UxmlElement, size_of: Callable, bounds_of: Callable = Callable()) -> bool:
 	var vp := get_part(el, "viewport")
 	var content := get_part(el, "content")
 	var vs := get_part(el, "vertical-scroller")
@@ -294,6 +300,10 @@ static func update_scroll_view(el: UxmlElement, size_of: Callable) -> bool:
 		return false
 	var vpv: Vector2 = vsz
 	var cs: Vector2 = csz
+	if bounds_of.is_valid():
+		var bb = bounds_of.call(content)
+		if bb != null:
+			cs = bb
 	var scroll_w := cs.x - vpv.x
 	var scroll_h := cs.y - vpv.y
 	var vvis := scroller_visibility(el, "vertical")
@@ -321,6 +331,24 @@ static func update_scroll_view(el: UxmlElement, size_of: Callable) -> bool:
 	for sc in [vs, hs]:
 		changed = update_scroller(sc, size_of) or changed
 	return changed
+
+
+## Unity VisualElement.boundingBox of `content`, as a size: the content box
+## and the boxes of its children (margins excluded, translate ignored).
+## Unity also takes the boxes of deeper descendants that overflow their
+## parents; godot-uxml stops at the children, so a scroll after each
+## layout does not walk the whole content. `rect_of(el)` returns the
+## laid-out rect relative to the parent (null: not laid out).
+static func bounding_size(content: UxmlElement, rect_of: Callable) -> Variant:
+	var r = rect_of.call(content)
+	if r == null:
+		return null
+	var bb := Rect2(Vector2.ZERO, (r as Rect2).size)
+	for c in content.children:
+		var cr = rect_of.call(c)
+		if cr != null:
+			bb = bb.merge(cr)
+	return bb.size
 
 
 static func _set_scroller_state(sc: UxmlElement, _shown: bool, enabled: bool, high: float, factor: float) -> bool:
@@ -457,6 +485,12 @@ static func is_multi_column(el: UxmlElement) -> bool:
 	return el.local == "MultiColumnListView" or el.local == "MultiColumnTreeView"
 
 
+## virtualization-method="DynamicHeight": rows take the height of their
+## content (CollectionBehavior measures them).
+static func is_dynamic(el: UxmlElement) -> bool:
+	return _attr(el, "virtualization-method", "FixedHeight") == "DynamicHeight"
+
+
 static func item_height(el: UxmlElement) -> float:
 	var h := _num(el, "fixed-item-height", DEFAULT_ITEM_HEIGHT)
 	return DEFAULT_ITEM_HEIGHT if h <= 0.0 else h
@@ -524,7 +558,7 @@ static func _build_collection(el: UxmlElement) -> UxmlElement:
 
 ## One pooled row of a collection view, hidden until an item is bound.
 static func make_row(el: UxmlElement, slot: int) -> UxmlElement:
-	var h := item_height(el)
+	var h := -1.0 if is_dynamic(el) else item_height(el)
 	var row: UxmlElement
 	var item_classes := ["unity-collection-view__item"]
 	if is_tree(el):
@@ -625,7 +659,11 @@ static func clone(t: UxmlElement, at: UxmlElement) -> UxmlElement:
 	return c
 
 
+## The inline style of a row: the item height (none for DynamicHeight,
+## h < 0) and `display: none` for an unused row.
 static func row_style(h: float, visible: bool) -> String:
+	if h < 0.0:
+		return "" if visible else "display: none;"
 	return "height: %s;%s" % [px(h), "" if visible else " display: none;"]
 
 
@@ -1056,15 +1094,17 @@ static func _build_imgui(el: UxmlElement) -> UxmlElement:
 ## Unity's post-layout updates on the model for every ScrollView, Scroller
 ## and multi-column header under `root`. Returns true when the model
 ## changed (lay out again).
-static func after_layout(root: UxmlElement, size_of: Callable) -> bool:
+static func after_layout(root: UxmlElement, size_of: Callable, bounds_of: Callable = Callable()) -> bool:
 	var changed := false
 	for el in root.walk():
 		match el.local:
 			"ScrollView":
-				changed = update_scroll_view(el, size_of) or changed
+				changed = update_scroll_view(el, size_of, bounds_of) or changed
 			"Scroller":
 				if el.part_of == null or el.part_of.local != "ScrollView":
 					changed = update_scroller(el, size_of) or changed
+			"Tab":
+				changed = update_lone_tab(el, size_of) or changed
 			"MultiColumnListView", "MultiColumnTreeView":
 				var hc := get_part(el, "header")
 				if hc != null:
@@ -1072,6 +1112,21 @@ static func after_layout(root: UxmlElement, size_of: Callable) -> bool:
 					if s != null:
 						changed = update_columns(el, (s as Vector2).x) or changed
 	return changed
+
+
+## A Tab outside a TabView keeps its header. Unity lays the underline of
+## that header out as wide as the Tab, not as the header (measured:
+## ctl-tabview, a 400px underline under an 81px header): the underline
+## gets the width of the Tab. Returns true when the model changed.
+static func update_lone_tab(el: UxmlElement, size_of: Callable) -> bool:
+	var header := get_part(el, "header")
+	if header == null or not el.children.has(header):
+		return false
+	var ul := get_part(el, "header-underline")
+	var sz = size_of.call(el)
+	if ul == null or sz == null:
+		return false
+	return set_style(ul, "width: %s;" % px((sz as Vector2).x))
 
 
 ## Before UxmlParts.expand moves author children: the Column UxmlObjects
@@ -1136,7 +1191,7 @@ static func tree_ids(roots: Array, out: Dictionary = {}) -> Dictionary:
 ## (-1 hides the row). `info`: {depth, children, expanded} for tree rows.
 ## The made item's content is the bind callback's job.
 static func bind_row(el: UxmlElement, row: UxmlElement, index: int, selected: bool, info: Dictionary = {}) -> bool:
-	var h := item_height(el)
+	var h := -1.0 if is_dynamic(el) else item_height(el)
 	var changed := false
 	row.set_meta(META_ROW, index)
 	changed = set_style(row, row_style(h, index >= 0)) or changed
@@ -1193,6 +1248,18 @@ static func bind_text(row: UxmlElement, text: String) -> bool:
 
 ## The content container's height for `count` items (Unity's fixed-height
 ## virtualization sets it inline).
+## DynamicHeight: the content container is `height` high (-1: auto) with a
+## top padding of `padding` (Unity's contentHeight and contentPadding).
+static func content_extent(el: UxmlElement, height: float, padding: float) -> bool:
+	var sv := get_part(el, "scroll-view")
+	var content: UxmlElement = null if sv == null else get_part(sv, "content")
+	if content == null:
+		return false
+	content.set_meta(&"uxml_height", height)
+	content.set_meta(&"uxml_padding", padding)
+	return set_style(content, content_style(content))
+
+
 static func content_height(el: UxmlElement, count: int) -> bool:
 	var sv := get_part(el, "scroll-view")
 	if sv == null:

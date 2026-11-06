@@ -480,3 +480,81 @@ in `bench/ref/` follows three intentional changes (no ScrollView special
 case, a stretched container measured at the stretched width, the
 `overflow: scroll` cross-size rule) and now places `position: absolute`
 children, which the Scroller parts bring into the equivalence documents.
+
+## Unity fidelity (`unity/fidelity`)
+
+Method: `bench/bench.gd -- --quick` and `bench/workloads.gd`, with and
+without `-- --no-theme`, for the branch point and this branch. The runs
+alternate (base, branch) for each script and repeat twice; the table
+gives the median of the two medians. Ops that the branch does not change
+(`parse_uxml`, `parse_uss`) moved by up to 7 % between runs, so a
+difference of less than about 7 % is noise.
+
+| op (native core, ms, median) | base, theme | branch, theme | base, no theme | branch, no theme |
+| --- | ---: | ---: | ---: | ---: |
+| `bench`: load_document(big) full | 596 | 621 | 539 | 549 |
+| `bench`: set_class churn (card) | 19.2 | 20.5 | 17.1 | 18.3 |
+| `bench`: set_text + relayout | 18.0 | 18.4 | 15.5 | 17.2 |
+| `bench`: resize relayout | 16.9 | 19.3 | 15.4 | 18.0 |
+| `bench`: transition frame (width) | 15.9 | 16.8 | 15.3 | 16.4 |
+| `bench`: hud frame (8 labels + relayout) | 0.51 | 0.52 | 0.48 | 0.51 |
+| `workloads`: list1k load + first layout | 1725 | 1924 | 1192 | 1203 |
+| `workloads`: list1k update one row + relayout | 22.9 | 24.7 | 18.5 | 18.6 |
+| `workloads`: dialog typewriter char + relayout | 0.29 | 0.40 | 0.25 | 0.34 |
+| `workloads`: listview10k scroll 3 rows | 3.4 | 3.0 | 2.9 | 2.6 |
+| `workloads`: listview10k refresh_list | 3.0 | 2.5 | 2.8 | 2.1 |
+| geomean, `bench` (25 ops) | 1 | 1.055 | 1 | 1.042 |
+| geomean, `workloads` (17 ops) | 1 | 1.020 | 1 | 0.959 |
+
+Costs that stay, and their causes:
+
+- Wrapping Labels measure their max-content width (Unity's measure; see
+  [design.md](design.md)). A new text is shaped once more for that
+  width. The typewriter row (a wrapping paragraph in a `flex-grow` column
+  of a row) pays about 0.1 ms per character for this. The width is
+  cached for the text, so a layout without a text change does not pay.
+- Labels that are taller than their box get a fitted font (Unity draws
+  text that does not fit the box). The first layout of the 1,000-row
+  list fits 2,000 Labels (about +200 ms of 1.7 s, theme only: the
+  default theme gives these Labels a line taller than the row).
+- Resize of the big document: the measure bounds (Yoga AtMost) measure
+  some elements a second time when a bound applies, and the absolute
+  pixel-grid rule (a position is the rounded absolute edge minus the
+  rounded absolute edge of the parent) moves about 30 % more controls on
+  each resize. Native pass about +0.5 ms, placement about +0.4 ms, two
+  passes per resize.
+
+Fixes in this branch that took the first version back to these numbers
+(first version against base: `list1k` update 2.24×, typewriter 1.26×,
+`bench` relayouts 1.13 to 1.21×):
+
+- Bound thresholds: each measure records the largest bound that does not
+  change the result, so an unbounded measure answers for all bounds
+  above the threshold. Pure leaf measures are cached for the pass.
+- The max-content width of a wrapping Label is cached for its text
+  (`uxml_maxc` meta; per control in the native layout).
+- The unfitted line height of a fitted Label is cached (`uxml_unfit`
+  meta; per control in the native layout). It cost about 5 µs per Label
+  per pass (10 ms of the 1,000-row relayout).
+- A Label that stays taller than its box after the fit (Godot's line
+  floor) was fitted again on every layout: 2,000 GDScript calls per
+  relayout of the 1,000-row list. The placement now records the box
+  height and the control height of each fit and skips a fit with the
+  same two heights.
+- A Label held at that floor keeps its fit for a box that needs a larger
+  deficit. Before, six status Labels in boxes of 0 and 1 px changed
+  their font on each relayout (about 0.3 ms each).
+
+Harness changes in this branch:
+
+- `bench/equiv_runtime.gd` snapshots a `FontFile` by identity, not by
+  value. Every text control now has a FontVariation over the theme font,
+  and a snapshot by value copied the font data for each control and
+  step (several GB and hours for the big document).
+- `bench/ref/ref_flex_layout.gd` follows the measure bounds (Yoga
+  AtMost) and drops the earlier `overflow: scroll` cross-size rule, as
+  both layout paths do.
+- `bench/parity.gd` reads the scroll range from the content bounding box
+  (`bounds_of`), as the ScrollView does.
+- `tests/run_tests.gd` takes `-- --only=<text>` to run the tests whose
+  `suite.test` name contains the text.

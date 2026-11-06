@@ -379,10 +379,14 @@ func _reverse_main(el: UxmlElement) -> bool:
 ## width, margins and padding). border_w_hint, when >= 0, is the border-box
 ## width the element will actually get — the row case lets a wrapped label
 ## report its real height at the width the line assigned it.
+## (unity/fidelity) bx/by: Yoga's AtMost measure bounds, the border-box
+## space the container has for el (-1: none).
 func _measure(
 	el: UxmlElement,
 	avail: Vector2,
-	border_w_hint: float = -1.0
+	border_w_hint: float = -1.0,
+	bx: float = -1.0,
+	by: float = -1.0
 ) -> Vector2:
 	var w := _dim(el, "width", avail.x)
 	var h := _dim(el, "height", avail.y)
@@ -399,9 +403,19 @@ func _measure(
 			hint = maxf(0.0, border_w_hint - in_w)
 		elif w >= 0.0:
 			hint = maxf(0.0, w - in_w)
+		elif bx >= 0.0:
+			# (unity/fidelity) text lays out in the width the container has.
+			hint = maxf(0.0, bx - in_w)
 		var intr: Vector2 = _measurer.call(el, _styles.get(el, {}), hint)
-		bw = w if w >= 0.0 else intr.x + in_w
-		bh = h if h >= 0.0 else intr.y + in_h
+		# (unity/fidelity) Unity clamps a leaf measure to its bound.
+		var ix: float = intr.x
+		var iy: float = intr.y
+		if bx >= 0.0:
+			ix = minf(ix, maxf(0.0, bx - in_w))
+		if by >= 0.0:
+			iy = minf(iy, maxf(0.0, by - in_h))
+		bw = w if w >= 0.0 else ix + in_w
+		bh = h if h >= 0.0 else iy + in_h
 	else:
 		var cw := w - in_w if w >= 0.0 else -1.0
 		# (unity/controls-containers) Yoga measures a stretched container at
@@ -409,7 +423,15 @@ func _measure(
 		if cw < 0.0 and border_w_hint >= 0.0:
 			cw = maxf(0.0, border_w_hint - in_w)
 		var ch := h - in_h if h >= 0.0 else -1.0
-		var nat := _measure_content(el, Vector2(cw, ch))
+		# (unity/fidelity) The content bound: the content size, else the
+		# measure bound.
+		var lx := cw
+		if lx < 0.0 and bx >= 0.0:
+			lx = maxf(0.0, bx - in_w)
+		var ly := ch
+		if ly < 0.0 and by >= 0.0:
+			ly = maxf(0.0, by - in_h)
+		var nat := _measure_content(el, Vector2(cw, ch), lx, ly)
 		# Native chrome (e.g. a ScrollContainer's scrollbars) can floor the
 		# auto size, but an authored px/% always wins.
 		var chrome: Vector2 = _measurer.call(el, _styles.get(el, {}), cw)
@@ -417,16 +439,30 @@ func _measure(
 		bh = h if h >= 0.0 else maxf(nat.y, chrome.y) + in_h
 	# The border box can never be smaller than its own padding+border —
 	# the floor overrides explicit dims and max bounds alike (Yoga).
-	return Vector2(
-		maxf(
-			clampf(bw, _min_or(el, "min-width", avail.x, 0.0), _max_or(el, "max-width", avail.x)),
-			in_w
-		),
-		maxf(
-			clampf(bh, _min_or(el, "min-height", avail.y, 0.0), _max_or(el, "max-height", avail.y)),
-			in_h
-		)
+	var ox := maxf(
+		clampf(bw, _min_or(el, "min-width", avail.x, 0.0), _max_or(el, "max-width", avail.x)),
+		in_w
 	)
+	var oy := maxf(
+		clampf(bh, _min_or(el, "min-height", avail.y, 0.0), _max_or(el, "max-height", avail.y)),
+		in_h
+	)
+	if not kids.is_empty() and (bx >= 0.0 or by >= 0.0) and _str(el, "overflow", "visible") == "scroll":
+		# (unity/fidelity) Yoga: an auto-sized scroll box measured AtMost
+		# stays inside its bound on its cross axis, on its main axis only
+		# when the box and one of its children grow.
+		var row := _is_row(el)
+		var main_clamp := false
+		if _num(el, "flex-grow", 0.0) > 0.0:
+			for k in kids:
+				if _num(k, "flex-grow", 0.0) > 0.0:
+					main_clamp = true
+					break
+		if bx >= 0.0 and w < 0.0 and border_w_hint < 0.0 and (main_clamp or not row):
+			ox = maxf(minf(ox, bx), in_w)
+		if by >= 0.0 and h < 0.0 and (main_clamp or row):
+			oy = maxf(minf(oy, by), in_h)
+	return Vector2(ox, oy)
 
 
 func _min_or(el: UxmlElement, name: String, base: float, fallback: float) -> float:
@@ -439,7 +475,8 @@ func _max_or(el: UxmlElement, name: String, base: float) -> float:
 
 
 ## Natural content-box size of a container's children (no padding/border).
-func _measure_content(el: UxmlElement, cavail: Vector2) -> Vector2:
+## (unity/fidelity) lx/ly bound the content (Yoga AtMost; -1: none).
+func _measure_content(el: UxmlElement, cavail: Vector2, lx: float = -1.0, ly: float = -1.0) -> Vector2:
 	var kids := _flex_children(el)
 	if kids.is_empty():
 		return Vector2.ZERO
@@ -451,9 +488,17 @@ func _measure_content(el: UxmlElement, cavail: Vector2) -> Vector2:
 	var gap_c := _gap(el, "row-gap" if row else "column-gap", cavail[cross])
 	var lines: Array = []
 	var cur := {"main": 0.0, "cross": 0.0, "n": 0}
+	var wl: float = lx if row else ly
+	if _str(el, "overflow", "visible") == "scroll":
+		if row:
+			lx = -1.0
+		else:
+			ly = -1.0
 	for child in kids:
-		var msz := _measure(child, cavail)
 		var m := _margins(child, cavail.x)
+		var msz := _measure(child, cavail, -1.0,
+			-1.0 if lx < 0.0 else maxf(0.0, lx - m["l"] - m["r"]),
+			-1.0 if ly < 0.0 else maxf(0.0, ly - m["t"] - m["b"]))
 		var o_main: float
 		var o_cross: float
 		if row:
@@ -463,8 +508,8 @@ func _measure_content(el: UxmlElement, cavail: Vector2) -> Vector2:
 			o_main = msz.y + m["t"] + m["b"]
 			o_cross = msz.x + m["l"] + m["r"]
 		if (
-			wrap and cavail[main] >= 0.0 and cur["n"] > 0
-			and cur["main"] + gap_m + o_main > cavail[main] + EPS
+			wrap and wl >= 0.0 and cur["n"] > 0
+			and cur["main"] + gap_m + o_main > wl + EPS
 		):
 			lines.append(cur)
 			cur = {"main": 0.0, "cross": 0.0, "n": 0}
@@ -579,12 +624,19 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	var gap_c := _gap(el, "row-gap" if row else "column-gap", ac)
 	var size_prop := "width" if row else "height"
 	var cross_prop := "height" if row else "width"
+	# (unity/fidelity) Measure bounds: the area less the item's margins; a
+	# scroll container leaves its main axis unbounded.
+	var sc := _str(el, "overflow", "visible") == "scroll"
+	var bnd_x: float = -1.0 if (sc and row) else area.size.x
+	var bnd_y: float = -1.0 if (sc and not row) else area.size.y
 
 	# Hypothetical main sizes, with min/max already applied.
 	var items: Array = []
 	for child in kids:
 		var m := _margins(child, area.size.x)
-		var nat := _measure(child, area.size, _stretch_hint(child, row, align_items, ac, m))
+		var nat := _measure(child, area.size, _stretch_hint(child, row, align_items, ac, m),
+			-1.0 if bnd_x < 0.0 else maxf(0.0, bnd_x - m["l"] - m["r"]),
+			-1.0 if bnd_y < 0.0 else maxf(0.0, bnd_y - m["t"] - m["b"]))
 		var hyp: float
 		var basis := _len(child, "flex-basis", am)
 		if not basis["auto"]:
@@ -660,9 +712,12 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 			else:
 				# For a row item the final main size is now known — measuring
 				# with it lets wrapped text report the height it really needs.
+				var mi: Dictionary = it["m"]
 				nat = _measure(
 					it["el"], area.size,
-					it["main"] if row else -1.0
+					it["main"] if row else -1.0,
+					-1.0 if bnd_x < 0.0 else maxf(0.0, bnd_x - mi["l"] - mi["r"]),
+					-1.0 if bnd_y < 0.0 else maxf(0.0, bnd_y - mi["t"] - mi["b"])
 				)[cross]
 			# Cross sizes floor at the cross-axis padding+border total the
 			# same way the main axis does — an explicit dim or max bound
@@ -781,11 +836,9 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 					maxf(_max_or(it["el"], "max-" + cross_prop, ac), smin)
 				)
 			else:
+				# (unity/fidelity) A scroll box keeps inside its line through
+				# the measure bound (see _measure).
 				it["cross"] = it["nat_cross"]
-				# (unity/controls-containers) Yoga: an overflow: scroll box
-				# sized by its content stays inside a definite cross size.
-				if ac >= 0.0 and _str(it["el"], "overflow", "visible") == "scroll" and _dim(it["el"], cross_prop, ac) < 0.0:
-					it["cross"] = maxf(minf(it["cross"], ac - mct), it["in_cross"])
 			var mc_start: float = it["m"]["t" if row else "l"]
 			var mc_end: float = it["m"]["b" if row else "r"]
 			match al:

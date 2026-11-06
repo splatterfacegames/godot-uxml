@@ -90,6 +90,12 @@ signal tab_reordered(element_name, from_index, to_index)
 ## The editor skin of the editor theme: "dark" (Unity's default) or "light".
 @export_enum("dark", "light") var editor_skin: String = "dark"
 
+## Another document whose author stylesheets also style this document
+## (set before the load). UxmlPopupMenu uses it: Unity attaches a dropdown
+## menu under the root of the document, so the author sheets of the
+## document reach the menu.
+var shared_sheets: UxmlDocumentModel = null
+
 ## Every diagnostic produced by the last load: parse/cascade warnings plus
 ## runtime `unsupported-value`/`duplicate-name`/`missing-file` entries.
 var diagnostics: Array = []
@@ -293,6 +299,44 @@ func load_document(path: String, root: String = "") -> int:
 	return OK
 
 
+## The author stylesheets of `src` that style its whole document (no scope,
+## or scoped to its root) style this document too, scoped to this root, in
+## the same order. The sheets keep their indices, so `@import` references
+## between them stay valid; theme sheets are not copied.
+func _adopt_sheets(src: UxmlDocumentModel) -> void:
+	if src == null or src == _doc:
+		return
+	var base := _doc.sheets.size()
+	for sh in src.sheets:
+		var copy: Dictionary = sh.duplicate()
+		copy["index"] = base + int(sh["index"])
+		copy["scope"] = _doc.root
+		copy["items"] = _reindex_items(sh["items"], base)
+		_doc.sheets.append(copy)
+	for r in src.style_roots:
+		var sh: Dictionary = src.sheets[int(r["sheet"])]
+		if sh.get("theme", false):
+			continue
+		if r["scope"] != null and r["scope"] != src.root:
+			continue
+		_doc.style_roots.append({"sheet": base + int(r["sheet"]), "scope": _doc.root})
+
+
+## Sheet items with `@import` references moved by `base` sheets.
+static func _reindex_items(items: Array, base: int) -> Array:
+	if base == 0:
+		return items
+	var out: Array = []
+	for item in items:
+		if item is Dictionary and item.has("resolved_sheet"):
+			var it: Dictionary = item.duplicate()
+			it["resolved_sheet"] = int(item["resolved_sheet"]) + base
+			out.append(it)
+		else:
+			out.append(item)
+	return out
+
+
 ## Load a document from UXML text instead of a file. `virtual_path` names
 ## the document for diagnostics and for relative references (it need not
 ## exist). Used for generated documents such as a dropdown menu.
@@ -304,6 +348,8 @@ func load_source(uxml: String, virtual_path: String = "res://__uxml_source__.uxm
 	_resolver = UxmlResourceResolver.new(effective_root)
 	_doc = UxmlLoader.load_source(uxml, virtual_path, _resolver)
 	_effective_root = effective_root
+	if shared_sheets != null:
+		_adopt_sheets(shared_sheets)
 	UxmlTheme.attach(_doc, theme_path, editor_theme, editor_skin)
 	_index()
 	_restyle_now()
@@ -609,6 +655,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			_resolver, _doc.path, _doc.source, _rt_warnings
 		)
 		_applier.element_paths = _doc.element_paths
+		_applier.unity_line_metrics = theme_path == UxmlTheme.DEFAULT
 	var need_layout := _force_layout or _full_apply or _unsettled
 	var applied: Array = []
 	var fresh := 0  # applied[0..fresh) changed this pass; the rest are re-applies
@@ -812,8 +859,11 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 	if ((c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
 			and content_w >= 0.0 and not c.has_meta(&"uxml_autosize")):
 		# Label reports its wrapped height from its current width — hand it
-		# the width the line assigned so the measurement is honest.
-		c.size.x = content_w
+		# the width the line assigned so the measurement is honest. The
+		# control is as wide as the content plus its USS padding and border
+		# (the placement gives it that width too), so the text wraps at the
+		# content width.
+		c.size.x = content_w + _hpad(c)
 	var ms: Vector2
 	if _applier != null and _applier.auto_sizes > 0 and c.has_meta(&"uxml_autosize"):
 		# -unity-text-auto-size: the size at the font size that fits the
@@ -840,6 +890,17 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 		c.set(&"clip_text", true)
 	else:
 		ms = c.get_combined_minimum_size()
+	if c is Label:
+		if c.autowrap_mode != TextServer.AUTOWRAP_OFF and not c.has_meta(&"uxml_autosize"):
+			# Unity measures wrapping text at its max-content width: the
+			# longest paragraph. The layout clamps the measure to the space
+			# the Label has (Yoga AtMost).
+			ms.x = UxmlStyleApplier.label_max_content(c)
+		if _applier != null and not _applier.fitted.is_empty() and _applier.fitted.has(c):
+			# A Label fitted into a box shorter than its line measures as
+			# without the fit (UxmlStyleApplier.fit_label; the native
+			# measurer reads the `uxml_fit` meta that fit_label sets with it).
+			ms.y = UxmlStyleApplier.unfitted_height(c)
 	# A USS stylebox carries padding+border as content margins, which the
 	# minimum size already counts — the flex pass adds the same insets on
 	# top of the intrinsic size, so take them back out here. Only styleboxes
@@ -863,8 +924,19 @@ func _volatile_measures() -> Dictionary:
 		var c: Control = _controls[el]
 		if ((c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
 				and not c.has_meta(&"uxml_autosize")):
-			out[el] = c.size.x
+			out[el] = c.size.x - _hpad(c)
 	return out
+
+
+## The horizontal USS padding and border a control's stylebox carries
+## (`uxml_margins`): a wrapping Label is measured at its content width.
+static func _hpad(c: Control) -> float:
+	if c.has_theme_stylebox_override("normal"):
+		var sb: StyleBox = c.get_theme_stylebox("normal")
+		if sb != null and sb.has_meta("uxml_margins"):
+			var m: Array = sb.get_meta("uxml_margins")
+			return m[0] + m[2]
+	return 0.0
 
 
 ## Best-fit text elements: their measure reads the width hint although they
@@ -882,7 +954,8 @@ func _autosize_elements() -> Dictionary:
 ## Current width of a volatile element's control (after the engine clamps
 ## a measure-time size write).
 func _volatile_width(el: UxmlElement) -> float:
-	return (_controls[el] as Control).size.x
+	var c: Control = _controls[el]
+	return c.size.x - _hpad(c)
 
 
 ## Run the flex pass for `host` without touching controls' placement:
@@ -985,6 +1058,20 @@ func _place_control(el: UxmlElement) -> void:
 		UxmlStyleApplier.autosize_place(c, cs)
 	c.position = r.position
 	c.size = r.size
+	if _applier != null and c is Label:
+		# Godot floors a Label at one text line; Unity's box can be shorter.
+		# A one-line Label taller than its box is fitted; a fitted Label is
+		# fitted again for a new height (the native placement does the same).
+		# A Label fitted for the same box height that kept its height since
+		# (UxmlStyleApplier.fit_seen) is not fitted again.
+		var fit_h = _applier.fitted.get(c)
+		var floored: bool = c.size.y > r.size.y + 0.01
+		if ((floored and (fit_h != null or c.autowrap_mode == TextServer.AUTOWRAP_OFF))
+				or (fit_h != null and fit_h != r.size.y)):
+			var seen = _applier.fit_seen.get(c)
+			if seen == null or seen[0] != r.size.y or seen[1] != c.size.y:
+				_applier.fit_label(c, r.size)
+				_applier.fit_seen[c] = [r.size.y, c.size.y]
 	# Internal chrome the flex pass does not position lives inside the
 	# element's content box: field caption+native shift by the resolved
 	# padding/border insets, and an Image's anchored TextureRect gets
@@ -1171,10 +1258,11 @@ func _prepare_collections() -> bool:
 					_doc.source, el.open_tag_start, _doc.path))
 				el.attributes = el.attributes.filter(func(a): return a["name"] != "fixed-item-height")
 		var vm = el.get_attribute("virtualization-method")
-		if vm != null and String(vm) != "FixedHeight":
+		if vm != null and not String(vm) in ["FixedHeight", "DynamicHeight"]:
 			_rt_warnings.append(UxmlDiagnostic.make("unsupported-value",
-				'virtualization-method="%s" is not supported; FixedHeight used (rows keep fixed-item-height)' % vm,
+				'virtualization-method="%s" is not FixedHeight or DynamicHeight; FixedHeight used' % vm,
 				_doc.source, el.open_tag_start, _doc.path))
+			el.attributes = el.attributes.filter(func(a): return a["name"] != "virtualization-method")
 		if el.has_attribute("item-template"):
 			el.set_meta(&"uxml_item_template", _load_template(el, String(el.get_attribute("item-template"))))
 		var k := 0
@@ -1280,10 +1368,12 @@ func refresh_list(list_name: String) -> void:
 		b.refresh(true)
 
 
-## The pooled rows of a list (for games that want to style them directly).
+## The rows of a list that are in use (for games that want to style them
+## directly): Unity's row count for the viewport, floor(viewport / item
+## height) + 2. Rows past the item count are in the list, unbound.
 func get_list_rows(list_name: String) -> Array:
 	var b = _behavior_of(list_name, "set_source")
-	return [] if b == null else b._rows
+	return [] if b == null else b.active_rows()
 
 
 ## TreeView / MultiColumnTreeView data: `roots` are Dictionaries {id, data,

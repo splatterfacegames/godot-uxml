@@ -616,3 +616,75 @@ func test_aspect_ratio() -> void:
 	_vec_eq(_rect(r, "b"), Rect2(80, 0, 220, 123.75), "grown width 220 at 16:9 gives height 123.75")
 	_vec_eq(_rect(r, "c"), Rect2(0, 100, 90, 30), "height 30 at 3:1 gives width 90")
 	h.check(_warn_kinds(r).has("unsupported-value"), "an invalid ratio is diagnosed: %s" % [_warn_kinds(r)])
+
+
+# Yoga's AtMost measure (Unity: TextElement clamps its measure to the space
+# it has, TextUtilities.PostProcessMeasuredSize). A text leaf in a 20px row
+# measures at most 20 - margins high (ctl-treeview: a Label 14px high), and
+# at most as wide as its container (ctl-basefield).
+func test_measure_bound_clamps_leaves() -> void:
+	var r := _layout(
+		'<ui:VisualElement name="row" class="row"><ui:VisualElement name="t" class="t"/></ui:VisualElement>'
+		+ '<ui:VisualElement name="col" class="col"><ui:VisualElement name="w" class="w"/></ui:VisualElement>',
+		'.row { flex-direction: row; width: 200px; height: 20px; align-items: center; }'
+		+ '.t { padding: 4px 2px 4px 1px; margin: 4px 4px 2px 2px; }'
+		+ '.col { width: 150px; align-items: flex-start; }'
+		+ '.w { min-width: 20px; }',
+		Vector2(400, 300), {"t": Vector2(45, 17), "w": Vector2(238, 17)}
+	)
+	_vec_eq(_rect(r, "t"), Rect2(2, 4, 48, 14), "the text height is clamped to 20 - 6 margins")
+	_vec_eq(_rect(r, "w"), Rect2(0, 0, 150, 17), "the text width is clamped to the column width")
+
+
+# An auto-sized container measures its children at most as wide as itself:
+# a row-wrap grid two levels down wraps at the host width (inventory).
+func test_measure_bound_wraps_nested_grid() -> void:
+	var cells := ""
+	for i in 6:
+		cells += '<ui:VisualElement class="cell"/>'
+	var r := _layout(
+		'<ui:VisualElement name="outer" class="outer"><ui:VisualElement name="grid" class="grid">%s</ui:VisualElement></ui:VisualElement>' % cells,
+		'.outer { align-self: flex-start; }'
+		+ '.grid { flex-direction: row; flex-wrap: wrap; padding: 8px; }'
+		+ '.cell { width: 84px; height: 84px; margin: 4px; }',
+		Vector2(400, 300)
+	)
+	_vec_eq(_rect(r, "grid"), Rect2(0, 0, 384, 200), "four cells per line, two lines")
+	_vec_eq(_rect(r, "outer"), Rect2(0, 0, 384, 200), "the outer box takes the wrapped size")
+
+
+# overflow: scroll: Yoga keeps an auto-sized scroll box inside its bound on
+# its cross axis (a row-wrap content container is as tall as the
+# viewport), not on its main axis when nothing grows (a column content
+# container keeps its content height).
+func test_scroll_box_measure_bound() -> void:
+	var r := _layout(
+		'<ui:VisualElement name="vp" class="vp"><ui:VisualElement name="rw" class="rw">'
+		+ '<ui:VisualElement class="big"/><ui:VisualElement class="big"/></ui:VisualElement></ui:VisualElement>'
+		+ '<ui:VisualElement name="vp2" class="vp"><ui:VisualElement name="cl" class="cl">'
+		+ '<ui:VisualElement class="big"/><ui:VisualElement class="big"/></ui:VisualElement></ui:VisualElement>',
+		'.vp { height: 100px; width: 120px; }'
+		+ '.rw { overflow: scroll; flex-direction: row; flex-wrap: wrap; flex-shrink: 0; }'
+		+ '.cl { overflow: scroll; flex-shrink: 0; }'
+		+ '.big { width: 100px; height: 80px; }',
+		Vector2(400, 300)
+	)
+	_vec_eq(_rect(r, "rw"), Rect2(0, 0, 120, 100), "row-wrap scroll box: cross size clamped to 100")
+	_vec_eq(_rect(r, "cl"), Rect2(0, 0, 120, 160), "column scroll box: main size keeps 160")
+
+
+# Unity rounds positions from the absolute edges (inventory: a Scroller
+# button at 152.47 under a parent at 35.29 lands at 153, abs 188).
+func test_pixel_grid_absolute_edges() -> void:
+	var r := _layout(
+		'<ui:VisualElement name="a" class="a"/><ui:VisualElement name="p" class="p">'
+		+ '<ui:VisualElement class="s"/><ui:VisualElement name="c" class="c"/></ui:VisualElement>',
+		'.a { height: 35.3px; } .p { height: 200px; } .s { height: 152.47px; } .c { height: 10px; }',
+		Vector2(400, 300)
+	)
+	var rounded := UxmlFlexLayout.round_to_pixel_grid(r["doc"].root, r["rects"])
+	var p: UxmlElement = r["doc"].find_by_name("p")
+	var c: UxmlElement = r["doc"].find_by_name("c")
+	h.eq((rounded[p] as Rect2).position.y, 35.0, "p at 35")
+	h.eq((rounded[c] as Rect2).position.y, 153.0, "c at round(187.77) - round(35.3) = 153")
+	h.eq((rounded[c] as Rect2).size.y, 10.0, "c keeps its size")

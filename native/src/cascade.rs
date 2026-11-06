@@ -1562,6 +1562,9 @@ impl UxmlNativeCascade {
             auto_size: None,
             fields: ks.iter().map(|&b| b & 2 != 0).collect(),
             texrects,
+            maxc: std::cell::RefCell::new(vec![None; ks.len()]),
+            maxc_on: std::cell::Cell::new(false),
+            unfit: std::cell::RefCell::new(vec![None; ks.len()]),
         });
         self.placement = crate::layout::Placement::default();
     }
@@ -1610,7 +1613,26 @@ impl UxmlNativeCascade {
             return VarArray::new();
         };
         self.recs.refresh(c);
+        // Re-applied controls may have a new font, size or stylebox: their
+        // max-content widths are measured again.
+        {
+            let mut mc = io.maxc.borrow_mut();
+            let mut uf = io.unfit.borrow_mut();
+            if force_all {
+                mc.iter_mut().for_each(|e| *e = None);
+                uf.iter_mut().for_each(|e| *e = None);
+            } else {
+                for &k in force.as_slice() {
+                    if k >= 0 && (k as usize) < mc.len() {
+                        mc[k as usize] = None;
+                        uf[k as usize] = None;
+                    }
+                }
+            }
+        }
+        io.maxc_on.set(true);
         let out = crate::layout::Pass::new(c, io, &self.recs.recs, scroll_bar_width, warned, warnings).run(host);
+        io.maxc_on.set(false);
         let changed = match &self.placement.last {
             Some(prev) => prev.rects != out.rects,
             None => true,

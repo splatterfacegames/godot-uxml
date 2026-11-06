@@ -12,6 +12,7 @@ const FIXTURES := "res://tests/fixtures"
 var _checks := 0
 var _failures := 0
 var _current := ""
+var _only := ""
 
 
 func _initialize() -> void:
@@ -49,6 +50,10 @@ func _initialize() -> void:
 			continue
 		suites.append([cls.new(self), entry[1]])
 
+	# `-- --only=<text>`: run the tests whose "suite.test" name contains it.
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--only="):
+			_only = arg.substr(7)
 	var test_count := 0
 	for pair in suites:
 		var suite = pair[0]
@@ -56,7 +61,7 @@ func _initialize() -> void:
 		var names: Array = []
 		for m in suite.get_method_list():
 			var n: String = m["name"]
-			if n.begins_with("test_"):
+			if n.begins_with("test_") and (_only.is_empty() or ("%s.%s" % [tag, n]).contains(_only)):
 				names.append(n)
 		names.sort()
 		for n in names:

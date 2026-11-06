@@ -1105,8 +1105,12 @@ func test_list_view_virtualization() -> void:
 	await h.process_frame
 	await h.process_frame
 	var rows: Array = doc.get_list_rows("items")
-	h.check(rows.size() >= 13 and rows.size() < 200,
-		"pool covers the viewport, not the item count (%d rows)" % rows.size())
+	# Updated with unity/fidelity: the rows in use follow the viewport as in
+	# Unity's FixedHeight Resize, floor(viewport / item height) + 2.
+	var lsv: UxmlElement = UxmlContainerParts.get_part(doc.get_element_model("items"), "scroll-view")
+	var lvp: Control = doc._controls[UxmlContainerParts.get_part(lsv, "viewport")]
+	h.eq(rows.size(), int(floor(lvp.size.y / 24.0)) + 2,
+		"rows cover the viewport, not the item count (%d rows)" % rows.size())
 	h.eq(_warn_kinds(doc).has("unsupported-control"), false, "ListView is a known control")
 	h.eq(_warn_kinds(doc).has("duplicate-name"), false, "pooled rows do not report duplicate names")
 	var r0: UxmlListRow = rows[0]
