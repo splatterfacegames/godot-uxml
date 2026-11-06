@@ -297,6 +297,8 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 ## _BOX_KEYS at its last apply, the box _stylebox built from them (or
 ## null), that box's uxml_margins as built].
 var _box_memo: Dictionary = {}
+## The box of a Button without a USS box.
+static var _NO_BOX := StyleBoxEmpty.new()
 ## The style properties _stylebox reads.
 const _BOX_KEYS := ["background-color",
 	"border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
@@ -374,6 +376,11 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 				sb = _stylebox(style, el)
 				_box_memo[c] = [inputs, sb, null if sb == null else (sb.get_meta("uxml_margins") as Array).duplicate()]
 		if not keep:
+			# A Button without a USS box draws none (Unity's RepeatButton and
+			# `all: initial` draw no box): not Godot's theme box, whose
+			# content margins would also pad the text.
+			if sb == null and c is BaseButton:
+				sb = _NO_BOX
 			for slot in slots:
 				if sb != null:
 					c.add_theme_stylebox_override(slot, sb)
@@ -1134,6 +1141,72 @@ func fit_label(c: Label, want: Vector2) -> void:
 	c.size = want
 
 
+## Godot floors a Control at its minimum size, and a Button's minimum is
+## its text plus its stylebox's content margins (the USS border and
+## padding). Unity draws a Button's text over a box that is too small for
+## it, centred in the content box (measured: bench/pixels.py, a 30px
+## Button with 10px padding and a 17px line). When the layout gives a
+## Button less than that, its content margins shrink on that axis so the
+## Button takes the laid-out size: on the vertical axis around the
+## content box's centre (Godot centres a Button's text vertically), on the
+## horizontal axis by the text alignment. The text then sits where Unity
+## draws it; the box draws at the laid-out size. The margins (and the
+## `uxml_margins` meta the measurers subtract) are put back when the box
+## is large enough again. `start` and `end` are the element's insets.
+## Called by both placements after the inset hook. Returns whether the
+## Button is fitted (`uxml_bfit`).
+func fit_button(c: Button, want: Vector2, start: Vector2, end: Vector2) -> bool:
+	var sb := c.get_theme_stylebox(&"normal")
+	if sb == null or not c.has_theme_stylebox_override(&"normal"):
+		return false
+	var cur := Vector2(sb.content_margin_left + sb.content_margin_right,
+		sb.content_margin_top + sb.content_margin_bottom)
+	var text := c.get_minimum_size() - cur
+	var m := [start.x, start.y, end.x, end.y]  # left, top, right, bottom
+	if want.y < start.y + end.y + text.y - 0.01:
+		var top := clampf(start.y + (want.y - start.y - end.y - text.y) * 0.5, 0.0, start.y)
+		m[1] = top
+		m[3] = clampf(want.y - text.y - top, 0.0, end.y)
+	if not c.clip_text and want.x < start.x + end.x + text.x - 0.01:
+		var free := want.x - start.x - end.x - text.x
+		var left := start.x
+		var align = c.get(&"alignment")
+		if align == null or int(align) == HORIZONTAL_ALIGNMENT_CENTER:
+			left = start.x + free * 0.5
+		elif int(align) == HORIZONTAL_ALIGNMENT_RIGHT:
+			left = start.x + free
+		left = clampf(left, 0.0, start.x)
+		m[0] = left
+		m[2] = clampf(want.x - text.x - left, 0.0, end.x)
+	var fitted: bool = m != [start.x, start.y, end.x, end.y]
+	if not fitted and not c.has_meta(&"uxml_bfit"):
+		return false
+	var seen := {}
+	for slot in _stylebox_slots(c):
+		if not c.has_theme_stylebox_override(slot):
+			continue
+		var s := c.get_theme_stylebox(slot)
+		if s == null or seen.has(s):
+			continue
+		seen[s] = true
+		if s.content_margin_left != m[0]:
+			s.content_margin_left = m[0]
+		if s.content_margin_top != m[1]:
+			s.content_margin_top = m[1]
+		if s.content_margin_right != m[2]:
+			s.content_margin_right = m[2]
+		if s.content_margin_bottom != m[3]:
+			s.content_margin_bottom = m[3]
+		s.set_meta("uxml_margins", [m[0], m[1], m[2], m[3]])
+	if fitted:
+		c.set_meta(&"uxml_bfit", true)
+	else:
+		c.remove_meta(&"uxml_bfit")
+	c.update_minimum_size()
+	c.size = want
+	return fitted
+
+
 ## The height of a one-line Label with the font it has without fit_label:
 ## one line of that font plus the stylebox margins. fit_label and both
 ## measurers use it, so neither depends on when Godot updates the minimum
@@ -1549,7 +1622,9 @@ func _apply_text_layout(c: Control, style: Dictionary, el: UxmlElement) -> void:
 		c.horizontal_alignment = hv.x if has_align else int(c.get_meta("uxml_halign", 0))
 		c.vertical_alignment = hv.y if has_align else int(c.get_meta("uxml_valign", 0))
 	elif c is Button and not c is OptionButton:
-		c.alignment = hv.x if has_align else int(c.get_meta("uxml_halign", 0))
+		# Unity's initial -unity-text-align is upper-left (a Button's theme
+		# rule sets middle-center; a RepeatButton has none).
+		c.alignment = hv.x if has_align else HORIZONTAL_ALIGNMENT_LEFT
 	elif c is LineEdit:
 		c.alignment = hv.x if has_align else int(c.get_meta("uxml_halign", 0))
 	if c is Label or c is RichTextLabel:

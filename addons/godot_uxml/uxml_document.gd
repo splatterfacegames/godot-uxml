@@ -1011,8 +1011,27 @@ func _compute_layout(host: Vector2) -> Dictionary:
 		 # _measure_leaf only reads its width hint for wrapping Labels
 		 # (the volatile set); every other measure is hint-independent.
 		 "hint_free": true,
+		 "text_controls": _text_controls(),
 		 "pixel_grid": pixel_grid}
 	)
+
+
+## Elements with children whose control draws text (Label, RichTextLabel,
+## Button): the layout does not measure their text (Unity measures text on
+## leaves only; the native layout checks the same controls). Kept until
+## the next load.
+var _text_parents = null
+
+
+func _text_controls() -> Dictionary:
+	if _text_parents == null or (_text_parents as Dictionary).get(&"_of") != _doc:
+		var out := {&"_of": _doc}
+		for el in _controls:
+			var c = _controls[el]
+			if not (el as UxmlElement).children.is_empty() and (c is Label or c is RichTextLabel or c is Button):
+				out[el] = true
+		_text_parents = out
+	return _text_parents
 
 
 func _native_layout() -> bool:
@@ -1125,6 +1144,10 @@ func _place_control(el: UxmlElement) -> void:
 		# insets (percentage padding included) the box layout used.
 		if _applier != null:
 			_applier.apply_resolved_insets(c, start, end)
+			# A Button floored at its minimum size gets content margins
+			# that fit its box (the native placement does the same).
+			if c is Button and (c.size != r.size or c.has_meta(&"uxml_bfit")):
+				_applier.fit_button(c, r.size, start, end)
 
 
 # ---------------------------------------------------------------------------

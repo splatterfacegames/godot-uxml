@@ -351,6 +351,9 @@ pub struct Placement {
     /// call and the control height after it; a forced (re-applied)
     /// placement drops it.
     fit_seen: Vec<Option<(f32, f32)>>,
+    /// Buttons fitted by UxmlStyleApplier.fit_button at their last
+    /// placement.
+    bfit: Vec<bool>,
 }
 
 impl Placement {
@@ -469,6 +472,24 @@ impl Placement {
                     a.call("apply_resolved_insets", &[c.to_variant(), start.to_variant(), end.to_variant()]);
                 }
             }
+            // UxmlDocument._place_control: a Button floored at its minimum
+            // size gets content margins that fit its box
+            // (UxmlStyleApplier.fit_button); a fitted Button is fitted again
+            // for every placement.
+            if let Some(a) = applier {
+                if self.bfit.len() != io.controls.len() {
+                    self.bfit = vec![false; io.controls.len()];
+                }
+                if (c.get_size() != r.size || self.bfit[i]) && c.is_class("Button") {
+                    let mut a = a.clone();
+                    let fitted = a.call("fit_button", &[c.to_variant(), r.size.to_variant(), start.to_variant(), end.to_variant()]);
+                    self.bfit[i] = fitted.try_to::<bool>().unwrap_or(false);
+                    // fit_button sets the stylebox margins (uxml_margins).
+                    if let Some(e) = io.margins.borrow_mut().get_mut(i) {
+                        *e = None;
+                    }
+                }
+            }
         }
         self.hooked[i] = Some((start, end));
     }
@@ -542,6 +563,9 @@ pub struct Pass<'a> {
     /// Per-pass memo: the control carries `uxml_clip_text` (metas do not
     /// change during a pass).
     cliptext_m: Vec<Option<bool>>,
+    /// Whether element i's control draws text (Label, RichTextLabel,
+    /// Button): Unity measures text only on leaves.
+    textish_m: Vec<Option<bool>>,
     /// Some element is best-fit text; per-pass memo of hint_sub.
     any_hinted: bool,
     hs_m: Vec<Option<bool>>,
@@ -621,6 +645,7 @@ impl<'a> Pass<'a> {
             meas_m: (0..n).map(|_| vec![]).collect(),
             margins_m: vec![None; n],
             cliptext_m: vec![None; n],
+            textish_m: vec![None; n],
             fit_m: vec![None; n],
             any_hinted,
             hs_m: vec![None; n],
@@ -1380,7 +1405,18 @@ impl<'a> Pass<'a> {
                 ly = gmax(0.0, by - in_h);
             }
             let (nat, mtx, mty) = self.measure_content(i, Vector2::new(f(cw), f(ch)), lx, ly);
-            let chrome = self.measure_call(i, cw);
+            // UxmlDocument._measure_leaf: a text control with children
+            // measures nothing (Unity measures text on leaves only).
+            let textish = match self.textish_m[i] {
+                Some(t) => t,
+                None => {
+                    let t = self.io.labels[i].is_some() || self.io.rich[i].is_some()
+                        || self.io.controls[i].as_ref().is_some_and(|c| c.is_class("Button"));
+                    self.textish_m[i] = Some(t);
+                    t
+                }
+            };
+            let chrome = if textish { Vector2::ZERO } else { self.measure_call(i, cw) };
             bw = if w >= 0.0 { w } else { gmax(d(nat.x), d(chrome.x)) + in_w };
             bh = if h >= 0.0 { h } else { gmax(d(nat.y), d(chrome.y)) + in_h };
             if w < 0.0 && hint < 0.0 && mtx > NO_BOUND {

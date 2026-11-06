@@ -118,6 +118,43 @@ func _unity_project_data() -> void:
 	UxmlInputParts.register_enum("DumpFlags", {"None": 0, "Alpha": 1, "Beta": 2, "Gamma": 4, "AlphaBeta": 3})
 
 
+## The Godot stand-ins of the ScriptableObjects that the editor cases bind
+## (as bench/parity.gd).
+const BIND_SCRIPTS := {
+	"DumpTarget": """extends Resource
+enum DumpEnum { First, SecondValue, Third }
+@export var intValue: int = 42
+@export var floatValue: float = 1.5
+@export var stringValue: String = "hello"
+@export var boolValue: bool = true
+@export var colorValue: Color = Color(1, 0.5, 0, 1)
+@export var vector2Value: Vector2 = Vector2(1, 2)
+@export var vector3Value: Vector3 = Vector3(1, 2, 3)
+@export var enumValue: DumpEnum = DumpEnum.SecondValue
+@export_flags("Alpha", "Beta", "Gamma") var flagsValue: int = 5
+@export var curveValue: Curve = Curve.new()
+@export var gradientValue: Gradient = Gradient.new()
+@export var textureValue: Texture2D
+@export_flags_3d_physics var layerMaskValue: int = 1
+""",
+	"DumpSmallTarget": """extends Resource
+@export var count: int = 3
+@export var title: String = "Hi"
+@export var active: bool = false
+""",
+}
+
+
+func _bind_target(type_name: String, root: String) -> Object:
+	var path := root + "/" + type_name + ".gd"
+	_write(path, BIND_SCRIPTS[type_name])
+	var script := GDScript.new()
+	script.source_code = BIND_SCRIPTS[type_name]
+	script.resource_path = path
+	script.reload()
+	return script.new()
+
+
 func _paths(root: UxmlElement) -> Dictionary:
 	var out := {}
 	var stack: Array = [[root, ""]]
@@ -176,6 +213,8 @@ func _render_case(c: Dictionary, dump: Dictionary) -> void:
 	doc.size = Vector2(panel)
 	_vp.add_child(doc)
 	_load(doc, uxml, uxml_path, root, c["uss"])
+	if sidecar.has("bind"):
+		doc.set_data_source(_bind_target(String(sidecar["bind"]), root))
 	doc.size = Vector2(panel)
 	await process_frame
 	await _apply_actions(doc, actions)
@@ -184,6 +223,7 @@ func _render_case(c: Dictionary, dump: Dictionary) -> void:
 		await process_frame
 	await RenderingServer.frame_post_draw
 	_save(name + ".png")
+	_save_rects(doc, name + ".rects.json")
 	_hide_text(doc)
 	for k in 2:
 		await process_frame
@@ -210,6 +250,25 @@ func _save(file: String) -> void:
 	var img := _vp.get_texture().get_image()
 	img.convert(Image.FORMAT_RGBA8)
 	img.save_png(_out.path_join(file))
+
+
+## Each element's control rect relative to the document, by tree path:
+## what the runtime laid out (bench/pixels.py compares it with Unity's).
+func _save_rects(doc: UxmlDocument, file: String) -> void:
+	var out := {}
+	var ours := _paths(doc._doc.root)
+	var origin := doc.get_global_transform()
+	for p in ours:
+		var c = doc._controls.get(ours[p])
+		if not (c is Control) or not (c as Control).is_visible_in_tree():
+			continue
+		var t := origin.affine_inverse() * (c as Control).get_global_transform()
+		if not t.x.is_equal_approx(Vector2.RIGHT) or not t.y.is_equal_approx(Vector2.DOWN):
+			continue  # rotated or scaled: Unity's worldBound is a bounding box
+		out[p] = [t.origin.x, t.origin.y, (c as Control).size.x, (c as Control).size.y]
+	var f := FileAccess.open(_out.path_join(file), FileAccess.WRITE)
+	f.store_string(JSON.stringify(out))
+	f.close()
 
 
 func _apply_actions(doc: UxmlDocument, actions: Array) -> void:
@@ -255,6 +314,13 @@ func _apply_actions(doc: UxmlDocument, actions: Array) -> void:
 			"advance":
 				doc._restyle_now()
 				doc.advance_transitions(float(act["ms"]) / 1000.0)
+			"submit":
+				# A dropdown opens its menu (Unity's GenericDropdownMenu in the
+				# panel; the runtime's UxmlPopupMenu, embedded in the viewport).
+				var el := doc.get_element_model(target)
+				var b = null if el == null else doc._behaviors.get(el)
+				if b != null and b.has_method("open_menu"):
+					b.open_menu()
 			"focus":
 				var el := doc.get_element_model(target)
 				var ctl = null if el == null else doc._natives.get(el, doc._controls.get(el))
@@ -286,6 +352,23 @@ func _sync_unity_state(doc: UxmlDocument, dump: Dictionary) -> void:
 	for u in dump["elements"]:
 		_sync_el(doc, ours, u)
 	doc._restyle_now()
+	# An open menu: Unity's overlay/0 is the menu element, the root's first
+	# child of the menu's own document.
+	for m in doc.find_children("*", "UxmlPopupMenu", true, false):
+		var md: UxmlDocument = m._doc
+		if md == null:
+			continue
+		var mine := _paths(md._doc.root)
+		for u in dump.get("overlay", []):
+			var p := String(u["path"])
+			if p.begins_with("overlay/0"):
+				var mp := "0" + p.substr("overlay/0".length())
+				var el = mine.get(mp)
+				if el != null:
+					var have: Array = u["pseudoStates"]
+					for st in STATES:
+						md._set_state(el, st, have.has(st) or (st == "checked" and have.has("selected")))
+		md._restyle_now()
 
 
 func _sync_el(doc: UxmlDocument, ours: Dictionary, u: Dictionary) -> void:

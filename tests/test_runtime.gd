@@ -940,8 +940,16 @@ func test_percent_padding_native_text() -> void:
 		if sb != null:
 			h.check(absf(sb.content_margin_left - 20.0) < 1.0,
 				"%s left margin = resolved 10%% of 200 (got %s)" % [n, sb.content_margin_left])
-			h.check(absf(sb.content_margin_top - 10.0) < 1.0,
-				"%s top margin = resolved 5%% of 200 (got %s)" % [n, sb.content_margin_top])
+			# The row is shrunk below the Button's text and padding, so the
+			# Button's vertical margins are fitted to its box (Unity draws
+			# the text over the box; UxmlStyleApplier.fit_button): only the
+			# Label keeps the resolved top padding as its margin.
+			if not c.has_meta(&"uxml_bfit"):
+				h.check(absf(sb.content_margin_top - 10.0) < 1.0,
+					"%s top margin = resolved 5%% of 200 (got %s)" % [n, sb.content_margin_top])
+			else:
+				h.check(sb.content_margin_top < 10.0 and absf(c.size.y - c.get_minimum_size().y) < 0.5,
+					"%s fitted: a top margin under the resolved 10 (got %s), the box at its text and margins" % [n, sb.content_margin_top])
 
 	doc.size = Vector2(800, 600)
 	await h.process_frame

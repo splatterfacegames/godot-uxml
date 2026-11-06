@@ -159,6 +159,30 @@ def compare(name, udir, gdir, ddir, tol):
         "text_blocks": blocks,
         "full": 1.0 - (fe > tol).sum() / n,
     }
+    # Runtime geometry: each element's control rect against Unity's rect.
+    rp = os.path.join(gdir, name + ".rects.json")
+    geo_n = geo_bad = 0
+    geo_notes = []
+    if os.path.exists(rp):
+        ours = json.load(open(rp, encoding="utf-8"))
+        for e in unity_dump_elements(name):
+            if e["path"] not in ours or e.get("style", {}).get("display") == "none":
+                continue
+            st = e.get("style", {})
+            if st.get("rotate", "0").split(" ")[0] not in ("0", "0deg") or not str(st.get("scale", "")).startswith("(1.00, 1.00"):
+                continue
+            rc = e["rect"]
+            want = (rc["x"], rc["y"], rc["width"], rc["height"])
+            got = ours[e["path"]]
+            geo_n += 1
+            if max(abs(a - b) for a, b in zip(want, got)) > 0.5:
+                geo_bad += 1
+                if len(geo_notes) < 4:
+                    geo_notes.append("%s %s: %s vs Unity %s" % (e["path"], e["type"] + ("#" + e["name"] if e["name"] else ""),
+                        "(%g, %g, %g x %g)" % tuple(got), "(%g, %g, %g x %g)" % want))
+    r["geo_n"] = geo_n
+    r["geo_bad"] = geo_bad
+    r["geo_notes"] = geo_notes
     r["regions"] = [(int(a), int(b), int(c), int(d)) for (a, b, c, d) in components(dilate(near_bad, 2, 2))]
     r["status"] = "exact" if r["box_bad"] == 0 else ("1px" if r["box_far"] == 0 else "differs")
     # Diff image: Unity | godot-uxml | differences.
@@ -177,6 +201,13 @@ def compare(name, udir, gdir, ddir, tol):
     os.makedirs(ddir, exist_ok=True)
     Image.fromarray(sheet).save(os.path.join(ddir, name + ".png"))
     return r
+
+
+def unity_dump_elements(name):
+    p = os.path.join(HERE, "parity", "unity", name + ".json")
+    if not os.path.exists(p):
+        return []
+    return json.load(open(p, encoding="utf-8"))["elements"]
 
 
 def unity_elements(name):
@@ -230,10 +261,10 @@ def render(godot, names, gdir):
 
 def fmt(r):
     if "box_exact" not in r:
-        return "| %s | %s | | | | | | |" % (r["name"], r["status"])
-    return "| %s | %s | %.2f%% | %.2f%% | %d | %.2f | %d / %d | %d |" % (
+        return "| %s | %s | | | | | | | |" % (r["name"], r["status"])
+    return "| %s | %s | %.2f%% | %.2f%% | %d | %.2f | %d / %d | %d | %d/%d |" % (
         r["name"], r["status"], 100 * r["box_exact"], 100 * r["box_near"], r["box_max"],
-        r["text_iou"], r["text_u"], r["text_g"], r["text_edge"])
+        r["text_iou"], r["text_u"], r["text_g"], r["text_edge"], r["geo_n"] - r["geo_bad"], r["geo_n"])
 
 
 def main():
@@ -258,24 +289,29 @@ def main():
     if not args.no_render and not render(args.godot, only, gdir):
         return 1
     rows = [compare(n, args.unity, gdir, ddir, args.tol) for n in names]
-    head = ["| case | boxes | exact | within 1px | max error | text IoU | text px Unity / godot-uxml | text edge px |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    head = ["| case | boxes | exact | within 1px | max error | text IoU | text px Unity / godot-uxml | text edge px | runtime rects |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
     lines = head + [fmt(r) for r in rows]
     print("\n".join(lines))
     if args.explain:
         for r in rows:
-            if r.get("regions"):
+            if r.get("regions") or r.get("geo_notes"):
                 print(r["name"])
                 print("\n".join(explain(r)))
-    done =[r for r in rows if "box_exact" in r]
+                for g in r.get("geo_notes", []):
+                    print("    rect " + g)
+    done = [r for r in rows if "box_exact" in r]
     exact = sum(1 for r in done if r["status"] == "exact")
     aa = sum(1 for r in done if r["status"] == "1px")
     px = sum(r["box_exact"] for r in done) / max(1, len(done))
     near = sum(r["box_near"] for r in done) / max(1, len(done))
     iou = sum(r["text_iou"] for r in done) / max(1, len(done))
+    gn = sum(r["geo_n"] for r in done)
+    gok = gn - sum(r["geo_bad"] for r in done)
     summary = ("PIXELS: %d cases (%d not rendered); boxes: %d exact, %d more within 1px, %d differ; "
-               "box pixels %.3f%% exact, %.3f%% within 1px; text mask IoU %.3f (mean)") % (
-        len(done), len(rows) - len(done), exact, aa, len(done) - exact - aa, 100 * px, 100 * near, iou)
+               "box pixels %.3f%% exact, %.3f%% within 1px; text mask IoU %.3f (mean); "
+               "runtime rects %d/%d within 0.5px") % (
+        len(done), len(rows) - len(done), exact, aa, len(done) - exact - aa, 100 * px, 100 * near, iou, gok, gn)
     print("")
     print(summary)
     if args.markdown:
