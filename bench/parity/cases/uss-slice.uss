@@ -1,0 +1,8 @@
+#wrap { flex-direction: row; flex-wrap: wrap; }
+.b { width: 60px; height: 30px; margin: 2px; }
+#a { -unity-slice-left: 5; -unity-slice-right: 6; -unity-slice-top: 7; -unity-slice-bottom: 8; }
+#b { -unity-slice-left: 3px; -unity-slice-top: 4px; }
+#c { -unity-slice-scale: 2px; }
+#d { -unity-slice-scale: 0.5; -unity-slice-type: tiled; }
+#e { -unity-slice-type: sliced; -unity-slice-left: 12; }
+#f { -unity-slice-left: 1.6; }

@@ -312,7 +312,8 @@ Unity UXML declares a binding as a UxmlObject child of the bound element:
 | form | result |
 | --- | --- |
 | `project://database/Assets/x`, `project://x` | `<root>/Assets/x` |
-| `/Assets/x`, `Assets/x`, `Packages/x` | `<root>/<same>` |
+| `/Assets/x`, `/Packages/x` | `<root>/<same>` |
+| `Assets/x`, `Packages/x` (no leading `/`) | relative to `from`'s directory, as Unity reads them (measured: `absolute-import-packages`, `imp-assets-noslash`, `imp-style-noslash`); `<root>/<same>` when that file does not exist or `from` is empty |
 | `res://`, `user://`, absolute FS path | as written, must stay under root |
 | relative | `from`'s directory, or root when `from` is empty |
 

@@ -61,10 +61,24 @@ func _initialize() -> void:
 		unity_cases.append({"name": n,
 			"uxml": FileAccess.get_file_as_string(CASES_DIR + n + ".uxml"),
 			"uss": FileAccess.get_file_as_string(uss_path) if FileAccess.file_exists(uss_path) else "",
-			"files": {}})
+			"files": _case_files(CASES_DIR + n + ".files")})
 	_unity_project_data()
 	var unity_ok := _unity_section(unity_cases)
 	quit(0 if negatives_ok and unity_ok else 1)
+
+
+## The other files of a corpus case (<name>.files/: templates, sheets),
+## keyed by their path relative to that folder.
+func _case_files(dir: String, rel: String = "") -> Dictionary:
+	var out := {}
+	var d := DirAccess.open(dir)
+	if d == null:
+		return out
+	for f in d.get_files():
+		out[rel + f] = FileAccess.get_file_as_string(dir + "/" + f)
+	for sub in d.get_directories():
+		out.merge(_case_files(dir + "/" + sub, rel + sub + "/"))
+	return out
 
 
 func _corpus_names() -> Array:
@@ -255,7 +269,12 @@ func _model_actions(doc: UxmlDocumentModel, actions: Array) -> void:
 			UxmlContainerParts.bind_row(el, rows[k], idx, sel.has(k), info)
 			if idx >= 0:
 				UxmlContainerParts.bind_text(rows[k], texts[k])
-		UxmlContainerParts.content_height(el, texts.size())
+		if UxmlContainerParts.is_dynamic(el):
+			# DynamicHeight: the runtime sets the content to the measured
+			# rows (every row of these cases is in view): auto.
+			UxmlContainerParts.content_extent(el, -1.0, 0.0)
+		else:
+			UxmlContainerParts.content_height(el, texts.size())
 		el.set_meta(&"parity_count", texts.size())
 
 
@@ -578,6 +597,11 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 			var want: bool = (u["classes"] as Array).has(cls)
 			if (sel as UxmlElement).class_list().has(cls) != want:
 				UxmlParts.toggle_control_class(sel, cls, want)
+	# The selected tab of a TabView after the case's actions.
+	for u in uels:
+		var tv = ours.get(String(u["path"]))
+		if tv != null and String(u["type"]) == "TabView" and u.get("props", {}).has("selectedTabIndex"):
+			UxmlContainerParts.select_tab_model(tv, int(u["props"]["selectedTabIndex"]))
 	# Unity's pseudo-states, applied to the elements at the same paths.
 	var es := {}
 	for u in uels:
@@ -592,6 +616,7 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 			es[el] = st
 	var styles: Dictionary = {}
 	var measures := {}
+	var bounded := {}
 	for u in uels:
 		var el = ours.get(String(u["path"]))
 		# The layout measure (DoMeasure) when the dump has it: a password
@@ -599,15 +624,32 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		var key := "layoutMeasure" if u.has("layoutMeasure") else "textMeasure"
 		if el != null and u.has(key):
 			measures[el] = Vector2(float(u[key]["width"]), float(u[key]["height"]))
+		# Unity's measure at a width (a wrapping text): at the laid-out
+		# content width and at the parent's content width.
+		if el != null:
+			var at: Array = []
+			for mk in ["contentMeasure", "atMostMeasure"]:
+				if u.has(mk):
+					at.append([float(u[mk]["at"]), Vector2(float(u[mk]["width"]), float(u[mk]["height"]))])
+			if not at.is_empty():
+				bounded[el] = at
 	# Unity measures text only on elements without children (Yoga leaves).
 	var measurer := func(el: UxmlElement, style: Dictionary, hint: float) -> Vector2:
 		if not el.children.is_empty():
 			return Vector2.ZERO
 		if measures.has(el):
-			return measures[el]
+			var m: Vector2 = measures[el]
+			if hint >= 0.0 and hint < m.x - 0.5:
+				for b in bounded.get(el, []):
+					if absf(float(b[0]) - hint) < 0.6:
+						return b[1]
+			return m
 		return _measure_fixed(el, style, hint)
 	var panel := Vector2(dump["panel"]["width"], dump["panel"]["height"])
 	var resolve_fn := func(): return UssStyleResolver.resolve(doc, {"element_states": es})["styles"]
+	var timed = _timed_styles(doc, actions, {"element_states": es})
+	if timed != null:
+		resolve_fn = timed
 	var layout_fn := func(st: Dictionary): return UxmlFlexLayout.compute(doc.root, st, panel, measurer, [],
 		{"pixel_grid": true})
 	var settled := _settle(doc, resolve_fn, layout_fn)
@@ -623,6 +665,18 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	var style_of := func(x: UxmlElement) -> Dictionary:
 		return styles.get(x, {})
 	var relaid := false
+	# A click on a Slider without a page size jumps the dragger centre to
+	# the pointer (BaseSlider.SetSliderValueFromClick), as the runtime's
+	# slider behavior does; the value then moves it only by more than half
+	# a pixel (SliderUtilities.UpdateDragElementPosition).
+	if _slider_clicks(doc, actions, rects, styles):
+		relaid = true
+	for el in doc.root.walk():
+		if el.local == "TwoPaneSplitView" and el.part_of == null:
+			var m := UxmlContainerParts.two_pane_margins(el, style_of)
+			if m != 0.0 and UxmlContainerParts.two_pane_style(el,
+					float(UxmlInputParts.num(el, "fixed-pane-initial-dimension", 100.0)), m):
+				relaid = true
 	for el in doc.root.walk():
 		if UxmlInputParts.layout_styles(el, size_of, style_of):
 			relaid = true
@@ -640,6 +694,10 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		res = settled[1]
 	ours = _paths(doc.root)
 	var abs := _abs_rects(doc.root, res["rects"], styles)
+	var parents := {}
+	for pe in doc.root.walk():
+		for ch in pe.children:
+			parents[ch] = pe
 	var out := {"name": name, "status": "match", "notes": [], "elements": 0, "struct_ok": 0, "geo_half": 0,
 		"geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0, "pairs": []}
 	var seen := {}
@@ -690,7 +748,22 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		# compared.
 		if hidden_under.has(path) or String(u["style"].get("display", "flex")) == "none":
 			continue
-		for diff in _style_diffs(u["style"], st, out):
+		var par_el = parents.get(el)
+		var base_w := NAN
+		if par_el != null and res["rects"].has(par_el):
+			var pst: Dictionary = styles.get(par_el, {})
+			base_w = (res["rects"][par_el] as Rect2).size.x
+			for bp in ["padding-left", "padding-right", "border-left-width", "border-right-width"]:
+				var pe = pst.get(bp)
+				if pe != null:
+					var pl := UssValues.parse_length(String(pe["value"]))
+					if pl["kind"] == "px":
+						base_w -= UxmlFlexLayout.grid_box(float(pl["value"]), bp.begins_with("border"))
+		for diff in _style_diffs(u["style"], st, out, base_w):
+			out["notes"].append("%s %s" % [label, diff])
+		var lr = res["rects"].get(el)
+		var own: Vector2 = Vector2.ZERO if lr == null else (lr as Rect2).size
+		for diff in _ext_style_diffs(u["style"], st, el, styles, parents, own, out):
 			out["notes"].append("%s %s" % [label, diff])
 	for path in ours:
 		if not seen.has(ours[path]):
@@ -700,6 +773,88 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		out["status"] = "differs"
 	out["abs"] = abs
 	return out
+
+
+func _slider_clicks(doc: UxmlDocumentModel, actions: Array, rects: Dictionary, styles: Dictionary) -> bool:
+	var abs := {}
+	var changed := false
+	for act in actions:
+		if str(act.get("op", "")) != "click" or not act.has("x"):
+			continue
+		if abs.is_empty():
+			abs = _abs_rects(doc.root, rects, styles)
+		var pt := Vector2(float(act["x"]), float(act["y"]))
+		for el in doc.root.walk():
+			if not (el.local == "Slider" or el.local == "SliderInt"):
+				continue
+			if absf(float(UxmlInputParts.num(el, "page-size", 0.0))) > 0.000001:
+				continue
+			var drag := UxmlParts.find_part(el, "drag-container")
+			var dragger := UxmlParts.find_part(el, "dragger")
+			if drag == null or dragger == null or not abs.has(drag) or not rects.has(dragger):
+				continue
+			var r: Rect2 = abs[drag]
+			if not r.has_point(pt):
+				continue
+			var dsz: Vector2 = (rects[dragger] as Rect2).size
+			var vertical := str(el.get_attribute("direction")) == "Vertical"
+			var at := Vector2.ZERO
+			if vertical:
+				at.y = clampf(pt.y - r.position.y - dsz.y / 2.0, 0.0, r.size.y - dsz.y)
+			else:
+				at.x = clampf(pt.x - r.position.x - dsz.x / 2.0, 0.0, r.size.x - dsz.x)
+			for role in ["dragger", "dragger-border"]:
+				var p := UxmlParts.find_part(el, role)
+				if p != null:
+					var tr := "translate: %s %s;" % [UxmlInputParts._px(at.x), UxmlInputParts._px(at.y)]
+					if p.get_attribute("style") == null:
+						p.attributes.append({"name": "style", "value": tr, "offset": 0})
+					else:
+						p.set_attribute("style", tr)
+					changed = true
+	return changed
+
+
+## Cases that change classes and advance the clock (transitions sampled at
+## a time): one cascade with the runtime's transitions (UssTransitions), the
+## class changes and clock steps of the sidecar in order. Returns the
+## resolve function of the settled cascade, or null for a case without them.
+func _timed_styles(doc: UxmlDocumentModel, actions: Array, opts: Dictionary):
+	var timed: Array = []
+	for a in actions:
+		if String(a.get("op", "")) in ["add-class", "remove-class", "advance"]:
+			timed.append(a)
+	if timed.is_empty():
+		return null
+	var cas := UssCascade.new(doc)
+	cas.update(opts, true)
+	var trs := UssTransitions.new(cas)
+	for a in timed:
+		var op := String(a["op"])
+		if op == "advance":
+			trs.advance(float(a.get("ms", 0)))
+			if trs.tick():
+				cas.update(opts, false, PackedInt32Array(), true)
+			continue
+		var t: UxmlElement = doc.root.find_by_name(String(a.get("target", "")))
+		if t == null:
+			continue
+		var cls := String(a.get("class", ""))
+		var list: Array = t.class_list().duplicate()
+		if op == "add-class" and not list.has(cls):
+			list.append(cls)
+		elif op == "remove-class":
+			list.erase(cls)
+		if t.get_attribute("class") == null:
+			t.attributes.append({"name": "class", "value": " ".join(list), "offset": 0})
+		else:
+			t.set_attribute("class", " ".join(list))
+		var ch := cas.update(opts, false, PackedInt32Array([int(cas.index[t])]))
+		if not ch.is_empty():
+			trs.after_update(ch, cas.last_old, opts)
+	return func():
+		cas.update(opts, false)
+		return cas.styles
 
 
 func _udisplay_none(uels: Array, path: String) -> bool:
@@ -727,21 +882,53 @@ func _translate(style: Dictionary, size: Vector2) -> Vector2:
 
 
 func _abs_rects(root: UxmlElement, rects: Dictionary, styles: Dictionary = {}) -> Dictionary:
+	# Unity's worldBound: the box of the element's rect through its world
+	# transform (layout position, translate, and rotate / scale about the
+	# transform-origin, composed with every ancestor's).
 	var out := {}
-	var stack: Array = [[root, Vector2.ZERO]]
+	var stack: Array = [[root, Transform2D.IDENTITY]]
 	while not stack.is_empty():
 		var fr: Array = stack.pop_back()
 		var el: UxmlElement = fr[0]
-		var origin: Vector2 = fr[1]
+		var world: Transform2D = fr[1]
 		var r = rects.get(el)
-		var p := origin
 		if r != null:
-			p = origin + (r as Rect2).position + _translate(styles.get(el, {}), (r as Rect2).size)
+			world = world * _local_transform(styles.get(el, {}), r as Rect2)
 			if el != root:
-				out[el] = Rect2(p, (r as Rect2).size)
+				var sz := (r as Rect2).size
+				var pts := [world * Vector2.ZERO, world * Vector2(sz.x, 0), world * Vector2(0, sz.y), world * sz]
+				var box := Rect2(pts[0], Vector2.ZERO)
+				for q in pts:
+					box = box.expand(q)
+				out[el] = box
 		for ch in el.children:
-			stack.append([ch, p])
+			stack.append([ch, world])
 	return out
+
+
+func _local_transform(style: Dictionary, r: Rect2) -> Transform2D:
+	var t := Transform2D(0.0, r.position + _translate(style, r.size))
+	var angle := 0.0
+	var e = style.get("rotate")
+	if e != null:
+		var pr := UssValues.parse_rotate(String(e["value"]))
+		if pr["ok"]:
+			angle = pr["angle"]
+	var sc := Vector2.ONE
+	e = style.get("scale")
+	if e != null:
+		var ps := UssValues.parse_scale(String(e["value"]))
+		if ps["ok"]:
+			sc = ps["scale"]
+	if angle == 0.0 and sc == Vector2.ONE:
+		return t
+	var o := r.size * 0.5
+	e = style.get("transform-origin")
+	if e != null:
+		var po := UssValues.parse_transform_origin(String(e["value"]))
+		if po["ok"]:
+			o = po["px"] + po["ratio"] * r.size
+	return t * Transform2D(0.0, o) * Transform2D(angle, sc, 0.0, Vector2.ZERO) * Transform2D(0.0, -o)
 
 
 func _structure_diff(u: Dictionary, el: UxmlElement) -> String:
@@ -788,7 +975,7 @@ const COLORS := ["background-color", "border-left-color", "border-top-color",
 ## their initial values (0px, transparent, opacity 1, upper-left). `color`
 ## and `font-size` are only compared where ours is set: Godot's own
 ## defaults stand in for an unset one.
-func _style_diffs(us: Dictionary, st: Dictionary, out: Dictionary) -> Array:
+func _style_diffs(us: Dictionary, st: Dictionary, out: Dictionary, base_w: float = NAN) -> Array:
 	var diffs: Array = []
 	for p in LENGTHS:
 		if not us.has(p):
@@ -799,10 +986,23 @@ func _style_diffs(us: Dictionary, st: Dictionary, out: Dictionary) -> Array:
 		var e = st.get(p)
 		if e != null:
 			var pl := UssValues.parse_length(String(e["value"]))
+			var radius := String(p).ends_with("radius")
 			if pl["kind"] == "px":
 				got = pl["value"]
+			elif pl["kind"] == "percent" and radius:
+				# Unity resolves a radius to its number (50% is 50).
+				got = pl["value"]
+			elif pl["kind"] == "percent":
+				# A margin or padding percentage: of the parent's content width.
+				got = float(pl["value"]) * base_w / 100.0
+			elif pl["kind"] == "auto" and String(p).begins_with("margin"):
+				got = 0.0
 			else:
 				got = NAN
+			# The layout's pixel-grid value of a box length (Unity rounds
+			# margins, padding and borders).
+			if not is_nan(got) and not radius:
+				got = UxmlFlexLayout.grid_box(got, String(p).begins_with("border"))
 		if not is_nan(got) and absf(got - want) <= 0.05:
 			out["style_ok"] += 1
 		else:
@@ -886,3 +1086,372 @@ func _unity_negative(r: Dictionary) -> bool:
 			return false
 		return true
 	return true
+
+
+# ---------------------------------------------------------------------------
+# Every other resolved value (Unity's IResolvedStyle and the computed style)
+# ---------------------------------------------------------------------------
+
+## Keyword properties: Unity key -> [our property, initial value].
+const ENUM_PROPS := {
+	"align-content": ["align-content", "flex-start"], "align-items": ["align-items", "stretch"],
+	"align-self": ["align-self", "auto"], "justify-content": ["justify-content", "flex-start"],
+	"display": ["display", "flex"], "position": ["position", "relative"],
+	"flex-direction": ["flex-direction", "column"], "flex-wrap": ["flex-wrap", "nowrap"],
+	"visibility": ["visibility", "visible"], "overflow": ["overflow", "visible"],
+	"white-space": ["white-space", "normal"], "text-overflow": ["text-overflow", "clip"],
+	"-unity-text-overflow-position": ["-unity-text-overflow-position", "end"],
+	"-unity-overflow-clip-box": ["-unity-overflow-clip-box", "padding-box"],
+	"-unity-font-style-and-weight": ["-unity-font-style", "normal"],
+	"-unity-text-generator": ["-unity-text-generator", "standard"],
+	"-unity-editor-text-rendering-mode": ["-unity-editor-text-rendering-mode", "sdf"],
+	"-unity-slice-type": ["-unity-slice-type", "sliced"],
+}
+## Number properties -> initial value. Unity resolves a dimension to its
+## number (letter-spacing: 3px is 3).
+const NUM_PROPS := {
+	"flex-grow": 0.0, "flex-shrink": 1.0, "-unity-text-outline-width": 0.0,
+	"-unity-slice-scale": 1.0, "letter-spacing": 0.0, "word-spacing": 0.0,
+	"-unity-paragraph-spacing": 0.0,
+}
+const INT_PROPS := ["-unity-slice-left", "-unity-slice-right", "-unity-slice-top", "-unity-slice-bottom"]
+## Lengths as authored (Unity's computed style) -> initial value.
+const COMPUTED_LENGTHS := {
+	"width": "auto", "height": "auto", "min-width": "auto", "min-height": "auto",
+	"max-width": "none", "max-height": "none", "flex-basis": "auto",
+	"left": "auto", "top": "auto", "right": "auto", "bottom": "auto",
+	"margin-left": "0", "margin-top": "0", "margin-right": "0", "margin-bottom": "0",
+	"padding-left": "0", "padding-top": "0", "padding-right": "0", "padding-bottom": "0",
+	"border-top-left-radius": "0", "border-top-right-radius": "0",
+	"border-bottom-left-radius": "0", "border-bottom-right-radius": "0",
+	"letter-spacing": "0", "word-spacing": "0", "-unity-paragraph-spacing": "0",
+}
+## Unity's MouseCursor ids of the cursor keywords.
+const CURSOR_IDS := {
+	"arrow": 0, "text": 1, "resize-vertical": 2, "resize-horizontal": 3, "link": 4,
+	"slide-arrow": 5, "resize-up-right": 6, "resize-up-left": 7, "move-arrow": 8,
+	"rotate-arrow": 9, "scale-arrow": 10, "arrow-plus": 11, "arrow-minus": 12,
+	"pan": 13, "orbit": 14, "zoom": 15, "fps": 16,
+	"split-resize-up-down": 18, "split-resize-left-right": 19, "not-allowed": 20,
+}
+
+
+## Our value of a property: "" when unset or `initial` (the initial value).
+func _ov(st: Dictionary, p: String) -> String:
+	var e = st.get(p)
+	if e == null:
+		return ""
+	var v := String(e["value"]).strip_edges()
+	return "" if v.to_lower() == "initial" else v
+
+
+static func _kw(s: String) -> String:
+	return s.to_lower().replace("-", "").replace("_", "").replace(" ", "")
+
+
+## A length in one canonical form for both sides: "auto", "none", "12px",
+## "50%"; "" when it is not a length.
+static func _canon_len(s: String) -> String:
+	var v := s.strip_edges().to_lower()
+	if v == "auto" or v == "none":
+		return v
+	var pct := v.ends_with("%")
+	var num := v.trim_suffix("%").trim_suffix("px")
+	if not num.is_valid_float():
+		return ""
+	var f := snappedf(float(num), 0.01)
+	if f == 0.0:
+		return "0px"
+	return ("%s%%" if pct else "%spx") % _n2(f)
+
+
+static func _n2(f: float) -> String:
+	var t := "%.2f" % f
+	if t.contains("."):
+		t = t.rstrip("0").rstrip(".")
+	return t
+
+
+static func _num_of(s: String) -> float:
+	var v := s.strip_edges().to_lower()
+	if v.is_valid_float():
+		return float(v)
+	for u in ["px", "%"]:
+		if v.ends_with(u) and v.trim_suffix(u).is_valid_float():
+			return float(v.trim_suffix(u))
+	return NAN
+
+
+## "(2.00, 3.00, 1.00)" -> [2, 3, 1].
+static func _vec(s: String) -> Array:
+	var inner := s.strip_edges().trim_prefix("(").trim_suffix(")")
+	var out: Array = []
+	for p in inner.split(","):
+		out.append(float(p.strip_edges()))
+	return out
+
+
+## "a=1 b=(1, 2) c=rgba(1, 2, 3, 1)" -> {a: "1", b: "(1, 2)", c: "rgba(...)"}.
+static func _fields(s: String) -> Dictionary:
+	var out := {}
+	var i := 0
+	while i < s.length():
+		var eq := s.find("=", i)
+		if eq < 0:
+			break
+		var key := s.substr(i, eq - i).strip_edges()
+		var j := eq + 1
+		var depth := 0
+		while j < s.length():
+			var c := s[j]
+			if c == "(" or c == "{":
+				depth += 1
+			elif c == ")" or c == "}":
+				depth -= 1
+			elif c == " " and depth == 0:
+				break
+			j += 1
+		out[key] = s.substr(eq + 1, j - eq - 1)
+		i = j + 1
+	return out
+
+
+func _check(out: Dictionary, diffs: Array, ok: bool, what: String) -> void:
+	out["style"] += 1
+	if ok:
+		out["style_ok"] += 1
+	else:
+		diffs.append(what)
+
+
+## Our resolved font-size in px: a percentage of the parent's (Unity
+## computes it at cascade time); null when the theme leaves it to Godot.
+func _font_px(el: UxmlElement, styles: Dictionary, parents: Dictionary):
+	var st: Dictionary = styles.get(el, {})
+	var v := _ov(st, "font-size")
+	if v.is_empty():
+		return null
+	var pl := UssValues.parse_length(v)
+	if pl["kind"] == "px":
+		return float(pl["value"])
+	if pl["kind"] == "percent":
+		var par = parents.get(el)
+		var base = null if par == null else _font_px(par, styles, parents)
+		return null if base == null else float(base) * float(pl["value"]) / 100.0
+	return NAN
+
+
+func _ext_style_diffs(us: Dictionary, st: Dictionary, el: UxmlElement, styles: Dictionary,
+		parents: Dictionary, size: Vector2, out: Dictionary) -> Array:
+	var diffs: Array = []
+	var comp: Dictionary = us.get("computed", {})
+	for uk in ENUM_PROPS:
+		if not us.has(uk) and not comp.has(uk):
+			continue
+		var spec: Array = ENUM_PROPS[uk]
+		var want := String(us[uk] if us.has(uk) else comp[uk])
+		var got := _ov(st, spec[0])
+		if got.is_empty():
+			got = spec[1]
+		_check(out, diffs, _kw(got) == _kw(want), "%s: ours %s vs Unity %s" % [uk, got, want])
+	for uk in NUM_PROPS:
+		if not us.has(uk):
+			continue
+		var v := _ov(st, uk)
+		var got: float = NUM_PROPS[uk] if v.is_empty() else _num_of(v)
+		_check(out, diffs, not is_nan(got) and absf(got - float(us[uk])) <= 0.005,
+			"%s: ours %s vs Unity %s" % [uk, v if not v.is_empty() else "unset", us[uk]])
+	# Slices belong to a background image: compared where godot-uxml draws
+	# no image of its own (its theme images are not Unity's textures).
+	var own_image := not _ov(st, "background-image").is_empty() \
+		and str(st["background-image"].get("origin", "")).find("godot_uxml/themes/") >= 0
+	for uk in INT_PROPS:
+		if not us.has(uk) or own_image:
+			continue
+		var v := _ov(st, uk)
+		var got := 0.0 if v.is_empty() else _num_of(v)
+		_check(out, diffs, not is_nan(got) and int(got) == int(us[uk]),
+			"%s: ours %s vs Unity %s" % [uk, v if not v.is_empty() else "unset", us[uk]])
+	# Lengths as authored: for authored elements. A control sets many of
+	# its parts' lengths from C# (a progress bar's `right`, a slider
+	# tracker's `100%`); those parts are compared on their resolved values
+	# and geometry.
+	for uk in COMPUTED_LENGTHS:
+		if not comp.has(uk) or el.part_of != null:
+			continue
+		var v := _ov(st, uk)
+		var inl = el.get_attribute("style")
+		if v.is_empty() and inl != null and String(inl).find(uk + ":") >= 0:
+			# Unity's computed style keeps an inline length that `all:
+			# initial` beat, while its layout uses the initial value
+			# (measured: uss-all-2); the layout (geometry) is compared.
+			continue
+		var got := _canon_len(v if not v.is_empty() else String(COMPUTED_LENGTHS[uk]))
+		var want := _canon_len(String(comp[uk]))
+		var same := got == want
+		if not same and got.ends_with("px") == want.ends_with("px") and got.ends_with("%") == want.ends_with("%"):
+			same = absf(_num_of(got) - _num_of(want)) <= 0.011
+		_check(out, diffs, same and not got.is_empty(), "computed %s: ours %s vs Unity %s" % [uk, v if not v.is_empty() else "unset", comp[uk]])
+	if us.has("font-size"):
+		var fp = _font_px(el, styles, parents)
+		if fp != null:
+			_check(out, diffs, absf(float(fp) - float(us["font-size"])) <= 0.05,
+				"resolved font-size: ours %s vs Unity %s" % [fp, us["font-size"]])
+	if us.has("-unity-text-outline-color"):
+		var v := _ov(st, "-unity-text-outline-color")
+		var got := Color(0, 0, 0, 0)
+		if not v.is_empty():
+			var pc := UssValues.parse_color(v)
+			got = pc["color"] if pc["ok"] else Color(1, 0, 1, 0.5)
+		_check(out, diffs, _color_eq(got, _ucolor(String(us["-unity-text-outline-color"]))),
+			"-unity-text-outline-color: ours %s vs Unity %s" % [_fmt(got), us["-unity-text-outline-color"]])
+	# Background placement.
+	var bg := {}
+	for axis in ["x", "y"]:
+		var uk: String = "background-position-" + axis
+		if not us.has(uk):
+			continue
+		var v := _ov(st, uk)
+		var got := "center 0px"
+		if not v.is_empty():
+			var pp := UssValues.parse_background_position(v, axis == "y")
+			got = ("%s %s" % [pp["keyword"], _canon_len(str(pp["value"]) + ("%" if pp["unit"] == "percent" else "px"))]) if pp["ok"] else "invalid " + v
+		var f := _fields(String(us[uk]).trim_prefix("(").trim_suffix(")").replace(":", "="))
+		var want := "%s %s" % [String(f.get("type", "")).to_lower(), _canon_len(String(f.get("x", "")))]
+		bg[axis] = got
+		_check(out, diffs, got == want, "%s: ours %s vs Unity %s" % [uk, got, us[uk]])
+	if us.has("background-repeat"):
+		var v := _ov(st, "background-repeat")
+		var got := "norepeat norepeat"
+		if not v.is_empty():
+			var pr := UssValues.parse_background_repeat(v)
+			got = (_kw(pr["x"]) + " " + _kw(pr["y"])) if pr["ok"] else "invalid " + v
+		var f := _fields(String(us["background-repeat"]).trim_prefix("(").trim_suffix(")").replace(":", "=").replace(",", ""))
+		var want := _kw(String(f.get("x", ""))) + " " + _kw(String(f.get("y", "")))
+		bg["repeat"] = got
+		_check(out, diffs, got == want, "background-repeat: ours %s vs Unity %s" % [got, us["background-repeat"]])
+	if us.has("background-size"):
+		var v := _ov(st, "background-size")
+		var got := "length 100% 100%"
+		if not v.is_empty():
+			var ps := UssValues.parse_background_size(v)
+			if not ps["ok"]:
+				got = "invalid " + v
+			elif ps["type"] != "length":
+				got = String(ps["type"])
+			else:
+				var ax := []
+				for a in [ps["x"], ps["y"]]:
+					ax.append("auto" if a[0] == "auto" else _canon_len(str(a[1]) + ("%" if a[0] == "percent" else "px")))
+				got = "length %s %s" % ax
+		var f := _fields(String(us["background-size"]).trim_prefix("(").trim_suffix(")").replace(":", "=").replace(",", ""))
+		var t := String(f.get("sizeType", "")).to_lower()
+		var want := t if t != "length" else "length %s %s" % [_canon_len(String(f.get("x", ""))), _canon_len(String(f.get("y", "")))]
+		bg["size"] = got
+		_check(out, diffs, got == want, "background-size: ours %s vs Unity %s" % [got, us["background-size"]])
+	if us.has("-unity-background-scale-mode") and bg.size() == 4:
+		# Unity derives the scale mode from the four placement longhands.
+		var mode := "stretchtofill"
+		if bg["x"] == "center 0px" and bg["y"] == "center 0px" and bg["repeat"] == "norepeat norepeat":
+			if bg["size"] == "cover":
+				mode = "scaleandcrop"
+			elif bg["size"] == "contain":
+				mode = "scaletofit"
+		_check(out, diffs, mode == _kw(String(us["-unity-background-scale-mode"])),
+			"-unity-background-scale-mode: ours %s vs Unity %s" % [mode, us["-unity-background-scale-mode"]])
+	# Transforms (resolved in px of the element's own size).
+	if us.has("translate"):
+		var v := _ov(st, "translate")
+		var got := Vector2.ZERO
+		if not v.is_empty():
+			var pt := UssValues.parse_translate(v)
+			got = pt["px"] + pt["ratio"] * size if pt["ok"] else Vector2(NAN, NAN)
+		var w := _vec(String(us["translate"]))
+		_check(out, diffs, absf(got.x - w[0]) <= 0.05 and absf(got.y - w[1]) <= 0.05,
+			"translate: ours %s vs Unity %s" % [got, us["translate"]])
+	if us.has("rotate"):
+		var v := _ov(st, "rotate")
+		var got := 0.0
+		if not v.is_empty():
+			var pr := UssValues.parse_rotate(v)
+			got = pr["angle"] if pr["ok"] else NAN
+		var want := UssValues.parse_angle(String(us["rotate"]).split(" ")[0])
+		_check(out, diffs, not is_nan(got) and absf(got - want) <= 0.0005,
+			"rotate: ours %s vs Unity %s" % [v if not v.is_empty() else "unset", us["rotate"]])
+	if us.has("scale"):
+		var v := _ov(st, "scale")
+		var got := Vector2.ONE
+		if not v.is_empty():
+			var ps := UssValues.parse_scale(v)
+			got = ps["scale"] if ps["ok"] else Vector2(NAN, NAN)
+		var w := _vec(String(us["scale"]))
+		_check(out, diffs, absf(got.x - w[0]) <= 0.005 and absf(got.y - w[1]) <= 0.005,
+			"scale: ours %s vs Unity %s" % [got, us["scale"]])
+	if us.has("transform-origin"):
+		var v := _ov(st, "transform-origin")
+		var got := size * 0.5
+		if not v.is_empty():
+			var po := UssValues.parse_transform_origin(v)
+			got = po["px"] + po["ratio"] * size if po["ok"] else Vector2(NAN, NAN)
+		var w := _vec(String(us["transform-origin"]))
+		_check(out, diffs, absf(got.x - w[0]) <= 0.05 and absf(got.y - w[1]) <= 0.05,
+			"transform-origin: ours %s vs Unity %s" % [got, us["transform-origin"]])
+	# Text: shadow, auto size; the cursor.
+	if comp.has("text-shadow"):
+		var f := _fields(String(comp["text-shadow"]))
+		var v := _ov(st, "text-shadow")
+		var sh := {"ok": true, "offset": Vector2.ZERO, "blur": 0.0, "color": Color(0, 0, 0, 0)}
+		if not v.is_empty():
+			sh = UssValues.parse_text_shadow(v)
+		var wo := _vec(String(f.get("offset", "(0, 0)")))
+		var ok: bool = sh["ok"] and absf(sh["offset"].x - wo[0]) <= 0.05 and absf(sh["offset"].y - wo[1]) <= 0.05 \
+			and absf(float(sh["blur"]) - float(f.get("blurRadius", "0"))) <= 0.05 \
+			and _color_eq(sh["color"], _ucolor(String(f.get("color", ""))))
+		_check(out, diffs, ok, "text-shadow: ours %s vs Unity %s" % [v if not v.is_empty() else "unset", comp["text-shadow"]])
+	if comp.has("-unity-text-auto-size"):
+		var f := _fields(String(comp["-unity-text-auto-size"]))
+		var v := _ov(st, "-unity-text-auto-size")
+		var pa := UssValues.parse_text_auto_size(v if not v.is_empty() else "none")
+		var best := String(f.get("mode", "")) == "BestFit"
+		var ok: bool = pa["ok"] and pa["best_fit"] == best
+		if ok and best:
+			ok = absf(float(pa["min"]) - _num_of(String(f.get("minSize", "")))) <= 0.05 \
+				and absf(float(pa["max"]) - _num_of(String(f.get("maxSize", "")))) <= 0.05
+		_check(out, diffs, ok, "-unity-text-auto-size: ours %s vs Unity %s" % [v if not v.is_empty() else "unset", comp["-unity-text-auto-size"]])
+	if comp.has("cursor"):
+		var f := _fields(String(comp["cursor"]))
+		var v := _ov(st, "cursor")
+		var id := 0
+		if not v.is_empty():
+			var pc := UssValues.parse_cursor(v)
+			id = CURSOR_IDS.get(v.to_lower(), -1) if pc["ok"] and pc["kind"] == "keyword" else -1
+		_check(out, diffs, str(id) == String(f.get("defaultCursorId", "0")),
+			"cursor: ours %s vs Unity %s" % [v if not v.is_empty() else "unset", comp["cursor"]])
+	# Transitions: the four lists as Unity keeps them.
+	for uk in ["transition-property", "transition-duration", "transition-timing-function", "transition-delay"]:
+		if not us.has(uk):
+			continue
+		var v := _ov(st, uk)
+		var got: Array = []
+		var initial: String = {"transition-property": "all", "transition-duration": "0s",
+			"transition-timing-function": "ease", "transition-delay": "0s"}[uk]
+		for part in (v if not v.is_empty() else initial).split(","):
+			got.append(_canon_tr(uk, part))
+		var want: Array = []
+		for part in us[uk]:
+			want.append(_canon_tr(uk, str(part)))
+		_check(out, diffs, got == want, "%s: ours %s vs Unity %s" % [uk, got, want])
+	return diffs
+
+
+static func _canon_tr(prop: String, s: String) -> String:
+	var v := s.strip_edges().to_lower()
+	if prop == "transition-duration" or prop == "transition-delay":
+		if v.ends_with("ms"):
+			return _n2(float(v.trim_suffix("ms")))
+		if v.ends_with("s"):
+			return _n2(float(v.trim_suffix("s")) * 1000.0)
+		return "?" + v
+	if prop == "transition-timing-function":
+		return _kw(v)
+	return "none" if v == "<null>" else v

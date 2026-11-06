@@ -1,0 +1,5 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:ListView name="lv-dyn" virtualization-method="DynamicHeight" style="height: 120px;" />
+  <ui:ListView name="lv-hscroll" horizontal-scrolling="true" show-border="true" style="height: 80px;" />
+  <ui:ListView name="lv-multi" selection-type="Multiple" fixed-item-height="24" style="height: 90px;" />
+</ui:UXML>

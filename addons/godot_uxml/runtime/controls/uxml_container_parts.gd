@@ -798,6 +798,11 @@ static func _column_header(el: UxmlElement) -> UxmlElement:
 		["unity-multi-column-header__resize-handle-container"])
 	var sortable := _attr(el, "sorting-mode", "None") != "None" or _bool(el, "sorting-enabled", false)
 	for c in columns_of(el):
+		if c["stretchable"] and cc.get_attribute("style") == null:
+			# Unity grows the column container when a column stretches
+			# (measured: ctl-multicolumn-listview).
+			cc.attributes.append({"name": "style", "value": "flex-grow: 1;", "offset": 0})
+	for c in columns_of(el):
 		var col := _part(el, "MultiColumnHeaderColumn", "header-column", c["name"],
 			["unity-multi-column-header__column"] + (["unity-multi-column-header__column--sortable"] if sortable and c["sortable"] else []))
 		col.set_meta(&"uxml_column", c["index"])
@@ -1026,13 +1031,36 @@ static func _build_two_pane(el: UxmlElement) -> UxmlElement:
 	return content
 
 
+## The fixed pane's margin total on the split axis, from its computed
+## style (`style_of.call(el) -> Dictionary`), on the pixel grid.
+static func two_pane_margins(el: UxmlElement, style_of: Callable) -> float:
+	var content := get_part(el, "content")
+	if content == null:
+		return 0.0
+	var panes: Array = []
+	for c in content.children:
+		if not UssControls.is_non_visual(c.local):
+			panes.append(c)
+	if panes.size() < 2:
+		return 0.0
+	var fixed: UxmlElement = panes[clampi(int(_num(el, "fixed-pane-index", 0.0)), 0, 1)]
+	var st: Dictionary = style_of.call(fixed)
+	var vertical := two_pane_orientation(el) == "vertical"
+	var total := 0.0
+	for prop in (["margin-top", "margin-bottom"] if vertical else ["margin-left", "margin-right"]):
+		total += UxmlFlexLayout.grid_box(UxmlInputParts.style_px(st, prop), false)
+	return total
+
+
 static func two_pane_orientation(el: UxmlElement) -> String:
 	return "vertical" if _attr(el, "orientation", "Horizontal") == "Vertical" else "horizontal"
 
 
 ## Pane and splitter styles for fixed pane dimension `dim` (Unity
-## TwoPaneSplitView.Init and the dragline manipulator).
-static func two_pane_style(el: UxmlElement, dim: float) -> bool:
+## TwoPaneSplitView.Init and the dragline manipulator). `margins` is the
+## fixed pane's margin total on the split axis: Unity places the dragline
+## anchor past the pane's margins (PostDisplaySetup; measured: ctl-more-2).
+static func two_pane_style(el: UxmlElement, dim: float, margins: float = 0.0) -> bool:
 	var content := get_part(el, "content")
 	var anchor := get_part(el, "dragline-anchor")
 	if content == null:
@@ -1058,9 +1086,9 @@ static func two_pane_style(el: UxmlElement, dim: float) -> bool:
 		var pos := dim if fixed_i == 0 else -1.0
 		var style := ""
 		if fixed_i == 0:
-			style = "%s: %s;" % ["top" if vertical else "left", px(pos)]
+			style = "%s: %s;" % ["top" if vertical else "left", px(pos + margins)]
 		else:
-			style = "%s: %s;" % ["bottom" if vertical else "right", px(dim)]
+			style = "%s: %s;" % ["bottom" if vertical else "right", px(dim + margins)]
 		changed = set_style(anchor, style) or changed
 	return changed
 

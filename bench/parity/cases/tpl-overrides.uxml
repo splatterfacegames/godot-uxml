@@ -1,0 +1,17 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:Template name="Card" src="tpl-overrides/card.uxml" />
+  <ui:Template name="Panel" src="tpl-overrides/panel.uxml" />
+  <ui:Instance template="Card" name="c1" />
+  <ui:Instance template="Card" name="c2">
+    <ui:AttributeOverrides element-name="title" text="Overridden" />
+    <ui:AttributeOverrides element-name="go" text="Go!" enabled="false" />
+  </ui:Instance>
+  <ui:Instance template="Card" name="c3" class="wide">
+    <ui:AttributeOverrides element-name="title" text="Third" />
+  </ui:Instance>
+  <ui:Instance template="Panel" name="p1">
+    <ui:Label name="slotted" text="In the slot" />
+    <ui:Button name="slotted-btn" text="Slot button" />
+  </ui:Instance>
+  <ui:Instance template="Panel" name="p2" />
+</ui:UXML>

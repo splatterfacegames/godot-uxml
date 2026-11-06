@@ -51,6 +51,12 @@ static func _match_simple(simple: Dictionary, element: UxmlElement, ctx: Diction
 			if simple["name"] == "root":
 				return element == ctx["root"]
 			var states: Dictionary = ctx["states"].get(element, {})
+			# Unity: `:selected` is `:checked`; `:inactive` is not `:active`.
+			match String(simple["name"]):
+				"selected", "checked":
+					return states.has("checked") or states.has("selected")
+				"inactive":
+					return not states.has("active")
 			return states.has(simple["name"])
 		_:
 			# `unknown` selectors never reach here in practice — a rule holding

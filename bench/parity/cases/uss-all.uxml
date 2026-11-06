@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:Button name="b-all" text="All" class="reset" />
+  <ui:Button name="b-after" text="After" class="reset after" />
+  <ui:Label name="l-all" text="Label" class="reset" />
+  <ui:VisualElement name="v-all" class="styled reset" />
+  <ui:VisualElement name="v-before" class="before" />
+  <ui:VisualElement name="inh" class="inh">
+    <ui:Label name="inh-label" text="Inherit" class="reset" />
+  </ui:VisualElement>
+</ui:UXML>

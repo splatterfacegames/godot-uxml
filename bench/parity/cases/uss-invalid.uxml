@@ -1,0 +1,23 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+<ui:VisualElement name="wrap" class="w">
+  <ui:VisualElement name="ai" class="b" />
+  <ui:VisualElement name="ac" class="b" />
+  <ui:VisualElement name="fd" class="b" />
+  <ui:VisualElement name="pos" class="b" />
+  <ui:VisualElement name="disp" class="b" />
+  <ui:VisualElement name="jc" class="b" />
+  <ui:VisualElement name="ws" class="b" />
+  <ui:VisualElement name="vis" class="b" />
+  <ui:VisualElement name="ov" class="b" />
+  <ui:VisualElement name="wd" class="b" />
+  <ui:VisualElement name="col" class="b" />
+  <ui:VisualElement name="op" class="b" />
+  <ui:VisualElement name="fg" class="b" />
+  <ui:VisualElement name="to" class="b" />
+  <ui:VisualElement name="fs" class="b" />
+  <ui:VisualElement name="al" class="b" />
+  <ui:VisualElement name="fw" class="b" />
+  <ui:VisualElement name="tp" class="b" />
+  <ui:Label name="lbl-ws" text="Label" />
+</ui:VisualElement>
+</ui:UXML>

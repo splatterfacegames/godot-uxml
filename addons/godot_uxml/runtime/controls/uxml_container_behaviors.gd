@@ -1676,10 +1676,15 @@ class TwoPaneBehavior extends UxmlBehaviors.Behavior:
 	var _start := 0.0
 	var _start_dim := 0.0
 
+	var _margins := 0.0
+
 	func setup() -> void:
 		_dim = UssValues.parse_number(attr("fixed-pane-initial-dimension", "100"))
 		if is_nan(_dim):
 			_dim = 100.0
+		# The anchor sits past the fixed pane's margins: known after the
+		# cascade (after_layout).
+		doc._post_layout.append(self)
 		var dl := control_of(UxmlContainerParts.get_part(el, "dragline"))
 		if dl != null:
 			UxmlContainerBehaviors.set_mouse(dl, Control.MOUSE_FILTER_STOP)
@@ -1701,8 +1706,16 @@ class TwoPaneBehavior extends UxmlBehaviors.Behavior:
 		if c != null and c.size != Vector2.ZERO:
 			limit = (c.size.y if _vertical() else c.size.x) - 1.0
 		_dim = clampf(d, 0.0, maxf(0.0, limit))
-		if UxmlContainerParts.two_pane_style(el, _dim):
+		if UxmlContainerParts.two_pane_style(el, _dim, _margins):
 			doc.relayout()
+
+	func after_layout() -> void:
+		var m := UxmlContainerParts.two_pane_margins(el, func(x: UxmlElement) -> Dictionary:
+			return doc._styles.get(x, {}))
+		if m != _margins:
+			_margins = m
+			if UxmlContainerParts.two_pane_style(el, _dim, _margins):
+				doc.relayout()
 
 	func _on_input(ev: InputEvent) -> void:
 		var a := 1 if _vertical() else 0

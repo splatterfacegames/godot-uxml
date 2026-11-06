@@ -1,0 +1,11 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="outer">
+    <ui:Label name="l1" text="Inherits" />
+    <ui:VisualElement name="mid">
+      <ui:Label name="l2" text="Two" />
+      <ui:Label name="l3" class="over" text="Three" />
+    </ui:VisualElement>
+    <ui:Button name="btn" text="Button" />
+    <ui:TextField name="tf" label="Field" value="v" />
+  </ui:VisualElement>
+</ui:UXML>

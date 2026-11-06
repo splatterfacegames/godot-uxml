@@ -1,0 +1,14 @@
+{
+ "height": 400,
+ "actions": [
+  {
+   "op": "add-class",
+   "target": "wrap",
+   "class": "on"
+  },
+  {
+   "op": "advance",
+   "ms": 100
+  }
+ ]
+}

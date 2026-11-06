@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <Style src="sel-root/root.uss" />
+  <ui:Template name="T" src="sel-root/t.uxml" />
+  <ui:VisualElement name="a" class="q" />
+  <ui:VisualElement name="nest" class="q">
+    <Style src="sel-root/nested.uss" />
+    <ui:VisualElement name="nest-child" class="q" />
+  </ui:VisualElement>
+  <ui:Instance template="T" name="inst" />
+</ui:UXML>

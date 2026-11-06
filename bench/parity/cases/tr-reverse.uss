@@ -1,0 +1,33 @@
+.b { width: 20px; height: 8px; margin: 1px; background-color: rgb(255, 0, 0); }
+#lin { transition: width 1s linear; }
+.on #lin { width: 120px; }
+#ease { transition: margin-left 1s ease; }
+.on #ease { margin-left: 100px; }
+#eio { transition: opacity 1s ease-in-out-sine; }
+.on #eio { opacity: 0; }
+#col { transition: background-color 1s linear; }
+.on #col { background-color: rgb(0, 0, 255); }
+#del { transition: height 1s linear 300ms; }
+.on #del { height: 48px; }
+#tr { transition: translate 1s ease-out; }
+.on #tr { translate: 50px 20px; }
+#rot { transition: rotate 1s linear; }
+.on #rot { rotate: 90deg; }
+#sc { transition: scale 1s linear; transform-origin: 0 0; }
+.on #sc { scale: 2 3; }
+#all { transition: all 1s linear; }
+.on #all { border-top-left-radius: 10px; padding-left: 10px; border-left-width: 4px; border-left-color: rgb(0, 255, 0); }
+#disc { transition: -unity-text-align 1s linear; }
+.on #disc { -unity-text-align: middle-center; }
+#bounce { transition: left 1s ease-out-bounce; }
+.on #bounce { left: 100px; }
+#fs { transition: font-size 1s linear; font-size: 10px; }
+.on #fs { font-size: 30px; }
+#ms { transition: width 400ms ease-in-cubic; }
+.on #ms { width: 100px; }
+#multi { transition: width 2s linear, height 500ms linear 250ms; }
+.on #multi { width: 220px; height: 28px; }
+#none { transition: width 1s linear; transition-property: none; }
+.on #none { width: 80px; }
+#neg { transition: width 1s linear -500ms; }
+.on #neg { width: 120px; }

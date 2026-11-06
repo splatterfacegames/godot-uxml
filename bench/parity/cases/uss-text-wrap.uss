@@ -1,0 +1,4 @@
+.t { width: 90px; margin: 1px; padding: 0; font-size: 12px; }
+#w-normal { white-space: normal; }
+#w-prewrap { white-space: pre-wrap; }
+#w-pre { white-space: pre; }

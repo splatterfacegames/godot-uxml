@@ -1,0 +1,16 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <uie:ColorField name="c-focus" label="CF" value="#FF8000FF" />
+  <uie:ObjectField name="o-focus" label="OF" />
+  <uie:ToolbarSearchField name="ts-focus" />
+  <uie:MaskField name="m-focus" label="MF" choices="A,B,C" value="1" />
+  <uie:LayerField name="l-hover" label="LH" />
+  <uie:TagField name="tg-dis" label="TD" enabled="false" />
+  <uie:EnumFlagsField name="ef-hover" label="EF" />
+  <uie:Toolbar name="tb">
+    <uie:ToolbarMenu name="tm-active" text="Menu" />
+    <uie:ToolbarToggle name="tt-checked-hover" text="T" value="true" />
+    <uie:ToolbarButton name="tb-dis" text="Dis" enabled="false" />
+  </uie:Toolbar>
+  <uie:CurveField name="cu-dis-hover" label="CU" enabled="false" />
+  <uie:GradientField name="g-hover" label="GR" />
+</ui:UXML>

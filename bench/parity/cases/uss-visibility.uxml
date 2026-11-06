@@ -1,0 +1,18 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="op" class="b">
+    <ui:VisualElement name="op-child" class="c" />
+  </ui:VisualElement>
+  <ui:VisualElement name="op0" class="b" />
+  <ui:VisualElement name="hid" class="b">
+    <ui:VisualElement name="hid-child" class="c" />
+    <ui:VisualElement name="hid-vis" class="c" />
+  </ui:VisualElement>
+  <ui:VisualElement name="none" class="b">
+    <ui:VisualElement name="none-child" class="c" />
+  </ui:VisualElement>
+  <ui:VisualElement name="ovh" class="b">
+    <ui:VisualElement name="ovh-child" class="big" />
+  </ui:VisualElement>
+  <ui:VisualElement name="clipbox" class="b" />
+  <ui:VisualElement name="after" class="b" />
+</ui:UXML>

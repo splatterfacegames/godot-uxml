@@ -1,0 +1,51 @@
+{
+ "actions": [
+  {
+   "op": "force-state",
+   "target": "h",
+   "states": [
+    "hover"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "a",
+   "states": [
+    "active"
+   ]
+  },
+  {
+   "op": "focus",
+   "target": "f"
+  },
+  {
+   "op": "force-state",
+   "target": "ck",
+   "states": [
+    "checked"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "sel",
+   "states": [
+    "checked"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "ha",
+   "states": [
+    "hover",
+    "active"
+   ]
+  },
+  {
+   "op": "force-state",
+   "target": "hp",
+   "states": [
+    "hover"
+   ]
+  }
+ ]
+}

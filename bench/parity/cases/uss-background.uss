@@ -1,0 +1,26 @@
+#wrap { flex-direction: row; flex-wrap: wrap; }
+.b { width: 60px; height: 30px; margin: 2px; background-color: rgb(200, 200, 200); }
+#p1 { background-position: left 10px top 20%; }
+#p2 { background-position-x: right 5px; background-position-y: bottom; }
+#p3 { background-position: center; }
+#p4 { background-position: 25% 75%; }
+#p5 { background-position: right; }
+#p6 { background-position: bottom 4px right; }
+#r1 { background-repeat: repeat; }
+#r2 { background-repeat: space round; }
+#r3 { background-repeat: repeat-x; }
+#r4 { background-repeat: repeat-y; }
+#r5 { background-repeat: no-repeat repeat; }
+#s1 { background-size: cover; }
+#s2 { background-size: contain; }
+#s3 { background-size: 50% auto; }
+#s4 { background-size: 20px 10px; }
+#s5 { background-size: 40px; }
+#s6 { background-size: auto; }
+#m1 { -unity-background-scale-mode: scale-and-crop; }
+#m2 { -unity-background-scale-mode: scale-to-fit; }
+#m3 { -unity-background-scale-mode: stretch-to-fill; }
+#m4 { background-size: cover; -unity-background-scale-mode: scale-to-fit; }
+#m5 { -unity-background-scale-mode: scale-to-fit; background-repeat: repeat; }
+#t1 { -unity-background-image-tint-color: rgba(255, 0, 0, 0.5); }
+#t2 { background-color: #0f08; }

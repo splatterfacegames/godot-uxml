@@ -1,0 +1,3 @@
+:root { padding-top: 5px; }
+:root > .q { padding-left: 6px; }
+:root .q { padding-right: 7px; }

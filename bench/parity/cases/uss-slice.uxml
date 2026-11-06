@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+<ui:VisualElement name="wrap">
+  <ui:VisualElement name="a" class="b" />
+  <ui:VisualElement name="b" class="b" />
+  <ui:VisualElement name="c" class="b" />
+  <ui:VisualElement name="d" class="b" />
+  <ui:VisualElement name="e" class="b" />
+  <ui:VisualElement name="f" class="b" />
+</ui:VisualElement>
+</ui:UXML>

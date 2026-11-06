@@ -23,8 +23,13 @@ use godot::prelude::*;
 const BIT_DISABLED: i32 = 32;
 const BIT_ENABLED: i32 = 64;
 const INLINE_SPEC: i64 = 1 << 62;
+/// `all: initial` outranks every other declaration (uss_cascade.gd ALL_SPEC).
+const ALL_SPEC: i64 = (1 << 62) | (1 << 61);
 const F_CUSTOM: i32 = 1;
 const F_VAR: i32 = 2;
+const F_ALL: i32 = 4;
+const BIT_ACTIVE: i32 = 2;
+const BIT_INACTIVE: i32 = 4;
 
 fn state_bit(name: &str) -> i32 {
     match name {
@@ -35,9 +40,32 @@ fn state_bit(name: &str) -> i32 {
         "checked" => 16,
         "disabled" => 32,
         "enabled" => 64,
-        "selected" => 128,
+        // Unity: `:selected` is `:checked` (uss_cascade.gd STATE_BITS).
+        "selected" => 16,
         _ => 0,
     }
+}
+
+/// "12px" / "12" -> 12 (UssValues.parse_length "px"), else None.
+fn px_of(v: &str) -> Option<f64> {
+    let t = v.trim();
+    let n = t.strip_suffix("px").unwrap_or(t);
+    if n.is_empty() || n.ends_with('.') && n.len() == 1 {
+        return None;
+    }
+    n.parse::<f64>().ok().filter(|x| x.is_finite())
+}
+
+/// "150%" -> 150, else None.
+fn pct_of(v: &str) -> Option<f64> {
+    v.trim().strip_suffix('%').and_then(|n| n.parse::<f64>().ok()).filter(|x| x.is_finite())
+}
+
+/// UssValues.fmt_number: four decimals, trailing zeros dropped.
+fn fmt_number(v: f64) -> String {
+    let t = format!("{:.4}", v);
+    let t = t.trim_end_matches('0').trim_end_matches('.').to_string();
+    if t == "-0" || t.is_empty() { "0".to_string() } else { t }
 }
 
 /// Two bloom-filter bits for an interned feature (any stable hash works:
@@ -272,6 +300,7 @@ pub struct Cascade {
     v_enabled: Variant,
     v_inherited: Variant,
     v_initial: Variant,
+    v_unset: Variant,
     sn_attributes: StringName,
     empty_fc: Rc<Vec<Item>>,
     empty_customs: Rc<Customs>,
@@ -587,6 +616,7 @@ impl Cascade {
             v_enabled: "enabled".to_variant(),
             v_inherited: "inherited".to_variant(),
             v_initial: GString::from("initial").to_variant(),
+            v_unset: GString::from("unset").to_variant(),
             sn_attributes: StringName::from("attributes"),
             empty_fc: Rc::new(vec![]),
             empty_customs: Rc::new(Customs { id: 0, dict: VarDictionary::new() }),
@@ -1092,6 +1122,9 @@ impl Cascade {
             if has_keys {
                 b |= kb[i];
             }
+            if b & BIT_ACTIVE == 0 {
+                b |= BIT_INACTIVE;
+            }
             // A clean (not re-read) element can only change through its
             // state bits: skip the Variant compares entirely.
             let reread_i = scan_all || reread[i];
@@ -1427,7 +1460,7 @@ impl Cascade {
                 }
                 c_shared[j] = true;
             }
-            let sp = c_spec[j];
+            let sp = if flags & F_ALL != 0 { ALL_SPEC } else { c_spec[j] };
             for (pk, (lh, _)) in pairs.iter().enumerate() {
                 match best_ix.get(lh) {
                     None => {
@@ -1491,11 +1524,50 @@ impl Cascade {
                 comp.retain(|it| it.pid != b.pid);
                 continue;
             }
+            // `unset`: an inherited property keeps the inherited value, any
+            // other one takes its initial value.
+            if *val == self.v_unset {
+                if !self.props.inherited[pidx] {
+                    computed.remove(&self.props.keys[pidx]);
+                    comp.retain(|it| it.pid != b.pid);
+                }
+                continue;
+            }
             computed.set(&self.props.keys[pidx], &entry);
             let item = Item { pid: b.pid, value: val.clone(), origin: origin.clone(), entry };
             match comp.iter_mut().find(|it| it.pid == b.pid) {
                 Some(it) => *it = item,
                 None => comp.push(item),
+            }
+        }
+
+        // font-size: a percentage of the inherited size, computed here as
+        // Unity computes it (uss_cascade.gd _font_percent).
+        if let Some(fpid) = self.props.index.get("font-size").copied() {
+            let fkey = self.props.keys[fpid as usize].clone();
+            if let Some(e) = computed.get(&fkey) {
+                let ed = e.try_to::<VarDictionary>().unwrap_or_default();
+                let own = gs(&ed.get(&self.k_value).unwrap_or_default()).to_string();
+                if own.trim_end().ends_with('%') && p >= 0 {
+                    let pe = self.fc_dict[p as usize].get(&fkey);
+                    let pv = pe
+                        .and_then(|x| x.try_to::<VarDictionary>().ok())
+                        .map(|d| gs(&d.get(&self.k_value).unwrap_or_default()).to_string());
+                    if let (Some(base), Some(pct)) = (pv.as_deref().and_then(px_of), pct_of(&own)) {
+                        let val = GString::from(format!("{}px", fmt_number(base * pct / 100.0)).as_str()).to_variant();
+                        let origin = ed.get(&self.k_origin).unwrap_or_default();
+                        let mut ne = VarDictionary::new();
+                        ne.set(&self.k_value, &val);
+                        ne.set(&self.k_origin, &origin);
+                        let nev = ne.to_variant();
+                        computed.set(&fkey, &nev);
+                        let item = Item { pid: fpid, value: val, origin, entry: nev };
+                        match comp.iter_mut().find(|it| it.pid == fpid) {
+                            Some(it) => *it = item,
+                            None => comp.push(item),
+                        }
+                    }
+                }
             }
         }
 

@@ -8,10 +8,14 @@ one <name>.json per case (see Assets/Editor/UxmlDump.cs for the format).
 Case sources (both may be given):
   --cases DIR        a directory of <name>.uxml with optional <name>.uss and
                      <name>.json sidecar (default: bench/parity/cases)
+                     A folder <name>.files/ beside a case holds its other
+                     files (templates, sheets), copied into the case folder.
   --reference FILE   bench/parity/reference.json (the reference engine's
-                     golden cases); cases whose files sit outside the case
-                     folder (project-rooted Assets/ or Packages/ paths) are
-                     skipped, because one Unity project cannot hold them all.
+                     golden cases). Their files also go to Assets/GoldenCases/
+                     (the folder the reference cases live in, so /Assets/...
+                     and project:// paths resolve), and project-rooted
+                     Packages/ files to an embedded package in Packages/;
+                     the cases agree on those files, so one project holds all.
 
   python tools/unity-dump/run.py [--unity PATH] [--out bench/parity/unity]
                                  [--only a,b] [--no-reference]
@@ -19,6 +23,7 @@ Case sources (both may be given):
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,21 +47,48 @@ def stage_dir_cases(src, stage, only):
             p = os.path.join(src, name + ext)
             if os.path.exists(p):
                 shutil.copyfile(p, os.path.join(d, name + ext))
+        extra = os.path.join(src, name + ".files")
+        if os.path.isdir(extra):
+            shutil.copytree(extra, d, dirs_exist_ok=True)
         names.append(name)
     return names
+
+
+def write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
 
 
 def stage_reference(ref_path, stage, only):
     data = json.load(open(ref_path, encoding="utf-8"))
     names, skipped = [], []
+    golden = os.path.join(HERE, "Assets", "GoldenCases")
+    if os.path.isdir(golden):
+        shutil.rmtree(golden)
+    rooted = {}
     for c in data["cases"]:
         name = c["name"]
         if only and name not in only:
             continue
         files = c.get("files") or {}
-        if any(k.startswith(("Assets/", "Packages/", "/")) or ".." in k for k in files):
+        if any(k.startswith(("Assets/", "/")) or ".." in k for k in files):
             skipped.append(name)
             continue
+        conflict = False
+        for k, text in files.items():
+            if k.startswith("Packages/"):
+                if rooted.get(k, text) != text:
+                    conflict = True
+                rooted[k] = text
+        if conflict:
+            skipped.append(name)
+            continue
+        for k, text in files.items():
+            if k.startswith("Packages/"):
+                write(os.path.join(HERE, k), text)
+            else:
+                write(os.path.join(golden, k), text)
         d = os.path.join(stage, name)
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, name + ".uxml"), "w", encoding="utf-8") as f:
@@ -65,6 +97,8 @@ def stage_reference(ref_path, stage, only):
             with open(os.path.join(d, name + ".uss"), "w", encoding="utf-8") as f:
                 f.write(c["uss"])
         for rel, text in files.items():
+            if rel.startswith("Packages/"):
+                continue
             p = os.path.join(d, rel)
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
@@ -74,6 +108,34 @@ def stage_reference(ref_path, stage, only):
             json.dump(side, f)
         names.append(name)
     return names, skipped
+
+
+WARN_RE = re.compile(r"Assets/Cases/([^/]+)/([^ ]+) \(line (\d+)\): (warning|error): (.*)$")
+
+
+def attach_import_warnings(log, out, names):
+    """Unity's USS import diagnostics (from the log) go into each case's dump
+    as "importWarnings": [{file, line, message}], so the harness can check
+    that godot-uxml reports the same declarations."""
+    per = {}
+    for line in log.splitlines():
+        m = WARN_RE.search(line)
+        if not m:
+            continue
+        entry = {"file": m.group(2), "line": int(m.group(3)), "message": m.group(5).strip()}
+        lst = per.setdefault(m.group(1), [])
+        if entry not in lst:
+            lst.append(entry)
+    for name in names:
+        p = os.path.join(out, name + ".json")
+        if not os.path.exists(p):
+            continue
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+        data["importWarnings"] = sorted(per.get(name, []), key=lambda e: (e["file"], e["line"]))
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, indent=1, ensure_ascii=False)
+            f.write("\n")
 
 
 def main():
@@ -115,6 +177,7 @@ def main():
     wrote = [l for l in log.splitlines() if "[uxml-dump] wrote" in l]
     for l in failed:
         print(l)
+    attach_import_warnings(log, args.out, names)
     print("Unity exit %d: %d written, %d failed, %d skipped (project-rooted files: %s)" % (
         rc, len(wrote), len(failed), len(skipped), ", ".join(skipped) or "none"))
     if rc != 0 and not wrote:

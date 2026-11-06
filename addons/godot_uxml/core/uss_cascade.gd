@@ -26,12 +26,19 @@ extends RefCounted
 
 const STATE_BITS := {
 	"hover": 1, "active": 2, "inactive": 4, "focus": 8,
-	"checked": 16, "disabled": 32, "enabled": 64, "selected": 128,
+	# `:selected` is Unity's old name of `:checked` (one pseudo-state);
+	# `:inactive` is set on every element that is not `:active`.
+	"checked": 16, "disabled": 32, "enabled": 64, "selected": 16,
 }
+const BIT_ACTIVE := 2
+const BIT_INACTIVE := 4
 const BIT_DISABLED := 32
 const BIT_ENABLED := 64
 ## Inline declarations outrank every selector: above any packed rule key.
 const INLINE_SPEC := 1 << 62
+## `all: initial` outranks every other declaration of the element, inline
+## ones included (measured: uss-all, uss-all-2).
+const ALL_SPEC := (1 << 62) | (1 << 61)
 ## Author rules outrank every theme rule (a sheet with "theme": true, see
 ## UxmlTheme), whatever the specificity — Unity sorts default-theme matches
 ## below author matches. Packed into the specificity key, so the native
@@ -40,6 +47,7 @@ const AUTHOR_LAYER := 1 << 61
 
 const F_CUSTOM := 1
 const F_VAR := 2
+const F_ALL := 4
 
 var doc: UxmlDocumentModel
 
@@ -541,6 +549,8 @@ static func _compile_rule(rule: Dictionary, layer: int) -> Array:
 		var fl := 0
 		if prop.begins_with("--"):
 			fl |= F_CUSTOM
+		elif prop == "all":
+			fl |= F_ALL
 		if val.find("var(") >= 0:
 			fl |= F_VAR
 			de.append(null)
@@ -558,6 +568,7 @@ static func _compile_rule(rule: Dictionary, layer: int) -> Array:
 		var anc_s := 0
 		var anc_r: Array = []
 		var sel_parts: Array = sel["parts"]
+		var anc_root := false
 		for pi in sel_parts.size():
 			var part: Dictionary = sel_parts[pi]
 			var ptypes := PackedStringArray()
@@ -583,6 +594,11 @@ static func _compile_rule(rule: Dictionary, layer: int) -> Array:
 						else:
 							mask |= int(STATE_BITS[simple["name"]])
 			var is_child: bool = part["combinator"] == "child"
+			if root and pi < sel_parts.size() - 1:
+				# Unity matches `:root` on the selector's subject only: as an
+				# ancestor (`:root > .a`, `:root .a`) it matches nothing
+				# (measured, sel-root).
+				anc_root = true
 			parts.append([ptypes, pnames, pclasses, mask, root, is_child])
 			if pi < sel_parts.size() - 1:
 				anc_c.append_array(pclasses)
@@ -590,6 +606,8 @@ static func _compile_rule(rule: Dictionary, layer: int) -> Array:
 				anc_s |= mask
 				if mask != 0:
 					anc_r.append([ptypes, pnames, pclasses, mask])
+		if anc_root:
+			continue
 		var need := 0
 		for pi2 in parts.size() - 1:
 			var cp2: Array = parts[pi2]
@@ -639,7 +657,21 @@ static func _expand(prop: String, raw: String) -> Array:
 	var hit = per.get(raw)
 	if hit != null:
 		return hit
-	var out := UssProperties.expand_shorthand(prop, raw)
+	var out: Array
+	if prop.begins_with("--"):
+		out = UssProperties.expand_shorthand(prop, raw)
+	else:
+		# Unity ignores `!important` and reads an unreadable longhand value
+		# as its type's zero value (UssProperties.unity_value).
+		var pairs := UssProperties.expand_shorthand(prop, UssProperties.strip_important(raw))
+		out = pairs
+		for k in pairs.size():
+			var pair: Array = pairs[k]
+			var uv := UssProperties.unity_value(pair[0], pair[1])
+			if uv != pair[1]:
+				if is_same(out, pairs):
+					out = pairs.duplicate()  # expansions may be shared
+				out[k] = [pair[0], uv]
 	per[raw] = out
 	_exp_cache[prop] = per
 	return out
@@ -734,6 +766,8 @@ static func _inline(text: String) -> Array:
 		var fl := 0
 		if prop.begins_with("--"):
 			fl |= F_CUSTOM
+		elif prop == "all":
+			fl |= F_ALL
 		if val.find("var(") >= 0:
 			fl |= F_VAR
 			de.append(null)
@@ -971,6 +1005,8 @@ func update(options: Dictionary = {}, force: bool = false, dirty = null, only_fo
 				b |= eb
 		if has_keys:
 			b |= key_bits[i]
+		if (b & BIT_ACTIVE) == 0:
+			b |= BIT_INACTIVE
 		var own: bool = (
 			full or b != _sig_bits[i] or c != _sig_cls[i]
 			or nm != _sig_name[i] or st != _sig_style[i]
@@ -1194,6 +1230,18 @@ func _match_compound(cp: Array, i: int, scope_idx: int) -> bool:
 	return true
 
 
+## A font-size percentage of the inherited font-size entry as px text, ""
+## when the inherited size is not in px (the parent's size is the theme's).
+static func _font_percent(value: String, parent_entry) -> String:
+	if parent_entry == null:
+		return ""
+	var pl := UssValues.parse_length(String(parent_entry["value"]))
+	var own := UssValues.parse_length(value)
+	if pl["kind"] != "px" or own["kind"] != "percent":
+		return ""
+	return UssValues.fmt_number(float(pl["value"]) * float(own["value"]) / 100.0) + "px"
+
+
 func _match_from(parts: Array, k: int, i: int, scope_idx: int) -> bool:
 	var cp: Array = parts[k]
 	if not _match_compound(cp, i, scope_idx):
@@ -1394,7 +1442,7 @@ func _compute(i: int) -> void:
 				doc.source, node.open_tag_start, doc.path
 			))
 			continue
-		var sp := c_spec[j]
+		var sp := ALL_SPEC if (c_flag[j] & F_ALL) else c_spec[j]
 		var org = c_origin[j]
 		for pk in pairs.size():
 			var pair: Array = pairs[pk]
@@ -1438,7 +1486,21 @@ func _compute(i: int) -> void:
 		if b_val[slot] == "initial":
 			computed.erase(prop)
 			continue
+		# `unset`: an inherited property keeps the inherited value, any
+		# other one takes its initial value.
+		if b_val[slot] == "unset":
+			if not _is_inherited(prop):
+				computed.erase(prop)
+			continue
 		computed[prop] = ent if ent != null else {"value": b_val[slot], "origin": b_origin[slot]}
+
+	# font-size: a percentage of the inherited size, computed here as Unity
+	# computes it (children inherit the px value).
+	var fse = computed.get("font-size")
+	if fse != null and String(fse["value"]).ends_with("%"):
+		var pxv := _font_percent(String(fse["value"]), inherited.get("font-size"))
+		if not pxv.is_empty():
+			computed["font-size"] = {"value": pxv, "origin": fse["origin"]}
 
 	if not _ov.is_empty():
 		var ov = _ov.get(i)

@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+<ui:VisualElement name="parent-a">
+  <Style src="Assets/Cases/imp-style-noslash/shared.uss" />
+  <ui:VisualElement name="target-a" class="target" />
+</ui:VisualElement>
+</ui:UXML>

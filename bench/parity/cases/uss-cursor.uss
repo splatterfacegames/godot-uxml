@@ -1,0 +1,5 @@
+.b { width: 30px; height: 10px; }
+#c-text { cursor: text; }
+#c-link { cursor: link; }
+#c-resize { cursor: resize-horizontal; }
+#c-arrow { cursor: arrow; }

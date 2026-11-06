@@ -1,0 +1,24 @@
+#wrap { flex-direction: row; flex-wrap: wrap; }
+.t { width: 90px; margin: 1px; padding: 0; font-size: 12px; }
+#ell { overflow: hidden; text-overflow: ellipsis; }
+#ell-start { overflow: hidden; text-overflow: ellipsis; -unity-text-overflow-position: start; }
+#ell-mid { overflow: hidden; text-overflow: ellipsis; -unity-text-overflow-position: middle; }
+#ell-clip { text-overflow: clip; -unity-text-overflow-position: end; }
+#ws-normal { white-space: normal; }
+#ws-nowrap { white-space: nowrap; }
+#ws-pre { white-space: pre; }
+#ws-prewrap { white-space: pre-wrap; }
+#ls { letter-spacing: 3px; }
+#ws { word-spacing: 6px; }
+#ps { -unity-paragraph-spacing: 4px; }
+#shadow { text-shadow: 2px 3px 1px rgb(255, 0, 0); }
+#shadow2 { text-shadow: 1px 1px blue; }
+#outline { -unity-text-outline: 1px rgb(0, 0, 255); }
+#outline2 { -unity-text-outline-width: 2px; -unity-text-outline-color: red; }
+#bold { -unity-font-style: bold; }
+#italic { -unity-font-style: italic; }
+#bi { -unity-font-style: bold-and-italic; }
+#gen { -unity-text-generator: advanced; }
+#bitmap { -unity-editor-text-rendering-mode: bitmap; }
+#auto { -unity-text-generator: advanced; -unity-text-auto-size: best-fit 8px 30px; height: 30px; }
+#auto-none { -unity-text-auto-size: none; }

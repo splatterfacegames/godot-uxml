@@ -1,0 +1,67 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="ac-flex-start" class="wrap">
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="ac-flex-end" class="wrap">
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="ac-center" class="wrap">
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="ac-stretch" class="wrap">
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="ac-space-between" class="wrap">
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="ac-space-around" class="wrap">
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="rev" class="wrap">
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="rowrev" class="wrap">
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+    <ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="je" class="jrow">
+    <ui:VisualElement class="it" /><ui:VisualElement class="it m" /><ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="ja" class="jrow">
+    <ui:VisualElement class="it" /><ui:VisualElement class="it" /><ui:VisualElement class="it" />
+  </ui:VisualElement>
+  <ui:VisualElement name="as" class="jrow">
+    <ui:VisualElement class="it a1" /><ui:VisualElement class="it a2" /><ui:VisualElement class="it a3" /><ui:VisualElement class="it a4" /><ui:VisualElement class="it a5" />
+  </ui:VisualElement>
+</ui:UXML>

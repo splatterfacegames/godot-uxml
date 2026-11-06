@@ -1,0 +1,9 @@
+.par { width: 200px; color: rgb(0, 128, 0); font-size: 16px; padding: 4px; }
+.c { width: 50px; height: 10px; margin: 2px; max-width: 30px; }
+#w-initial { width: initial; }
+#w-auto { width: auto; height: auto; }
+#m-initial { margin: initial; padding-left: initial; }
+#c-initial { color: initial; font-size: initial; }
+#mx-none { max-width: none; }
+#unset { margin-left: unset; color: unset; }
+#btn-initial { margin: initial; background-color: initial; border-width: initial; }

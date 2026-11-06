@@ -256,6 +256,9 @@ UXML {
 .unity-min-max-slider__dragger {
   position: absolute;
   height: 6px;
+  /* Unity's slices of its dragger image (no image here: inert). */
+  -unity-slice-left: 10;
+  -unity-slice-right: 10;
   top: 50%;
   margin-top: -3px;
   border-top-width: 1px;
@@ -297,6 +300,7 @@ UXML {
 .unity-base-text-field__input {
   flex-direction: row;
   flex-grow: 1;
+  flex-shrink: 1;
   flex-basis: 0%;
   /* Unity's input clips its text and does not bound the text width. */
   overflow: scroll;
@@ -337,6 +341,7 @@ UXML {
    ctl-textfield-multiline). */
 .unity-base-text-field__input--multiline--scroll-view {
   flex-direction: column;
+  flex-shrink: 0;
   overflow: hidden;
 }
 
@@ -371,7 +376,7 @@ UXML {
 /* The runtime theme stacks the sub-fields: each sub-field is a whole field
    with a 150px label (measured: ctl-vectors, ctl-rects). */
 .unity-composite-field__field-spacer {
-  flex-grow: 1;
+  visibility: hidden;
 }
 
 /* ---- DropdownField, EnumField ----------------------------------------- */
@@ -759,3 +764,45 @@ UXML {
   -unity-text-align: middle-center;
 }
 
+
+/* ---- Resolved values that change no box (measured with every resolved
+   style value: bench/parity/unity/ctl-*.json, uss-cursor.json) --------- */
+
+/* Unity clips these controls and parts. */
+.unity-base-field__label,
+.unity-base-text-field,
+.unity-toggle,
+.unity-toggle__input,
+.unity-radio-button,
+.unity-radio-button__input,
+.unity-radio-button-group,
+.unity-button-group,
+.unity-toggle-button-group,
+.unity-composite-field,
+.unity-composite-field__input,
+.unity-bounds-field,
+.unity-bounds-field__input,
+.unity-bounds-int-field,
+.unity-bounds-int-field__input,
+.unity-base-popup-field,
+.unity-base-popup-field__input,
+.unity-base-popup-field__text,
+.unity-enum-field,
+.unity-enum-field__input,
+.unity-enum-field__text,
+.unity-radio-button-group > .unity-base-field__input {
+  overflow: hidden;
+}
+
+.unity-base-popup-field__input,
+.unity-enum-field__input {
+  white-space: nowrap;
+}
+
+/* A disabled MinMaxSlider: the dragger and thumbs turn grey. */
+.unity-min-max-slider__dragger:disabled,
+.unity-min-max-slider__min-thumb:disabled,
+.unity-min-max-slider__max-thumb:disabled {
+  background-color: rgb(128, 128, 128);
+  border-color: rgb(126, 126, 126);
+}

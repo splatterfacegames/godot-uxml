@@ -1,0 +1,12 @@
+.scope { --w: 30px; --c: rgb(255, 0, 0); --m: 2px 4px; --ref: var(--w); --pad: 3px; --col2: #00f; }
+.b { height: 6px; }
+#v1 { width: var(--w); background-color: var(--c); }
+#v2 { width: var(--missing, 44px); background-color: var(--missing, rgb(0, 255, 0)); }
+#v3 { margin: var(--m); }
+#v4 { width: var(--ref); }
+#v5 { width: var(--missing, var(--w)); }
+#v6 { padding: var(--pad) 1px; border-color: var(--col2); border-width: 1px; }
+#v7 { width: var(--missing); }
+.inner { --w: 12px; }
+#v8 { width: var(--w); }
+#v9 { color: var(--c); font-size: var(--missing, 15px); }

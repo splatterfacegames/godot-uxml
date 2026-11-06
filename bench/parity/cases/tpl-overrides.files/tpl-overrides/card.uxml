@@ -1,0 +1,7 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="card.uss" />
+  <ui:VisualElement name="card" class="card">
+    <ui:Label name="title" text="Title" class="title" />
+    <ui:Button name="go" text="Go" />
+  </ui:VisualElement>
+</ui:UXML>

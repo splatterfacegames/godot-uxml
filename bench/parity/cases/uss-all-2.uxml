@@ -1,0 +1,11 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="by-id" class="reset" />
+  <ui:VisualElement name="inline" class="reset" style="width: 33px;" />
+  <ui:VisualElement name="parent" class="reset styled">
+    <ui:VisualElement name="child" class="styled" />
+  </ui:VisualElement>
+  <ui:VisualElement name="later" class="reset late" />
+  <ui:VisualElement name="earlier" class="early reset" />
+  <ui:VisualElement name="unset" class="styled all-unset" />
+  <ui:VisualElement name="custom" class="reset" />
+</ui:UXML>

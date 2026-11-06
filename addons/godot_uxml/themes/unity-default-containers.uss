@@ -311,10 +311,47 @@
 
 .unity-tab__header:hover .unity-tab__reorderable-handle-bar {
   opacity: 0.5;
+  transition: background-color 0.1s;
 }
 
 /* ---- TwoPaneSplitView -------------------------------------------------- */
 
 .unity-two-pane-split-view__dragline-anchor {
   background-color: rgb(149, 149, 149);
+}
+
+/* ---- Resolved values that change no box (measured with every resolved
+   style value: ctl-scroll*.json, ctl-multicolumn-*.json, ctl-tab*.json,
+   ctl-twopane.json, ctl-more-2.json) ---------------------------------- */
+
+.unity-scroller__slider,
+.unity-multi-column-view__header-container,
+.unity-multi-column-view__cell,
+.unity-multi-column-view__cell__label,
+.unity-multi-column-header__column,
+.unity-tab-view__content-viewport,
+.unity-two-pane-split-view {
+  overflow: hidden;
+}
+
+.unity-two-pane-split-view__dragline--vertical {
+  cursor: resize-vertical;
+}
+
+.unity-two-pane-split-view__dragline--horizontal {
+  cursor: resize-horizontal;
+}
+
+/* Unity animates the header move and the reorder handle colour. */
+.unity-tab-view__header-container {
+  transition: translate 0.5s ease-in-out;
+}
+
+#unity-tree-view__item-indent {
+  flex-direction: row;
+}
+
+#unity-list-view__add-button,
+#unity-list-view__remove-button {
+  -unity-font-style: bold;
 }

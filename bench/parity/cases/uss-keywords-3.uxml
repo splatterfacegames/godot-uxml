@@ -1,0 +1,13 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="par" class="par">
+    <ui:VisualElement name="disp" class="c" />
+    <ui:VisualElement name="fd" class="c" />
+    <ui:VisualElement name="op" class="c" />
+    <ui:Label name="fs" text="F" />
+    <ui:Label name="al" text="A" />
+    <ui:VisualElement name="fg" class="c" />
+    <ui:VisualElement name="pos" class="c" />
+    <ui:Label name="ls" text="L" />
+    <ui:VisualElement name="ini" class="c" />
+  </ui:VisualElement>
+</ui:UXML>

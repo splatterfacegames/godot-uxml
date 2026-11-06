@@ -1,0 +1,26 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="row" class="row">
+    <ui:VisualElement name="grow-max" class="g" />
+    <ui:VisualElement name="grow" class="g" />
+    <ui:VisualElement name="shrink-min" class="s" />
+  </ui:VisualElement>
+  <ui:VisualElement name="row2" class="row">
+    <ui:VisualElement name="conf" />
+    <ui:VisualElement name="conf-h" />
+    <ui:VisualElement name="minauto" />
+  </ui:VisualElement>
+  <ui:VisualElement name="col" class="col">
+    <ui:VisualElement name="cg" class="g" />
+    <ui:VisualElement name="cg-min" class="g" />
+  </ui:VisualElement>
+  <ui:VisualElement name="ar-row" class="row">
+    <ui:VisualElement name="ar1" />
+    <ui:VisualElement name="ar2" />
+    <ui:VisualElement name="ar3" />
+  </ui:VisualElement>
+  <ui:VisualElement name="shr" class="row">
+    <ui:VisualElement name="sh1" class="big" />
+    <ui:VisualElement name="sh2" class="big" />
+    <ui:VisualElement name="sh3" class="big" />
+  </ui:VisualElement>
+</ui:UXML>

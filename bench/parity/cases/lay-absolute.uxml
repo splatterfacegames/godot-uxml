@@ -1,0 +1,22 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="par" class="par">
+    <ui:VisualElement name="rb" class="abs" />
+    <ui:VisualElement name="lr" class="abs" />
+    <ui:VisualElement name="tb" class="abs" />
+    <ui:VisualElement name="pct" class="abs" />
+    <ui:VisualElement name="marg" class="abs" />
+    <ui:VisualElement name="none" class="abs" />
+    <ui:VisualElement name="minmax" class="abs" />
+    <ui:VisualElement name="flow" />
+    <ui:VisualElement name="neg" class="abs" />
+  </ui:VisualElement>
+  <ui:VisualElement name="center" class="cpar">
+    <ui:VisualElement name="c-abs" class="abs" />
+    <ui:VisualElement name="c-flow" />
+  </ui:VisualElement>
+  <ui:VisualElement name="rowp" class="rpar">
+    <ui:VisualElement name="r-flow" />
+    <ui:VisualElement name="r-abs" class="abs" />
+    <ui:VisualElement name="r-self" class="abs" />
+  </ui:VisualElement>
+</ui:UXML>
