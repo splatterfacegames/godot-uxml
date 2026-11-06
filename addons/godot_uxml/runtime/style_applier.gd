@@ -1341,10 +1341,19 @@ func apply_resolved_insets(c: Control, start: Vector2, end: Vector2) -> void:
 		# content_margin_* is a StyleBox BASE-class property — it insets
 		# native content for flat AND texture styleboxes. texture_margin_*
 		# is nine-patch source slicing and is deliberately left alone.
-		sb.content_margin_left = start.x
-		sb.content_margin_top = start.y
-		sb.content_margin_right = end.x
-		sb.content_margin_bottom = end.y
+		# Usually the stylebox already has these margins (_stylebox put the
+		# USS px border + padding there): a write of the same value would
+		# still emit `changed` and make the control update its minimum size
+		# and theme (about 60 us per Label), so only differing sides are
+		# written.
+		if sb.content_margin_left != start.x:
+			sb.content_margin_left = start.x
+		if sb.content_margin_top != start.y:
+			sb.content_margin_top = start.y
+		if sb.content_margin_right != end.x:
+			sb.content_margin_right = end.x
+		if sb.content_margin_bottom != end.y:
+			sb.content_margin_bottom = end.y
 		# Recorded unconditionally so the measure path subtracts exactly
 		# what the stylebox adds — texture styleboxes count too.
 		sb.set_meta("uxml_margins", [start.x, start.y, end.x, end.y])
