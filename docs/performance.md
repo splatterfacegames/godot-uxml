@@ -723,3 +723,319 @@ UNITY PARITY 123/127 (structure 3261/3261, geometry 10609/10616, style
 / 1295 (`--gdscript`), `bench/equiv_layout.gd` 216 / 216,
 `bench/equiv_runtime.gd` 1400 / 1400, `bench/equiv_parse.gd` 2701 / 2701,
 0 failures.
+
+## Part controls and hidden subtrees (`perf/part-controls`)
+
+Goal: fewer Godot nodes and less engine work per node, with no change in
+output. Every element of a Unity part tree is its own Control, and the
+previous pass found entering the tree to be the largest remaining engine
+cost. This pass profiled where a load spends its time per node, evaluated
+the candidate ways to make fewer or cheaper nodes, and implemented the one
+that pays: subtrees that are hidden at load stay out of the scene tree
+until they are first shown.
+
+### What a node costs
+
+Measured with the main loop running (a `SceneTree` script after two
+frames; 1,000 to 2,000 nodes per kind, three repeats; us per node):
+
+| step | Control | UxmlBox | Label | Button |
+| --- | ---: | ---: | ---: | ---: |
+| `new()` | 3.0 | 3.4 | 18 | - |
+| `add_child` off the tree | 1.6 | 1.6 | - | - |
+| entering the tree | 13-14 | 14-15 | 80-92 | 125-137 |
+| the document's 5 signal connections (`_wire`) | - | 8.5 | - | - |
+| `position` + `size` | - | 4.7 | - | - |
+| `visible`, `mouse_filter`, `focus_mode`, a meta | - | 2.7 | - | - |
+| a new StyleBoxFlat set as `box_style` | - | 4.0 | - | - |
+| `free()` of the subtree | - | 16 | 13 | - |
+
+For comparison, a `Node` enters in 0.4 us, a `Node2D` in 4.9, a `Panel` in
+17. A RenderingServer canvas item costs 0.6 us to create, parent and
+place, plus 1.3 us to draw a stylebox into it. The cost of entering the
+tree is flat from 100 to 4,000 siblings, and the same for flat and deep
+trees. A Label with empty text costs as much as one with text, so the time is
+not text shaping; presumably it is theme item caching. The following changed nothing
+(within ±5 %): `auto_translate_mode` disabled, `mouse_filter` ignore with
+focus none set before the add, and a `Theme` on the host (the default
+theme, or an empty one). With the default theme on the host, a Label
+entered in 91 us and a Button in 168 us: slower.
+
+Where a load spends its time (Options.uxml, theme, ms per load):
+parse and loader 1.5, part expansion and index 1.4, factory 1.9, entering
+the tree 1.7, wiring 0.7, behaviors 1.0, attributes and bindings 0.7, and
+the two restyles 14 (cascade 4.8, apply 8.5 for 59 controls, layout 3.2).
+The apply of a part box costs 20-60 us, and that is GDScript (the box is
+rebuilt), not the engine. Entering the tree is 7 % of the Options load,
+12 % of the large document (110 ms of 917) and 12 % of the settings
+workload (10 ms of 81).
+
+### Census of the fixtures
+
+Controls per document after a load (theme on). Ignore leaves: part boxes
+with no children whose `mouse_filter` is ignore (checkmarks, arrows).
+Pass leaves: leaf part boxes that pass the mouse on. Hidden: hidden at
+load (`display: none` on the element or an ancestor).
+
+| document | controls | parts | ignore leaves | pass leaves | hidden at load |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Options.uxml | 58 | 49 | 3 | 15 | 10 |
+| runtime.uxml | 65 | 43 | 2 | 12 | 14 |
+| review.uxml | 98 | 59 | 4 | 12 | 4 |
+| Menu.uxml | 4 | 0 | 0 | 0 | 0 |
+| settings workload | 314 | 160 | 32 | 48 | 235 |
+| inventory workload | 243 | 0 | 0 | 0 | 0 |
+| list1k workload | 3,023 | 21 | 0 | 6 | 10 |
+| listview10k workload (before items) | 212 | 69 | 0 | 6 | 206 |
+| large document | 1,950 | 421 | 60 | 120 | 48 |
+
+### Evaluated
+
+**Virtual parts (dropped).** A part drawn by its nearest Control ancestor
+through RenderingServer would save about 35 us of engine work per part
+(new, add, entering the tree, wiring, placement) plus part of its apply.
+Only parts that ignore the mouse can be virtual, though. A part that
+passes the mouse on is a picking target: Godot's `mouse_entered` on it is
+what sets `:hover` on the part (Unity sets it on every element under the
+pointer, and author or theme USS can style a part's `:hover`), and its
+`gui_input` sets `:active`. That leaves 3 parts in Options, 2 in runtime,
+32 in the settings workload and 60 in the large document: about 0.2 ms,
+2 ms and 4 ms per load (0.5 % to 3 %). A virtual part would also need its
+own draw order among real siblings (`canvas_item_set_draw_index`),
+`opacity`, transforms with ratio pivots, `overflow` clipping of real
+children, filters and materials. All of that would be a second
+implementation of what `UxmlBox`, `UxmlClip` and the applier already do,
+for a few percent.
+
+**Apply before entering the tree (dropped).** Off the tree,
+`end_bulk_theme_override` sends no theme-changed notification, so the
+first apply of a load could be cheaper if the controls entered the tree
+after it. Measured with the main loop running: Options 22.8 → 23.1 ms,
+settings 80.7 → 78.9, inventory 89.0 → 87.9, large document
+906 → 883 (−2.5 %). The theme cache is then built when the control enters
+the tree, so most of the cost moves rather than disappears. Applying off
+the tree would also read the default theme instead of a Godot `theme` set
+above the document, and filters, text shadows and `_pixel_scale` check
+`is_inside_tree()`.
+
+**Cheaper control types and fewer property writes.** Element boxes are
+already plain `Control`s (`UxmlBox`; a `Panel` costs more to enter). The
+factory sets properties off the tree, before `add_child`, and the document
+adds each top-level subtree with one `add_child`. Skipping the five signal
+connections of parts that never receive input would save 8.5 us per part.
+Godot runs the callbacks of a signal in connection order, though, and
+behaviors connect to the same signals (`gui_input`, `pressed`), so
+deferring the document's connections would reorder them. Kept as is.
+
+**Hidden subtrees out of the tree (implemented).** The settings workload
+has 235 of its 314 controls hidden at load (three of four pages), and the
+same holds for any screen with tabs, pages, collapsed Foldouts or hidden
+panels. The cascade resolved before the controls enter the tree finds the
+same hidden subtrees as the first restyle does (checked on every fixture).
+
+**Not creating hidden controls at all (not done).** Building a hidden
+subtree only when it is shown would save its factory, wiring and behavior
+setup too: about 10 ms more on the settings workload. The behaviors, the
+bindings and the factory, though, report diagnostics, set states,
+validate attributes and emit nothing else at load. Deferring them would
+move diagnostics from the load to the first show and change when behavior
+state exists. Parking keeps all of that exactly as it is and changes only
+tree membership.
+
+### What changed
+
+- `UxmlDocument._index` builds the controls off the tree, then
+  `_park_hidden()` creates the cascade and resolves it without runtime
+  states. Each topmost hidden subtree's root control is taken out of its
+  parent and recorded in `_parked`; then the remaining top-level controls
+  enter the tree. Parked: authored elements and the content part of an
+  authored (non-part) Foldout. Not parked: other parts (behaviors place,
+  measure or move them), pooled collection rows, and anything when the
+  document or an ancestor has a Godot `theme`.
+- The first restyle updates the early cascade incrementally: the
+  elements whose attributes behaviors and bindings set through
+  `set_attribute`, plus the states they set. Before, it re-read every
+  element. (Re-reading after the early resolve cost 1.3 to 3 ms on the
+  settings workload, about half of what parking saves.) Direct writes to
+  `UxmlElement.attributes` during setup change only `text`, which the
+  cascade does not read.
+- Every restyle checks the parked roots after the effective flags. A
+  shown root is added back to its parent before the apply and the layout,
+  after the control of the nearest earlier sibling element that is in the
+  parent (else before the nearest later one, else after the parent's
+  leading non-element children). This follows the current model order,
+  so a Tab moved while parked lands in the right place.
+- The API hands out no parked control. `get_element`, `get_native`, the
+  behavior and scroll calls by name (`_named`) put the element's parked
+  subtree in the tree, along with those below it, before returning;
+  `get_focus_ring` puts in all of them. Parked subtrees are freed on
+  reload and when the document is freed.
+- The native layout gets the controls when the restyle first sees a new
+  cascade (`_native_bound`), not only where the cascade was created.
+  `_structure_changed()` replaces the cascade mid-life.
+- `bench/equiv_layout.gd` compares measurer side effects on the controls
+  in the tree. A parked control is never measured, and writing `size` to
+  a control off the tree clamps it to a minimum size that the engine keeps
+  current only in the tree. That made the harness's own restore write
+  differ.
+
+### Results
+
+**In-process A/B** (`bench/park_load.gd`): loads alternate between parked
+and not parked (`UxmlDocument.park_hidden`) in one process, after the main
+loop started, 60 loads per document (12 for the two large ones). Both
+sides therefore see the same machine load. Median ms of three runs (two
+with the theme, one without):
+
+| document | parked | not parked | ratio | controls in the tree after load (not parked → parked) |
+| --- | ---: | ---: | ---: | --- |
+| settings workload, theme | 70.1 / 74.2 | 77.0 / 81.4 | 0.91 | 314 → 83 |
+| settings workload, no theme | 62.1 | 68.6 | 0.91 | 314 → 83 |
+| parking fixture, theme | 33.0 / 33.9 | 36.4 / 37.3 | 0.91 | 145 → 57 |
+| parking fixture, no theme | 29.6 | 32.6 | 0.91 | 145 → 57 |
+| runtime.uxml, theme | 24.9 / 25.8 | 24.6 / 24.7 | 1.01-1.04 | 66 → 64 |
+| Options.uxml, theme | 20.7 / 20.8 | 20.2 / 21.1 | 0.98-1.02 | 59 → 59 |
+| Menu.uxml, theme | 4.5 / 4.6 | 4.5 / 4.6 | 0.99-1.01 | 4 → 4 |
+| review.uxml, theme | 40.2 / 42.0 | 40.6 / 42.4 | 0.99 | 100 → 100 |
+| inventory workload, theme | 76.0 / 79.5 | 75.2 / 79.3 | 1.00-1.01 | 243 → 243 |
+| list1k workload, theme | 1257 / 1287 | 1239 / 1321 | 0.97-1.02 | 3,023 → 3,023 |
+| large document, theme | 783 / 802 | 768 / 770 | 1.02-1.04 | 1,950 → 1,950 |
+
+The same A/B with the workloads' timing (from `UxmlDocument.new()` to the
+end of one more `_restyle_now()` after the load, 20 loads per side, two
+runs): settings 80.0 and 85.2 ms parked, against 85.8 and 91.4 not parked.
+Split up (another run): the load itself takes 71.3 ms parked and 77.9 not
+parked; the restyle after it takes 11.0 and 10.4 ms. Inventory: 77.0
+against 76.5 ms for the load, 20.7 against 21.1 for the restyle. In
+runtime.uxml only a 2-element authored subtree is hidden, so there is
+nothing to win. Documents with nothing to park are within the
+run-to-run spread (±4 %).
+
+**main (`e677d05`) against this branch**: `bench/bench.gd -- --quick`,
+`bench/workloads.gd -- --quick` and a main-loop load loop (`load_document`
+40 times, 8 for the two large documents, a frame between loads), each with
+and without `-- --no-theme`. There were six rounds; each ran every script
+and mode for main, then for the branch. The tables give the median of the
+six medians (ms, native core). Other processes loaded the machine during
+the runs (Unity, another agent's tools). Ops this branch does not touch
+(`parse_uxml`, `parse_uss`, `loader`, hover, HUD) moved by up to ±8 %
+between sides, and the 5-sample `--quick` load rows by more. The A/B
+above is the measurement of this change; these tables show that nothing
+else moved beyond that spread.
+
+`bench.gd`:
+
+| op | main, theme | branch, theme | ratio | main, no theme | branch, no theme | ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| parse_uxml(big) | 24.016 | 23.689 | 0.99 | 24.259 | 23.865 | 0.98 |
+| parse_uss(3 sheets) | 6.011 | 5.867 | 0.98 | 6.088 | 5.920 | 0.97 |
+| loader(big) | 46.755 | 46.700 | 1.00 | 47.255 | 46.825 | 0.99 |
+| cascade resolve(big) | 96.088 | 94.635 | 0.98 | 93.892 | 98.438 | 1.05 |
+| cascade resolve(big, hover) | 102.422 | 101.964 | 1.00 | 104.172 | 112.826 | 1.08 |
+| load_document(big) full | 678.641 | 695.203 | 1.02 | 625.628 | 641.114 | 1.02 |
+| load_document(runtime.uxml) | 22.305 | 23.687 | 1.06 | 19.261 | 20.145 | 1.05 |
+| load_document(review.uxml) | 35.177 | 37.100 | 1.05 | 31.879 | 32.645 | 1.02 |
+| load_document(Options.uxml) | 19.049 | 19.599 | 1.03 | 13.905 | 15.168 | 1.09 |
+| load_document(Menu.uxml) | 4.402 | 4.327 | 0.98 | 3.535 | 3.596 | 1.02 |
+| hover toggle (button) | 1.319 | 1.240 | 0.94 | 1.305 | 1.475 | 1.13 |
+| hover toggle (card, desc sel) | 2.303 | 2.238 | 0.97 | 1.970 | 2.107 | 1.07 |
+| hover move (card i -> i+1) | 2.245 | 2.188 | 0.97 | 1.975 | 1.846 | 0.93 |
+| focus toggle (list item) | 1.745 | 1.821 | 1.04 | 1.594 | 1.594 | 1.00 |
+| set_class churn (card) | 14.788 | 15.334 | 1.04 | 15.834 | 16.165 | 1.02 |
+| set_text + refresh | 190.307 | 199.375 | 1.05 | 171.117 | 172.832 | 1.01 |
+| set_text + relayout | 13.055 | 13.026 | 1.00 | 14.630 | 14.386 | 0.98 |
+| resize relayout | 14.095 | 14.467 | 1.03 | 15.361 | 15.415 | 1.00 |
+| idle restyle (no change) | 0.958 | 0.877 | 0.91 | 0.818 | 0.875 | 1.07 |
+| transition frame (bg color) | 1.056 | 1.072 | 1.01 | 1.054 | 1.046 | 0.99 |
+| transition frame (width) | 12.169 | 12.447 | 1.02 | 13.302 | 13.605 | 1.02 |
+| hud frame (8 labels + refresh) | 3.049 | 3.047 | 1.00 | 2.827 | 2.902 | 1.03 |
+| hud frame (8 labels + relayout) | 0.611 | 0.619 | 1.01 | 0.616 | 0.660 | 1.07 |
+| hud frame (8 labels, no refresh) | 0.044 | 0.044 | 1.01 | 0.043 | 0.045 | 1.05 |
+| hud hover toggle | 0.347 | 0.354 | 1.02 | 0.324 | 0.346 | 1.07 |
+| geomean ratio |  |  | 1.005 |  |  | 1.028 |
+
+`workloads.gd`:
+
+| op | main, theme | branch, theme | ratio | main, no theme | branch, no theme | ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| settings: load + first layout | 76.263 | 79.615 | 1.04 | 68.482 | 72.341 | 1.06 |
+| settings: switch tab (display none/flex) | 8.786 | 10.047 | 1.14 | 7.908 | 7.768 | 0.98 |
+| settings: hover row | 0.478 | 0.492 | 1.03 | 0.491 | 0.459 | 0.93 |
+| inventory: load + first layout | 101.862 | 107.701 | 1.06 | 96.993 | 95.315 | 0.98 |
+| inventory: hover slot | 0.744 | 0.744 | 1.00 | 0.770 | 0.675 | 0.88 |
+| inventory: select slot (set_class) | 1.757 | 1.622 | 0.92 | 1.617 | 1.599 | 0.99 |
+| inventory: count change + relayout | 1.339 | 1.379 | 1.03 | 1.310 | 1.279 | 0.98 |
+| dialog: load + first layout | 10.970 | 11.226 | 1.02 | 9.653 | 10.123 | 1.05 |
+| dialog: typewriter char + relayout | 0.469 | 0.478 | 1.02 | 0.468 | 0.462 | 0.99 |
+| dialog: hover choice | 0.152 | 0.171 | 1.13 | 0.150 | 0.165 | 1.10 |
+| list1k: load + first layout | 1742.965 | 1737.946 | 1.00 | 1356.427 | 1412.044 | 1.04 |
+| list1k: hover row | 1.272 | 1.301 | 1.02 | 1.212 | 1.268 | 1.05 |
+| list1k: update one row + relayout | 20.785 | 23.169 | 1.11 | 14.974 | 15.206 | 1.02 |
+| listview10k: load + 10k items + first layout | 78.962 | 81.689 | 1.03 | 70.290 | 68.822 | 0.98 |
+| listview10k: scroll 3 rows (rebind + relayout) | 3.493 | 3.407 | 0.98 | 2.957 | 2.917 | 0.99 |
+| listview10k: hover row | 0.398 | 0.394 | 0.99 | 0.299 | 0.266 | 0.89 |
+| listview10k: update all visible items (refresh_list) | 2.524 | 2.912 | 1.15 | 2.439 | 2.501 | 1.03 |
+| geomean ratio |  |  | 1.039 |  |  | 0.993 |
+
+Main-loop load loop (`load_document` only):
+
+| op | main, theme | branch, theme | ratio | main, no theme | branch, no theme | ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Menu.uxml | 4.892 | 4.761 | 0.97 | 3.764 | 4.024 | 1.07 |
+| Options.uxml | 21.145 | 21.341 | 1.01 | 15.380 | 15.962 | 1.04 |
+| runtime.uxml | 26.459 | 26.032 | 0.98 | 21.370 | 22.748 | 1.06 |
+| review.uxml | 41.689 | 42.782 | 1.03 | 38.224 | 37.434 | 0.98 |
+| wl_settings.uxml | 77.543 | 71.493 | 0.92 | 70.483 | 64.080 | 0.91 |
+| wl_inventory.uxml | 78.238 | 77.825 | 0.99 | 73.782 | 72.733 | 0.99 |
+| wl_list.uxml | 1323.889 | 1340.794 | 1.01 | 1086.378 | 1071.643 | 0.99 |
+| big.uxml | 793.162 | 796.136 | 1.00 | 731.922 | 721.847 | 0.99 |
+| parking.uxml | - | 34.653 | - | - | 28.896 | - |
+| geomean ratio |  |  | 0.990 |  |  | 1.001 |
+
+Controls in the scene tree after a load (main → branch; the controls
+built are the same on both): Menu 4 → 4, Options 59 → 59, runtime
+66 → 64, review 100 → 100, settings workload 314 → 83, inventory 243 →
+243, list1k 3,023 → 3,023, large document 1,950 → 1,950, parking
+fixture 145 → 57. The listview10k pool rows are parts and stay in the
+tree.
+
+What the tables show: the loads with hidden content are faster in the
+load loop (settings 0.92 with the theme, 0.91 without), as in the A/B.
+Everything else is within the spread of the untouched ops. The
+workloads' 5-sample settings load row (1.04 / 1.06) is noise: the same
+op timed A/B in one process is 6 ms faster parked. The first show of a
+parked page pays the tree entry that the load no longer pays. In "switch
+tab" that happens in the first three of the twelve iterations. The rows
+read 1.14 (theme) and 0.98 (no theme), which is within the spread of the
+untouched ops; this op was not timed A/B.
+
+Correctness, on the final state of the branch (run on their own):
+`tests/run_tests.py` 2147 checks across 335 tests (main: 2077 / 326;
+the new `parking` suite adds 70 checks in 9 tests); `bench/parity.gd`
+UNITY PARITY 123/127 (structure 3261/3261, geometry 10609/10616, style
+69004/69004), PARITY 31 match / 13 differ, as on main;
+`bench/equiv.gd` 1530 (native) / 1295 (`--gdscript`),
+`bench/equiv_layout.gd` 216 / 216, `bench/equiv_runtime.gd` 1400 / 1400,
+`bench/equiv_parse.gd` 2783 / 2783, 0 failures each;
+`bench/park_render.gd` (windowed) 14/14 captures pixel-identical
+parked and not parked, through page switches, a Foldout, hidden
+first/last/inline children shown, a `get_element` into a parked page,
+and the settings workload's four tabs.
+
+What remains:
+
+- A hidden subtree is still built, wired and set up at load. Only its
+  tree entry waits. Not creating it until shown would save about as much
+  again on the settings workload, but it moves diagnostics and behavior
+  setup from the load to the first show (see above).
+- Hidden parts (a Scroller with its two Buttons, a dragger border, pooled
+  rows) stay in the tree: their behaviors place, measure and move them.
+- A parked control is out of the scene tree, so its parent's
+  `get_children()` lacks it until it is shown or handed out by the API.
+  Code that walks the document's Godot nodes directly does not see hidden
+  subtrees that were never shown (docs/design.md, "Hidden subtrees out of
+  the scene tree").
+- Labels (80-90 us) and Buttons (125-137 us) entering the tree remain
+  the largest engine cost of a load. An empty Label costs as much as one
+  with text, so the cost is presumably the per-control theme item
+  caching. None of the document-side changes tried here made it cheaper.
