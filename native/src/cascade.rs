@@ -1964,6 +1964,23 @@ impl UxmlNativeCascade {
         }
     }
 
+    /// The content-box insets [start, end] (border + padding) of preorder
+    /// index `i` from the last layout_place(), or [] when the element was
+    /// not laid out (UxmlDocument.get_element_rect).
+    #[func]
+    fn insets_of(&self, i: i64) -> VarArray {
+        let Some(out) = self.placement.last.as_ref() else {
+            return VarArray::new();
+        };
+        if i < 0 {
+            return VarArray::new();
+        }
+        match out.insets.get(i as usize).copied().flatten() {
+            Some((s, e)) => args(&[s.to_variant(), e.to_variant()]),
+            None => VarArray::new(),
+        }
+    }
+
     /// Native flex pass: [rects, content_sizes, insets] Dictionaries keyed
     /// by element, exactly as UxmlFlexLayout.compute returns them.
     /// Diagnostics are deduplicated through `warned` and appended to

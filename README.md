@@ -188,7 +188,14 @@ doc.element_at(point)                       # deepest element at a point
 doc.reload_stylesheet(origin, uss_text)     # restyle without a reload
 doc.replace_source(uxml_text)               # edit in place when possible
 UxmlControls.catalog()                      # elements and attributes
+doc.set_drag_and_drop("list", callbacks)    # Unity drag-and-drop callbacks
+doc.get_item_index_at("list", point)        # also get_item_rect("list", index)
+doc.get_element_rect(element, space)        # rectangle in the space of another element
 ```
+
+A collection drag sends `items_drag_started`, `items_drag_updated` and
+`items_drag_ended`. A `reorderable` ListView or TreeView without callbacks
+moves the items of the view.
 
 Element offsets (`open_tag_start`, `open_tag_end`, `source_end`, attribute
 offsets) are a documented contract. Every diagnostic has `offset` and

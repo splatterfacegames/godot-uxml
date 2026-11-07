@@ -2,8 +2,9 @@ extends RefCounted
 ## The tool APIs an editor uses (docs/design.md, "Editor APIs"): loads with
 ## a caller resolver, element handles, the source offset contract, partial
 ## reloads, cascade provenance, forced pseudo-states, transition snapshot
-## and seek, the hit test, the element catalog, template instances, and
-## end offsets on diagnostics. Scenarios that read cascade, layout or
+## and seek, the hit test, the element catalog, template instances, end
+## offsets on diagnostics, drag and drop of collection items, and element
+## rectangles in another element's space. Scenarios that read cascade, layout or
 ## runtime state run on the native and the GDScript paths, and the two
 ## traces must be equal.
 
@@ -805,6 +806,303 @@ func test_background_image_none_is_no_file() -> void:
 			bad.append(UxmlDiagnostic.format(d))
 	h.eq(bad, [], "background-image: none (ToolbarToggle checkmark, editor skin) reports no missing file")
 	_unload(doc)
+
+
+func test_background_image_none_checked_at_runtime() -> void:
+	var doc := UxmlDocument.new()
+	doc.editor_theme = "always"
+	h.root.add_child(doc)
+	doc.load_document("ed-toolbar.uxml", "res://bench/parity/cases")
+	var el := doc.get_element_model("tt-on")
+	h.check(doc._states.get(el, {}).has("checked"), "the ToolbarToggle starts :checked")
+	for on in [false, true, false, true]:
+		el.set_attribute("value", "true" if on else "false")
+		_settle(doc)
+	h.check(doc._states.get(el, {}).has("checked"), "checked again at runtime")
+	doc.set_forced_states(el, PackedStringArray(["hover", "checked"]))
+	_settle(doc)
+	doc.clear_forced_states()
+	_settle(doc)
+	var bad: Array = []
+	for d in doc.diagnostics:
+		if String(d["message"]).contains('"none"'):
+			bad.append(UxmlDiagnostic.format(d))
+	h.eq(bad, [], "a ToolbarToggle checked, unchecked and hovered at runtime reports no missing file")
+	_unload(doc)
+
+
+# ---------------------------------------------------------------------------
+# R12: drag and drop of collection items
+# ---------------------------------------------------------------------------
+
+func _mouse(doc: UxmlDocument, pos: Vector2, button := -1, pressed := false, held := true) -> void:
+	var ev: InputEvent
+	if button < 0:
+		var mm := InputEventMouseMotion.new()
+		mm.button_mask = MOUSE_BUTTON_MASK_LEFT if held else 0
+		mm.position = pos
+		mm.global_position = pos
+		ev = mm
+	else:
+		var mb := InputEventMouseButton.new()
+		mb.button_index = MOUSE_BUTTON_LEFT
+		mb.pressed = pressed
+		mb.button_mask = MOUSE_BUTTON_MASK_LEFT if pressed else 0
+		mb.position = pos
+		mb.global_position = pos
+		ev = mb
+	doc.get_viewport().push_input(ev)
+
+
+## Press at `from`, move past the drag distance, then through `path`;
+## release at the last point unless `release` is false.
+func _drag(doc: UxmlDocument, from: Vector2, path: Array, release := true) -> void:
+	_mouse(doc, from, -1, false, false)
+	_mouse(doc, from, MOUSE_BUTTON_LEFT, true)
+	_mouse(doc, from + Vector2(0, 1), -1)
+	_mouse(doc, from + Vector2(8, 1), -1)
+	for p in path:
+		_mouse(doc, p, -1)
+	if release:
+		_mouse(doc, path[-1] if not path.is_empty() else from, MOUSE_BUTTON_LEFT, false)
+
+
+## Records the drag signals of `doc` as text.
+func _dnd_log(doc: UxmlDocument) -> Array:
+	var log: Array = []
+	doc.items_drag_started.connect(func(n, i, p): log.append("start %s %s %s" % [n, i, p]))
+	doc.items_drag_updated.connect(func(n, p, t):
+		log.append("update %s %s %s" % [n, p, "{}" if t.is_empty() else "%s i%d at%d %s p%s c%d m%d" % [
+			t["element_name"], t["index"], t["insert_at_index"],
+			["over", "between", "outside"][t["drop_position"]], t["parent_id"], t["child_index"], t["visual_mode"]]]))
+	doc.items_drag_ended.connect(func(n, p, r): log.append("end %s %s %s" % [n, p, r]))
+	doc.item_index_changed.connect(func(n, a, b): log.append("moved %s %s %s" % [n, a, b]))
+	return log
+
+
+static func _results(log: Array) -> Array:
+	var out: Array = []
+	for l in log:
+		var s := String(l)
+		if s.begins_with("end "):
+			out.append(s.get_slice(" ", s.get_slice_count(" ") - 1))
+	return out
+
+
+func test_list_drag_and_drop() -> void:
+	var body := func():
+		var doc := _mk("r12a", '<ui:ListView name="lv" reorderable="true" selection-type="Multiple" fixed-item-height="20" style="position: absolute; left: 10px; top: 10px; width: 200px; height: 200px;" />'
+			+ '<ui:ListView name="plain" fixed-item-height="20" style="position: absolute; left: 250px; top: 10px; width: 100px; height: 100px;" />',
+			"", Vector2(400, 300))
+		var items := ["a", "b", "c", "d", "e"]
+		doc.set_items_source("lv", items)
+		doc.set_items_source("plain", ["x", "y"])
+		_settle(doc)
+		var out: Array = []
+		var log := _dnd_log(doc)
+		var r0 := doc.get_item_rect("lv", 0)
+		var r2 := doc.get_item_rect("lv", 2)
+		h.eq(r2.size, Vector2(r0.size.x, 20), "an item rect is one row high")
+		h.eq(r2.position.y - r0.position.y, 40.0, "rows are fixed-item-height apart")
+		h.eq(doc.get_item_index_at("lv", r2.get_center()), 2, "the item at a point")
+		h.eq(doc.get_item_index_at("lv", Vector2(300, 250)), -1, "no item outside the list")
+		h.eq(doc.get_item_index_at("lv", r0.position + Vector2(5, 5 * 20 + 10)), -1, "no item below the last")
+		h.eq(doc.get_item_rect("lv", 7), Rect2(), "no rect for an item that is not on a row")
+		h.eq(doc.get_item_rect("nope", 0), Rect2(), "no rect for an unknown list")
+		out.append([r0, r2])
+		# Reorder a onto the top band of d: between c and d (insert 3).
+		var c0 := r0.get_center()
+		var r3 := doc.get_item_rect("lv", 3)
+		var over3 := r3.get_center()
+		var top3 := r3.position + Vector2(20, 2)
+		_drag(doc, c0, [over3, top3], false)
+		var d := doc.get_drag()
+		h.eq(d.get("indices"), [0], "the drag takes the pressed item")
+		var t: Dictionary = d.get("target", {})
+		h.eq(t.get("insert_at_index"), 3, "the top band drops before the item")
+		h.eq(t.get("drop_position"), UxmlDocument.DragPosition.BETWEEN_ITEMS, "between items")
+		h.eq(t.get("visual_mode"), UxmlDocument.DragVisualMode.MOVE, "a reorderable list moves")
+		var ov: Control = doc._dnd_overlay
+		h.check(ov != null and ov.visible and (ov.get_child(0) as Control).visible, "the bar is drawn")
+		if ov != null:
+			h.eq(ov.position.y + (ov.get_child(0) as Control).position.y + 1.0, r3.position.y, "the bar is on the top edge of the item")
+		_mouse(doc, top3, MOUSE_BUTTON_LEFT, false)
+		h.eq(items, ["b", "c", "a", "d", "e"], "the bound Array moved")
+		h.eq(doc.get_selected_indices("lv"), [2], "the moved item stays selected")
+		h.eq(doc.get_drag(), {}, "no drag after the release")
+		h.check(doc._dnd_overlay == null, "the indicator is gone")
+		# The middle of an item: a list does not drop over an item.
+		_drag(doc, doc.get_item_rect("lv", 0).get_center(), [doc.get_item_rect("lv", 4).get_center()])
+		h.eq(items, ["b", "c", "a", "d", "e"], "a drop over an item is rejected")
+		# A multiple selection moves together, to the end.
+		doc.set_selection("lv", [1, 3])
+		var r4 := doc.get_item_rect("lv", 4)
+		_drag(doc, doc.get_item_rect("lv", 3).get_center(), [r4.position + Vector2(20, r4.size.y + 30)])
+		h.eq(items, ["b", "a", "e", "c", "d"], "both selected items moved to the end, in order")
+		h.eq(doc.get_selected_indices("lv"), [3, 4], "the moved items stay selected")
+		# A plain click on a multiple selection selects on the release.
+		doc.set_selection("lv", [0, 1])
+		var c1 := doc.get_item_rect("lv", 1).get_center()
+		_mouse(doc, c1, MOUSE_BUTTON_LEFT, true)
+		h.eq(doc.get_selected_indices("lv"), [0, 1], "the press keeps the selection")
+		_mouse(doc, c1, MOUSE_BUTTON_LEFT, false)
+		h.eq(doc.get_selected_indices("lv"), [1], "the release selects the item")
+		# Escape cancels.
+		_drag(doc, doc.get_item_rect("lv", 0).get_center(), [top3], false)
+		var key := InputEventKey.new()
+		key.keycode = KEY_ESCAPE
+		key.physical_keycode = KEY_ESCAPE
+		key.pressed = true
+		doc.get_viewport().push_input(key)
+		h.eq(doc.get_drag(), {}, "Escape ends the drag")
+		_mouse(doc, top3, MOUSE_BUTTON_LEFT, false)
+		h.eq(items, ["b", "a", "e", "c", "d"], "a canceled drag moves nothing")
+		# Outside every collection.
+		_drag(doc, doc.get_item_rect("lv", 0).get_center(), [Vector2(390, 290)])
+		# A list that is not reorderable does not drag.
+		_drag(doc, doc.get_item_rect("plain", 0).get_center(), [doc.get_item_rect("plain", 1).get_center()])
+		h.check(not log.any(func(l): return String(l).begins_with("start plain")), "no drag from a list that is not reorderable")
+		h.eq(_results(log), ["dropped", "rejected", "dropped", "canceled", "outside"], "the drag results")
+		out.append_array(log)
+		_unload(doc)
+		return out
+	await _both(body, "list drag and drop")
+
+
+func test_tree_drag_and_drop() -> void:
+	var body := func():
+		var doc := _mk("r12b", '<ui:TreeView name="tv" reorderable="true" fixed-item-height="20" style="position: absolute; left: 0; top: 0; width: 200px; height: 200px;" />'
+			+ '<ui:TreeView name="cb" fixed-item-height="20" style="position: absolute; left: 0; top: 210px; width: 200px; height: 80px;" />'
+			+ '<ui:ListView name="pal" fixed-item-height="20" style="position: absolute; left: 220px; top: 0; width: 150px; height: 100px;" />',
+			"", Vector2(400, 300))
+		var roots := [
+			{"id": 1, "data": "one", "children": [{"id": 11, "data": "one-a"}, {"id": 12, "data": "one-b"}]},
+			{"id": 2, "data": "two", "children": []},
+			{"id": 3, "data": "three"}]
+		doc.set_tree_source("tv", roots)
+		doc.set_tree_item_expanded("tv", 1, true)
+		doc.set_tree_source("cb", [{"id": "r", "data": "root", "children": [{"id": "k", "data": "kid"}]}])
+		doc.set_tree_item_expanded("cb", "r", true)
+		doc.set_items_source("pal", ["Button", "Label"])
+		_settle(doc)
+		var out: Array = []
+		var log := _dnd_log(doc)
+		# Visible: 0 one, 1 one-a, 2 one-b, 3 two, 4 three.
+		# one-b into two (over the item).
+		_drag(doc, doc.get_item_rect("tv", 2).get_center(), [doc.get_item_rect("tv", 3).get_center()], false)
+		var t: Dictionary = doc.get_drag().get("target", {})
+		h.eq([t.get("parent_id"), t.get("child_index"), t.get("drop_position")], [2, -1, UxmlDocument.DragPosition.OVER_ITEM], "over an item: into it, at the end")
+		h.check(doc._dnd_overlay != null and (doc._dnd_overlay.get_child(1) as Control).visible, "the item outline is drawn")
+		var hover_row = doc._dnd.get("hover")
+		h.check(hover_row != null and UxmlParts.control_classes(hover_row).has("unity-collection-view__item--drag-hover"), "the item row has the drag-hover class")
+		_mouse(doc, doc.get_item_rect("tv", 3).get_center(), MOUSE_BUTTON_LEFT, false)
+		h.check(hover_row != null and not UxmlParts.control_classes(hover_row).has("unity-collection-view__item--drag-hover"), "the class goes with the drag")
+		h.eq(_txt(roots), "[{id: 1, data: one, children: [{id: 11, data: one-a}]}, {id: 2, data: two, children: [{id: 12, data: one-b}]}, {id: 3, data: three}]",
+			"the tree data moved")
+		h.eq(doc.get_tree_item("tv", 3).get("id"), 12, "the parent opened; the item is visible under it")
+		h.eq(doc.get_selected_indices("tv"), [3], "the moved item stays selected")
+		# Visible: 0 one, 1 one-a, 2 two, 3 one-b, 4 three.
+		# one into its own child: rejected.
+		_drag(doc, doc.get_item_rect("tv", 0).get_center(), [doc.get_item_rect("tv", 1).get_center()])
+		# three between one-a and two (top band of two): a root before two.
+		var r2 := doc.get_item_rect("tv", 2)
+		_drag(doc, doc.get_item_rect("tv", 4).get_center(), [r2.position + Vector2(30, 2)], false)
+		t = doc.get_drag().get("target", {})
+		h.eq([t.get("parent_id"), t.get("child_index"), t.get("insert_at_index")], [null, 1, 2], "between: the parent and child index of the next item")
+		_mouse(doc, r2.position + Vector2(30, 2), MOUSE_BUTTON_LEFT, false)
+		h.eq(roots.map(func(x): return x["id"]), [1, 3, 2], "a root moved between roots")
+		# Callbacks: a palette list drags into a tree that copies.
+		var calls: Array = []
+		h.eq(doc.set_drag_and_drop("pal", {
+			"can_start_drag": func(a): calls.append("can %s %s" % [a["index"], a["ids"]]); return a["index"] == 0,
+			"setup_drag_and_drop": func(a): calls.append("setup %s" % [a["indices"]]); return {"title": "+ Button", "data": {"kind": "palette"}},
+		}), OK, "set_drag_and_drop")
+		h.eq(doc.set_drag_and_drop("cb", {
+			"drag_and_drop_update": func(a): return UxmlDocument.DragVisualMode.COPY if a["source"] == "pal" else UxmlDocument.DragVisualMode.REJECTED,
+			"handle_drop": func(a): calls.append("drop %s %s %s %s %s" % [a["source"], a["data"], a["parent_id"], a["child_index"], a["title"]]); return UxmlDocument.DragVisualMode.COPY,
+		}), OK, "drop callbacks")
+		h.eq(doc.set_drag_and_drop("cb", {"bogus": func(): pass}), ERR_INVALID_PARAMETER, "an unknown key")
+		h.eq(doc.set_drag_and_drop("nope", {}), ERR_DOES_NOT_EXIST, "an unknown collection")
+		_drag(doc, doc.get_item_rect("pal", 1).get_center(), [doc.get_item_rect("cb", 0).get_center()])
+		_drag(doc, doc.get_item_rect("pal", 0).get_center(), [Vector2(300, 150)], false)
+		h.eq(doc.get_drag().get("title"), "+ Button", "the drag title from setup")
+		h.eq(doc.get_drag().get("data"), {"kind": "palette"}, "the drag data from setup")
+		h.eq(doc.get_drag().get("target"), {}, "no target outside the collections")
+		var rk := doc.get_item_rect("cb", 1)
+		_mouse(doc, rk.position + Vector2(10, 2), -1)
+		_mouse(doc, rk.position + Vector2(10, 2), MOUSE_BUTTON_LEFT, false)
+		# The tree that copies does not take its own items (update rejects).
+		_drag(doc, doc.get_item_rect("cb", 1).get_center(), [doc.get_item_rect("cb", 0).get_center()])
+		h.eq(calls, ["can 1 [1]", "can 0 [0]", "setup [0]", "drop pal { \"kind\": \"palette\" } r 0 + Button"], "the callbacks")
+		h.eq(_results(log), ["dropped", "rejected", "dropped", "dropped"], "the drag results")
+		out.append_array(log)
+		out.append_array(calls)
+		_unload(doc)
+		return out
+	await _both(body, "tree drag and drop")
+
+
+# ---------------------------------------------------------------------------
+# R14: rectangles in another element's space
+# ---------------------------------------------------------------------------
+
+## Equal within 0.01 pixel (rotations and scales round).
+static func _near(a: Rect2, b: Rect2) -> bool:
+	return (a.position - b.position).length() < 0.01 and (a.size - b.size).length() < 0.01
+
+
+func test_element_rect() -> void:
+	var body := func():
+		var doc := _mk("r14", '<ui:VisualElement name="p" style="position: absolute; left: 20px; top: 30px; width: 200px; height: 100px; border-width: 2px; padding: 5px;">'
+			+ '<ui:VisualElement name="c" style="width: 50px; height: 40px; margin-left: 10px;" />'
+			+ '<ui:VisualElement name="pct" style="width: 100px; height: 20px; padding-left: 10%; border-left-width: 3px;" /></ui:VisualElement>'
+			+ '<ui:VisualElement name="rot" style="position: absolute; left: 250px; top: 10px; width: 100px; height: 20px; rotate: 90deg;">'
+			+ '<ui:VisualElement name="rc" style="width: 10px; height: 10px;" /></ui:VisualElement>'
+			+ '<ui:VisualElement name="sc" style="position: absolute; left: 20px; top: 200px; width: 40px; height: 20px; scale: 2 2; transform-origin: 0 0;">'
+			+ '<ui:VisualElement name="sk" style="position: absolute; left: 5px; top: 5px; width: 10px; height: 4px;" /></ui:VisualElement>'
+			+ '<ui:VisualElement name="gone" style="display: none; width: 10px; height: 10px;" />',
+			"", Vector2(400, 300))
+		var out: Array = []
+		var p := _el(doc, "p")
+		var c := _el(doc, "c")
+		h.eq(doc.get_element_rect(c), Rect2(37, 37, 50, 40), "border box in document coordinates")
+		h.eq(doc.get_element_rect(c, p), Rect2(17, 7, 50, 40), "in the parent's space (its border box origin)")
+		h.eq(doc.get_element_rect(p, c), Rect2(-17, -7, 200, 100), "in the child's space")
+		h.eq(doc.get_element_rect(p, null, "padding"), Rect2(22, 32, 196, 96), "padding box")
+		h.eq(doc.get_element_rect(p, null, "content"), Rect2(27, 37, 186, 86), "content box")
+		h.eq(doc.get_element_rect(p, p, "content"), Rect2(7, 7, 186, 86), "content box in its own space")
+		# 10% of the parent's content width (186) = 18.6, 19 on the grid.
+		var pct := doc.get_element_rect(_el(doc, "pct"), _el(doc, "pct"), "content")
+		h.eq(pct.position.x, 3.0 + 19.0, "percentage padding as the layout resolved it")
+		var rot := doc.get_element_rect(_el(doc, "rot"))
+		h.check(_near(rot, Rect2(290, -30, 20, 100)), "a rotated box: the bounding box (%s)" % rot)
+		var rc := doc.get_element_rect(_el(doc, "rc"), _el(doc, "rot"))
+		h.check(_near(rc, Rect2(0, 0, 10, 10)), "a child in its rotated parent's space (%s)" % rc)
+		var sk := _el(doc, "sk")
+		var skr := doc.get_element_rect(sk)
+		h.check(_near(skr, Rect2(30, 210, 20, 8)), "a scaled parent scales the child (%s)" % skr)
+		var skl := doc.get_element_rect(sk, _el(doc, "sc"))
+		h.check(_near(skl, Rect2(5, 5, 10, 4)), "in the scaled parent's space (%s)" % skl)
+		var t := doc.get_element_transform(c, p)
+		h.check(_near(Rect2(t * Vector2.ZERO, Vector2.ZERO), Rect2(17, 7, 0, 0)), "LocalToWorld of the origin")
+		h.check(_near(Rect2(t.affine_inverse() * Vector2(17, 7), Vector2.ZERO), Rect2()), "WorldToLocal")
+		h.eq(doc.get_element_rect(_el(doc, "gone")), Rect2(), "display: none has no rect")
+		h.eq(doc.get_element_rect(c, _el(doc, "gone")), Rect2(), "nor a space")
+		h.eq(doc.get_element_rect(c, null, "margin"), Rect2(), "an unknown box")
+		h.eq(doc.get_element_rect(null), Rect2(), "no element")
+		var tg := doc.get_element_transform(_el(doc, "gone"))
+		h.eq([tg.x, tg.y], [Vector2.ZERO, Vector2.ZERO], "no transform without a layout")
+		# A pending restyle runs first.
+		c.set_attribute("style", "width: 60px; height: 40px; margin-left: 10px;")
+		h.eq(doc.get_element_rect(c, p), Rect2(17, 7, 60, 40), "a pending restyle runs first")
+		out.append(doc.get_element_rect(_el(doc, "pct"), null, "content"))
+		out.append([rot.position.round(), rot.size.round()])
+		var old := c
+		doc.reload()
+		h.eq(doc.get_element_rect(old), Rect2(), "an element of an earlier load")
+		_unload(doc)
+		return out
+	await _both(body, "element rect")
 
 
 # ---------------------------------------------------------------------------

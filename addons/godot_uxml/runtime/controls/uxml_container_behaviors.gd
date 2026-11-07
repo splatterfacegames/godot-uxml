@@ -600,6 +600,8 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 	var _drag_from := -1
 	var _drag_start := Vector2.ZERO
 	var _dragging := false
+	var _defer_click := -1         # a press on a multiple selection selects on release
+	var _dnd_cb: Dictionary = {}   # set_drag_and_drop callbacks
 	var _pending_sel = null        # a bound selection that waits for items
 	var _resize_col := -1
 	var _resize_x := 0.0
@@ -1093,7 +1095,16 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 				var cc := control_of(_content)
 				if cc != null and cc.focus_mode != Control.FOCUS_NONE:
 					cc.grab_focus()
-				_click_select(row.index, mb.shift_pressed, mb.ctrl_pressed or mb.meta_pressed)
+				var ctrl := mb.ctrl_pressed or mb.meta_pressed
+				# Unity: a plain press on an item of a multiple selection
+				# keeps the selection until the release, so that the drag
+				# takes every selected item.
+				if _selection.size() > 1 and _selection.has(row.index) and not mb.shift_pressed \
+						and not ctrl and _can_try_drag():
+					_defer_click = row.index
+				else:
+					_defer_click = -1
+					_click_select(row.index, mb.shift_pressed, ctrl)
 				if mb.double_click:
 					doc.items_chosen.emit(element_name(), [row.index])
 				_drag_from = row.index
@@ -1101,42 +1112,351 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 				_dragging = false
 			elif not mb.pressed:
 				if _dragging:
-					_drop(mb.global_position)
-				_drag_from = -1
-				_dragging = false
+					doc._dnd_finish(self, mb.global_position, mb.canceled)
+				elif _defer_click >= 0 and not mb.canceled:
+					_click_select(_defer_click, false, false)
+				drag_reset()
 			return
 		var mm := ev as InputEventMouseMotion
-		if mm != null and _drag_from >= 0 and UxmlParts._bool(el, "reorderable", false):
-			if not _dragging and mm.global_position.distance_to(_drag_start) > 5.0:
-				_dragging = true
-			if _dragging:
-				var c: Control = doc._controls.get(row.element)
-				if c != null:
-					c.mouse_default_cursor_shape = Control.CURSOR_DRAG
-
-	## Drop a dragged item: it moves to the row under the pointer.
-	func _drop(at: Vector2) -> void:
-		var cc := control_of(_content)
-		if cc == null:
+		if mm == null or _drag_from < 0 or (mm.button_mask & MOUSE_BUTTON_MASK_LEFT) == 0:
 			return
-		var local := cc.get_global_transform().affine_inverse() * at
-		var to := clampi(index_at(local.y), 0, count() - 1)
-		move_item(_drag_from, to)
+		if _dragging:
+			doc._dnd_update(mm.global_position)
+		elif mm.global_position.distance_to(_drag_start) > DRAG_START_DISTANCE and _can_try_drag():
+			if doc._dnd_begin(self, _drag_from, mm.global_position):
+				_dragging = true
+				_defer_click = -1
+			else:
+				_drag_from = -1  # asked once per press, as Unity
 
 	## Move item `from` to index `to` (reorderable): the bound Array moves
 	## its element; item_index_changed tells the game.
 	func move_item(from: int, to: int) -> void:
 		if from < 0 or to < 0 or from == to or from >= count() or to >= count():
 			return
+		var was := _selection.has(from)
+		_move_one(from, to)
+		if was:
+			set_selection([to], false)
+		refresh(true)
+
+	func _move_one(from: int, to: int) -> void:
 		if _items is Array:
 			var it = (_items as Array)[from]
 			(_items as Array).remove_at(from)
 			(_items as Array).insert(to, it)
-		var was := _selection.has(from)
 		doc.item_index_changed.emit(element_name(), from, to)
-		if was:
-			set_selection([to], false)
+
+	# ---- drag and drop (UxmlDocument.set_drag_and_drop) -------------------
+
+	## Unity ListViewDragger: the pointer moves this far before a drag
+	## starts; the edge bands of an item that drop between items; the edge
+	## bands of the viewport that scroll it, and by how much.
+	const DRAG_START_DISTANCE := 5.0
+	const BETWEEN_ITEMS_BAND := 5.0
+	const AUTO_SCROLL_BAND := 5.0
+	const AUTO_SCROLL_STEP := 20.0
+
+	func set_drag_callbacks(callbacks: Dictionary) -> void:
+		_dnd_cb = callbacks.duplicate()
+
+	func drag_callback(key: String) -> Callable:
+		return _dnd_cb.get(key, Callable())
+
+	func _reorderable() -> bool:
+		return UxmlParts._bool(el, "reorderable", false)
+
+	## A drag can start: can_start_drag decides, else `reorderable`.
+	func _can_try_drag() -> bool:
+		return _dnd_cb.has("can_start_drag") or _reorderable()
+
+	## The press ended or the document ended the drag.
+	func drag_reset() -> void:
+		_drag_from = -1
+		_dragging = false
+		_defer_click = -1
+
+	## The item id of visible index `i` (a tree item's id, else the index).
+	func item_id(i: int) -> Variant:
+		if UxmlContainerParts.is_tree(el):
+			return _flat[i]["id"] if i >= 0 and i < _flat.size() else null
+		return i
+
+	## The items a drag from item `i` takes: the selection (in item order)
+	## when `i` is selected, else `i`.
+	func drag_indices(i: int) -> Array:
+		if not _selection.has(i):
+			return [i]
+		var out := _selection.duplicate()
+		out.sort()
+		return out
+
+	## Unity canStartDrag (or the reorderable default).
+	func can_start_drag(args: Dictionary) -> bool:
+		var cb := drag_callback("can_start_drag")
+		if cb.is_valid():
+			return bool(cb.call(args))
+		return _reorderable()
+
+	func viewport_control() -> Control:
+		return control_of(UxmlContainerParts.get_part(_sv, "viewport")) if _sv != null else null
+
+	static func _holds(c: Control, gp: Vector2) -> bool:
+		return Rect2(Vector2.ZERO, c.size).has_point(c.get_global_transform().affine_inverse() * gp)
+
+	## The bound, drawn row whose box holds the global point `gp` inside
+	## the viewport, or null.
+	func row_at(gp: Vector2) -> UxmlListRow:
+		var vp := viewport_control()
+		if vp != null and (not vp.is_visible_in_tree() or not _holds(vp, gp)):
+			return null
+		for k in _active:
+			var row: UxmlListRow = _rows[k]
+			var c: Control = _row_ctl[k]
+			if row.index >= 0 and c != null and c.is_visible_in_tree() and _holds(c, gp):
+				return row
+		return null
+
+	## The row bound to item `i`, drawn, or null.
+	func row_of(i: int) -> UxmlListRow:
+		if i < 0:
+			return null
+		for k in _active:
+			var row: UxmlListRow = _rows[k]
+			var c: Control = _row_ctl[k]
+			if row.index == i and c != null and c.is_visible_in_tree():
+				return row
+		return null
+
+	## The global bounding box of the row of item `i`, or Rect2().
+	func item_rect(i: int) -> Rect2:
+		var row := row_of(i)
+		if row == null:
+			return Rect2()
+		var c: Control = control_of(row.element)
+		return UxmlDocument.xform_rect(c.get_global_transform(), Rect2(Vector2.ZERO, c.size))
+
+	## Unity HandleDragAndDropArgs for the global point `gp` (Unity
+	## ListViewDragger.TryGetDragPosition): the edge bands of an item drop
+	## between items, the rest drops over the item; outside the items the
+	## drop goes to the end (or the start, above the viewport). A tree
+	## gives the parent id (null: the roots) and the child index (-1: the
+	## end) of the drop.
+	func drop_args(gp: Vector2) -> Dictionary:
+		var n := count()
+		var out := {"element_name": element_name(), "element": el, "position": gp, "index": -1,
+			"insert_at_index": n, "parent_id": null, "child_index": -1,
+			"drop_position": UxmlDocument.DragPosition.OUTSIDE_ITEMS}
+		var row := row_at(gp)
+		var tree := UxmlContainerParts.is_tree(el)
+		if row == null:
+			var vp := viewport_control()
+			if vp != null and (vp.get_global_transform().affine_inverse() * gp).y < 0.0:
+				out["insert_at_index"] = 0
+				if tree:
+					out["child_index"] = 0
+			return out
+		var c: Control = control_of(row.element)
+		var ly := (c.get_global_transform().affine_inverse() * gp).y
+		var i := row.index
+		out["index"] = i
+		if c.size.y - ly < BETWEEN_ITEMS_BAND:
+			out["insert_at_index"] = i + 1
+			out["drop_position"] = UxmlDocument.DragPosition.BETWEEN_ITEMS
+		elif ly > BETWEEN_ITEMS_BAND:
+			out["insert_at_index"] = i
+			out["drop_position"] = UxmlDocument.DragPosition.OVER_ITEM
+		else:
+			out["insert_at_index"] = i
+			out["drop_position"] = UxmlDocument.DragPosition.BETWEEN_ITEMS
+		if not tree:
+			return out
+		if out["drop_position"] == UxmlDocument.DragPosition.OVER_ITEM:
+			out["parent_id"] = item_id(i)
+			return out
+		var k: int = out["insert_at_index"]
+		if k < n:
+			var p := _parent_index(k)
+			out["parent_id"] = null if p < 0 else item_id(p)
+			out["child_index"] = _sibling_index(k, p)
+		return out
+
+	## The visible index of the parent of visible tree item `k`, or -1.
+	func _parent_index(k: int) -> int:
+		var d := int(_flat[k]["depth"])
+		var j := k - 1
+		while j >= 0 and int(_flat[j]["depth"]) >= d:
+			j -= 1
+		return j
+
+	## The index of visible tree item `k` among the children of `p`.
+	func _sibling_index(k: int, p: int) -> int:
+		var d := int(_flat[k]["depth"])
+		var out := 0
+		for j in range(p + 1, k):
+			if int(_flat[j]["depth"]) == d:
+				out += 1
+		return out
+
+	## Unity dragAndDropUpdate (or the reorderable default).
+	func drag_update(args: Dictionary) -> int:
+		var cb := drag_callback("drag_and_drop_update")
+		if cb.is_valid():
+			return _mode(cb.call(args))
+		return _default_mode(args)
+
+	## Unity handleDrop (or the reorderable default).
+	func drop(args: Dictionary) -> int:
+		var cb := drag_callback("handle_drop")
+		if cb.is_valid():
+			return _mode(cb.call(args))
+		var mode := _default_mode(args)
+		if mode != UxmlDocument.DragVisualMode.MOVE:
+			return mode
+		if UxmlContainerParts.is_tree(el):
+			_drop_tree(args)
+		else:
+			_drop_list(args)
+		return mode
+
+	static func _mode(v: Variant) -> int:
+		return int(v) if v is int else UxmlDocument.DragVisualMode.NONE
+
+	## Unity's reorderable controllers: only items of this view move, when
+	## `reorderable`; a list does not drop over an item; a tree item does
+	## not go into itself or below itself.
+	func _default_mode(args: Dictionary) -> int:
+		if not _reorderable() or args.get("source_element") != el:
+			return UxmlDocument.DragVisualMode.REJECTED
+		if not UxmlContainerParts.is_tree(el):
+			if args["drop_position"] == UxmlDocument.DragPosition.OVER_ITEM:
+				return UxmlDocument.DragVisualMode.REJECTED
+			return UxmlDocument.DragVisualMode.MOVE
+		var dragged := {}
+		for i in args["indices"]:
+			dragged[int(i)] = true
+		var p := -1
+		if args["drop_position"] == UxmlDocument.DragPosition.OVER_ITEM:
+			p = int(args["index"])
+		elif int(args["insert_at_index"]) < count():
+			p = _parent_index(int(args["insert_at_index"]))
+		while p >= 0:
+			if dragged.has(p):
+				return UxmlDocument.DragVisualMode.REJECTED
+			p = _parent_index(p)
+		return UxmlDocument.DragVisualMode.MOVE
+
+	## Unity ListViewReorderableDragAndDropController.OnDrop: the dragged
+	## items move, in order, to the insert index; item_index_changed for
+	## every move; the moved items stay selected.
+	func _drop_list(args: Dictionary) -> void:
+		var sorted: Array = args["indices"].duplicate()
+		sorted.sort()
+		var insert := int(args["insert_at_index"])
+		var insert_shift := 0
+		var src_shift := 0
+		var before := 0
+		for i in sorted:
+			if int(i) < insert:
+				before += 1
+		for k in range(sorted.size() - 1, -1, -1):
+			var index := int(sorted[k])
+			var to := insert - insert_shift
+			if index >= insert:
+				index += src_shift
+				src_shift += 1
+			elif index < to:
+				insert_shift += 1
+				to -= 1
+			if index != to and index < count() and to < count():
+				_move_one(index, to)
+		var start := insert - before
+		set_selection(range(start, start + sorted.size()), false)
 		refresh(true)
+
+	## Unity TreeViewReorderableDragAndDropController.OnDrop: the dragged
+	## items (not those whose parent also moves) go, in order, under the
+	## drop parent at the child index; item_index_changed(id, parent id)
+	## for every move; the parent opens; the moved items stay selected.
+	func _drop_tree(args: Dictionary) -> void:
+		var pid = args["parent_id"]
+		var kids: Array = _roots
+		if pid != null:
+			var pn := _find_item(_roots, pid)
+			if pn.is_empty():
+				return
+			if not pn.get("children") is Array:
+				pn["children"] = []
+			kids = pn["children"]
+		var at := int(args["child_index"])
+		var dragged := {}
+		for i in args["indices"]:
+			dragged[int(i)] = true
+		var moved: Array = []
+		for i in args["indices"]:
+			var p := _parent_index(int(i))
+			var nested := false
+			while p >= 0 and not nested:
+				nested = dragged.has(p)
+				p = _parent_index(p)
+			if nested:
+				continue
+			var id = item_id(int(i))
+			var loc := _locate(_roots, id)
+			if loc.is_empty():
+				continue
+			var list: Array = loc[0]
+			var node = list[loc[1]]
+			if is_same(list, kids) and at >= 0 and int(loc[1]) < at:
+				at -= 1
+			list.remove_at(loc[1])
+			if at < 0 or at > kids.size():
+				kids.append(node)
+			else:
+				kids.insert(at, node)
+				at += 1
+			moved.append(id)
+		if pid != null:
+			_expanded[pid] = true
+		_reflatten()
+		var sel: Array = []
+		for k in _flat.size():
+			if moved.has(_flat[k]["id"]):
+				sel.append(k)
+		set_selection(sel, false)
+		refresh(true)
+		for id in moved:
+			doc.item_index_changed.emit(element_name(), id, pid)
+
+	## [the Array that holds tree item `id`, its index there], or [].
+	func _locate(items: Array, id: Variant) -> Array:
+		for k in items.size():
+			var it = items[k]
+			if it is Dictionary:
+				if it.get("id") == id:
+					return [items, k]
+				var kids = it.get("children")
+				if kids is Array:
+					var r := _locate(kids, id)
+					if not r.is_empty():
+						return r
+		return []
+
+	## Unity ListViewDragger auto-scroll: a pointer in the edge band of the
+	## viewport scrolls it.
+	func auto_scroll(gp: Vector2) -> void:
+		var vp := viewport_control()
+		var svb = doc._behaviors.get(_sv)
+		if vp == null or svb == null:
+			return
+		var ly := (vp.get_global_transform().affine_inverse() * gp).y
+		var d := 0.0
+		if ly >= 0.0 and ly < AUTO_SCROLL_BAND:
+			d = -AUTO_SCROLL_STEP
+		elif ly <= vp.size.y and ly > vp.size.y - AUTO_SCROLL_BAND:
+			d = AUTO_SCROLL_STEP
+		if d != 0.0:
+			svb.set_offset(svb.offset() + Vector2(0.0, d))
 
 	func _click_select(i: int, shift: bool, ctrl: bool) -> void:
 		var mode := selection_mode()
@@ -1166,6 +1486,10 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 	## the controller A button chooses the selected items; a TreeView opens
 	## and closes items with Right and Left.
 	func _on_key(ev: InputEvent) -> void:
+		if _dragging and ev is InputEventKey and ev.is_pressed() and (ev as InputEventKey).keycode == KEY_ESCAPE:
+			doc.cancel_drag()
+			control_of(_content).accept_event()
+			return
 		if not ev.is_pressed() or count() == 0:
 			return
 		var cur: int = _selection[-1] if not _selection.is_empty() else -1

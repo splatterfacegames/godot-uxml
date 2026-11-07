@@ -54,6 +54,18 @@ signal items_added(element_name, indices)
 signal items_removed(element_name, indices)
 signal column_sorting_changed(element_name, descriptions)
 signal item_expanded_changed(element_name, id, expanded)
+## Drag and drop of collection items (see set_drag_and_drop()): a drag of
+## the items `indices` of collection `element_name` started at
+## `global_position` (after Unity canStartDrag / setupDragAndDrop); the
+## pointer moved (`target`: the drop arguments of the collection under the
+## pointer with its `visual_mode`, or {} outside every collection of this
+## document); the drag ended. `result`: "dropped" (a collection took the
+## drop), "rejected" (the collection under the pointer refused it),
+## "outside" (released outside every collection of this document) or
+## "canceled" (Escape, cancel_drag(), a reload, a lost mouse press).
+signal items_drag_started(element_name, indices, global_position)
+signal items_drag_updated(element_name, global_position, target)
+signal items_drag_ended(element_name, global_position, result)
 ## A closeable Tab of a TabView was closed (Unity Tab.closed).
 signal tab_closed(element_name, index)
 ## A reorderable TabView moved a Tab (a drag of its header).
@@ -106,6 +118,8 @@ var _custom_resolver: UxmlResourceResolver = null  # the caller's resolver of th
 var _last_text = null                  # UXML text of the last load_source(), null for a file
 var _loader_warnings := 0              # _doc.warnings entries the loader made (see replace_source)
 var _forced: Dictionary = {}           # UxmlElement -> PackedStringArray (set_forced_states)
+var _dnd: Dictionary = {}              # the running collection drag ({} when none)
+var _dnd_overlay: Control = null       # the drop indicator during a drag
 var _last_replace := ""                # "in-place" or "reload": the last replace_source()
 var _inject: Array = []                # elements the next restyle applies as changed (_swap_cascade)
 var _styles: Dictionary = {}
@@ -186,6 +200,10 @@ var pixel_grid := true
 ## deterministic time for tests and tools. When false (default) they follow
 ## the frame clock (_process delta).
 var transitions_manual := false
+
+## Colour of the drop indicator a collection drag draws (the bar between
+## items, the outline of an item; see set_drag_and_drop()).
+var drag_indicator_color := Color(0.27, 0.55, 1.0)
 # Data binding and the VisualElement base attributes (tabindex,
 # picking-mode, view-data-key, ...): runtime/uxml_binding.gd and
 # runtime/uxml_common_attributes.gd. Kept across loads.
@@ -788,6 +806,8 @@ func reload() -> int:
 
 
 func _clear() -> void:
+	if not _dnd.is_empty():
+		cancel_drag()
 	for child in _root_box.get_children():
 		_root_box.remove_child(child)
 		child.queue_free()
@@ -1987,6 +2007,129 @@ static func _picking_ignored(el: UxmlElement, c: Control) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Element geometry in another element's space
+# ---------------------------------------------------------------------------
+
+## The transform from the local coordinates of `element` (origin at the
+## top-left corner of its border box, as Unity's local space) to the
+## coordinates of `space` (null: this control's local coordinates, the
+## coordinates of element_at()). USS transforms (translate, rotate, scale,
+## transform-origin) of both elements and of their ancestors apply. The
+## inverse maps the other way: Unity LocalToWorld / WorldToLocal /
+## ChangeCoordinatesTo are `t * p` and `t.affine_inverse() * p`. Returns
+## Transform2D() with a zero basis when an element has no layout (no
+## control, display: none on itself or an ancestor) or is of another load.
+## A pending restyle and layout run first.
+func get_element_transform(element: UxmlElement, space: UxmlElement = null) -> Transform2D:
+	var none := Transform2D(Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
+	if _doc == null or not is_inside_tree():
+		return none
+	if _restyle_queued:
+		_restyle_now()
+	var c := _laid_out_control(element)
+	if c == null:
+		return none
+	var to := get_global_transform()
+	if space != null:
+		var sc := _laid_out_control(space)
+		if sc == null:
+			return none
+		to = sc.get_global_transform()
+	return to.affine_inverse() * c.get_global_transform()
+
+
+## The rectangle of a box of `element` in the coordinates of `space` (null:
+## this control's local coordinates), Unity's ChangeCoordinatesTo of the
+## element's box. `box`: "border" (the border box, Unity's layout size),
+## "padding" (inside the borders) or "content" (inside the borders and
+## the padding, Unity's contentRect), all as the last layout resolved
+## them. With a rotation or skew between the two spaces the result is the
+## bounding box of the transformed rectangle. Returns Rect2() when an
+## element has no layout (see get_element_transform()) or for an unknown
+## `box`.
+func get_element_rect(element: UxmlElement, space: UxmlElement = null, box: String = "border") -> Rect2:
+	var t := get_element_transform(element, space)
+	if t.x == Vector2.ZERO and t.y == Vector2.ZERO:
+		return Rect2()
+	var c: Control = _controls[element]
+	var r := Rect2(Vector2.ZERO, c.size)
+	match box:
+		"border":
+			pass
+		"padding":
+			var b := _border_widths(element)
+			r = Rect2(Vector2(b[0], b[1]), Vector2(maxf(0.0, r.size.x - b[0] - b[2]), maxf(0.0, r.size.y - b[1] - b[3])))
+		"content":
+			var ins := _layout_insets(element)
+			var s: Vector2 = ins[0]
+			var e: Vector2 = ins[1]
+			r = Rect2(s, Vector2(maxf(0.0, r.size.x - s.x - e.x), maxf(0.0, r.size.y - s.y - e.y)))
+		_:
+			return Rect2()
+	return xform_rect(t, r)
+
+
+## The bounding box of `r` transformed by `t`.
+static func xform_rect(t: Transform2D, r: Rect2) -> Rect2:
+	if t.x.y == 0.0 and t.y.x == 0.0:
+		var p := t * r.position
+		var q := t * r.end
+		return Rect2(p.min(q), (q - p).abs())
+	var out := Rect2(t * r.position, Vector2.ZERO)
+	out = out.expand(t * Vector2(r.end.x, r.position.y))
+	out = out.expand(t * Vector2(r.position.x, r.end.y))
+	return out.expand(t * r.end)
+
+
+## The control of `element` when the element has a layout: a control of
+## this load, inside the tree, not display: none on itself or above.
+func _laid_out_control(element: UxmlElement) -> Control:
+	if element == null:
+		return null
+	var c = _controls.get(element)
+	if c == null:
+		return null
+	if _cascade != null:
+		var i = _cascade.index.get(element)
+		if i != null and int(i) < _gone.size() and _gone[int(i)] == 1:
+			return null
+	if not _parked.is_empty():
+		_expose(element)
+	return c if (c as Control).is_inside_tree() else null
+
+
+## Resolved border widths [left, top, right, bottom] of `element`, as the
+## layout reads them (px only; on the pixel grid when pixel_grid is on).
+func _border_widths(element: UxmlElement) -> PackedFloat64Array:
+	var st: Dictionary = _styles.get(element, {})
+	var out := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
+	var k := 0
+	for p in ["border-left-width", "border-top-width", "border-right-width", "border-bottom-width"]:
+		var e = st.get(p)
+		if e != null:
+			var l := UssValues.parse_length(String(e["value"]))
+			if l["kind"] == "px":
+				var v := float(l["value"])
+				out[k] = UxmlFlexLayout.grid_box(v, true) if pixel_grid else maxf(0.0, v)
+		k += 1
+	return out
+
+
+## The content-box insets [start, end] (border + padding) of the last
+## layout of `element`.
+func _layout_insets(element: UxmlElement) -> Array:
+	if _native_layout():
+		var i = _cascade.index.get(element)
+		if i != null:
+			var r: Array = _cascade._native.call("insets_of", int(i))
+			if r.size() == 2:
+				return r
+		return [Vector2.ZERO, Vector2.ZERO]
+	var ins = _insets.get(element)
+	return ins if ins != null else [Vector2.ZERO, Vector2.ZERO]
+
+
+# ---------------------------------------------------------------------------
 # Forced pseudo-states (state preview)
 # ---------------------------------------------------------------------------
 
@@ -2417,6 +2560,302 @@ func scroll_to_item(list_name: String, index: int) -> void:
 	var b = _behavior_of(list_name, "scroll_to_item")
 	if b != null:
 		b.scroll_to_item(index)
+
+
+# ---------------------------------------------------------------------------
+# Drag and drop of collection items
+# ---------------------------------------------------------------------------
+
+## Unity DragVisualMode: what a drop at the pointer would do.
+enum DragVisualMode { NONE, COPY, MOVE, REJECTED }
+## Unity DragAndDropPosition: where a drop at the pointer goes.
+enum DragPosition { OVER_ITEM, BETWEEN_ITEMS, OUTSIDE_ITEMS }
+
+const DRAG_CALLBACKS := ["can_start_drag", "setup_drag_and_drop", "drag_and_drop_update", "handle_drop"]
+
+
+## The drag-and-drop callbacks of collection `list_name` (ListView,
+## TreeView, MultiColumnListView, MultiColumnTreeView), Unity's
+## canStartDrag, setupDragAndDrop, dragAndDropUpdate and handleDrop. Keys
+## of `callbacks` (each optional; the call replaces every earlier one):
+##
+##   can_start_drag(args) -> bool: may a drag start? args {element_name,
+##     element, index, id, indices, ids} (`indices`: the items the drag
+##     takes: the selection when the pressed item is selected, else the
+##     pressed item; `id`, `ids`: tree item ids, list indices). Without it
+##     a drag starts when the view is `reorderable`.
+##   setup_drag_and_drop(args) -> Dictionary: the same args plus
+##     {title: "", data: null}; return {title, data} for the drag.
+##   drag_and_drop_update(args) -> DragVisualMode: on every pointer move
+##     over this view during a drag from any collection of this document.
+##   handle_drop(args) -> DragVisualMode: the drop on this view, when the
+##     last update gave COPY or MOVE. COPY or MOVE accepts the drop.
+##
+## The update and drop args: {element_name, element (this view),
+## position (global), index (the item under the pointer, -1 none),
+## insert_at_index, drop_position (DragPosition), parent_id (tree: the
+## drop parent, null for the roots), child_index (tree: the index among
+## its children, -1 for the end), source, source_element, indices, ids
+## (the dragged items of the source), title, data}. The 5-pixel edge bands
+## of an item drop between items, the rest over the item.
+##
+## Without update and drop callbacks a `reorderable` view moves its own
+## items (Unity's default controllers): a list between items
+## (item_index_changed per move), a tree also into an item
+## (item_index_changed(element_name, id, parent_id) per move; the roots and
+## children Arrays of set_tree_source change in place). The drag starts
+## after 5 pixels, a press on a multiple selection keeps the selection
+## until the release, Escape cancels, the viewport scrolls in its 5-pixel
+## edge bands, and a COPY or MOVE update draws a bar between items or an
+## outline over an item (drag_indicator_color) and gives the item row the
+## class unity-collection-view__item--drag-hover. Set the callbacks after
+## each load, as set_list_source. Returns OK, ERR_DOES_NOT_EXIST (no such
+## collection) or ERR_INVALID_PARAMETER (an unknown key or a value that is
+## not a Callable).
+func set_drag_and_drop(list_name: String, callbacks: Dictionary) -> int:
+	var b = _behavior_of(list_name, "set_drag_callbacks")
+	if b == null:
+		return ERR_DOES_NOT_EXIST
+	for k in callbacks:
+		if not DRAG_CALLBACKS.has(k) or not callbacks[k] is Callable:
+			return ERR_INVALID_PARAMETER
+	b.set_drag_callbacks(callbacks)
+	return OK
+
+
+## The item whose row is drawn at `global_point` in collection
+## `list_name` (inside its viewport; transforms apply), or -1.
+func get_item_index_at(list_name: String, global_point: Vector2) -> int:
+	var b = _behavior_of(list_name, "row_at")
+	if b == null:
+		return -1
+	var row = b.row_at(global_point)
+	return -1 if row == null else row.index
+
+
+## The global rectangle (bounding box) of the row of item `index` in
+## collection `list_name`, or Rect2() when no drawn row shows the item.
+func get_item_rect(list_name: String, index: int) -> Rect2:
+	var b = _behavior_of(list_name, "item_rect")
+	return Rect2() if b == null else b.item_rect(index)
+
+
+## The running drag of this document: {element_name, element, indices,
+## ids, title, data, position (global), target (as items_drag_updated)},
+## or {} when no drag runs.
+func get_drag() -> Dictionary:
+	if _dnd.is_empty():
+		return {}
+	return {"element_name": _dnd["element_name"], "element": _dnd["element"], "indices": _dnd["indices"].duplicate(),
+		"ids": _dnd["ids"].duplicate(), "title": _dnd["title"], "data": _dnd["data"],
+		"position": _dnd["position"], "target": _dnd["target"].duplicate()}
+
+
+## End the running drag without a drop (items_drag_ended "canceled").
+func cancel_drag() -> void:
+	if _dnd.is_empty():
+		return
+	var src = _dnd["source"]
+	var at: Vector2 = _dnd["position"]
+	var nm: String = _dnd["element_name"]
+	_dnd_clear()
+	src.drag_reset()
+	items_drag_ended.emit(nm, at, "canceled")
+
+
+## A drag from item `index` of collection behavior `src` at `gp`: Unity
+## canStartDrag, then setupDragAndDrop. Returns false when it did not start.
+func _dnd_begin(src, index: int, gp: Vector2) -> bool:
+	if not _dnd.is_empty():
+		return false
+	var indices: Array = src.drag_indices(index)
+	var ids: Array = []
+	for i in indices:
+		ids.append(src.item_id(i))
+	var args := {"element_name": src.element_name(), "element": src.el, "index": index, "id": src.item_id(index),
+		"indices": indices.duplicate(), "ids": ids.duplicate()}
+	if not src.can_start_drag(args):
+		return false
+	var setup := args.duplicate()
+	setup["title"] = ""
+	setup["data"] = null
+	var cb: Callable = src.drag_callback("setup_drag_and_drop")
+	if cb.is_valid():
+		var r = cb.call(setup.duplicate())
+		if r is Dictionary:
+			for k in ["title", "data"]:
+				if (r as Dictionary).has(k):
+					setup[k] = r[k]
+	var row = src.row_of(index)
+	var c: Control = _controls.get(row.element) if row != null else null
+	_dnd ={"source": src, "element_name": args["element_name"], "element": src.el, "indices": indices, "ids": ids,
+		"title": str(setup["title"]), "data": setup["data"], "position": gp, "target": {}, "target_b": null,
+		"hover": null, "cursor": [c, c.mouse_default_cursor_shape] if c != null else []}
+	items_drag_started.emit(args["element_name"], indices.duplicate(), gp)
+	if not _dnd.is_empty():
+		_dnd_update(gp)
+	return not _dnd.is_empty()
+
+
+## The pointer of the running drag moved to `gp`: the collection under it
+## computes the drop and its visual mode (Unity dragAndDropUpdate).
+func _dnd_update(gp: Vector2) -> void:
+	if _dnd.is_empty():
+		return
+	_dnd["position"] = gp
+	var tb = _collection_at(gp)
+	var target := {}
+	if tb != null:
+		target = tb.drop_args(gp)
+		target["source"] = _dnd["element_name"]
+		target["source_element"] = _dnd["element"]
+		target["indices"] = _dnd["indices"].duplicate()
+		target["ids"] = _dnd["ids"].duplicate()
+		target["title"] = _dnd["title"]
+		target["data"] = _dnd["data"]
+		target["visual_mode"] = tb.drag_update(target.duplicate())
+		if _dnd.is_empty():
+			return  # the callback canceled the drag
+	_dnd["target"] = target
+	_dnd["target_b"] = tb
+	_dnd_indicate(tb, target)
+	var cur: Array = _dnd["cursor"]
+	if not cur.is_empty() and is_instance_valid(cur[0]):
+		var shape := Control.CURSOR_DRAG
+		match int(target.get("visual_mode", DragVisualMode.MOVE)):
+			DragVisualMode.COPY:
+				shape = Control.CURSOR_CAN_DROP
+			DragVisualMode.NONE, DragVisualMode.REJECTED:
+				shape = Control.CURSOR_FORBIDDEN
+		(cur[0] as Control).mouse_default_cursor_shape = shape
+	items_drag_updated.emit(_dnd["element_name"], gp, target.duplicate())
+	if tb != null and not _dnd.is_empty():
+		tb.auto_scroll(gp)
+
+
+## The release of the running drag of `src` at `gp`: the collection under
+## the pointer takes the drop when its last update gave COPY or MOVE
+## (Unity handleDrop).
+func _dnd_finish(src, gp: Vector2, canceled: bool) -> void:
+	if _dnd.is_empty() or _dnd["source"] != src:
+		return
+	if canceled:
+		cancel_drag()
+		return
+	_dnd_update(gp)
+	if _dnd.is_empty():
+		return
+	var nm: String = _dnd["element_name"]
+	var target: Dictionary = _dnd["target"]
+	var tb = _dnd["target_b"]
+	_dnd_clear()
+	var result := "outside"
+	if tb != null:
+		result = "rejected"
+		var mode := int(target["visual_mode"])
+		if mode == DragVisualMode.COPY or mode == DragVisualMode.MOVE:
+			var args := target.duplicate()
+			args.erase("visual_mode")
+			var r: int = tb.drop(args)
+			if r == DragVisualMode.COPY or r == DragVisualMode.MOVE:
+				result = "dropped"
+	items_drag_ended.emit(nm, gp, result)
+
+
+## Remove the drag state and its indicator.
+func _dnd_clear() -> void:
+	if _dnd.is_empty():
+		return
+	var hover = _dnd["hover"]
+	if hover != null:
+		UxmlParts.toggle_control_class(hover, "unity-collection-view__item--drag-hover", false)
+	var cur: Array = _dnd["cursor"]
+	if not cur.is_empty() and is_instance_valid(cur[0]):
+		(cur[0] as Control).mouse_default_cursor_shape = cur[1]
+	_dnd = {}
+	if _dnd_overlay != null:
+		_dnd_overlay.queue_free()
+		_dnd_overlay = null
+
+
+## The collection behavior under the global point `gp`, or null.
+func _collection_at(gp: Vector2):
+	var hit := element_at(get_global_transform().affine_inverse() * gp, false, true)
+	while hit != null:
+		if _lists.has(hit):
+			var b = _behaviors.get(hit)
+			if b != null and b.has_method("drop_args"):
+				return b
+		hit = _parents.get(hit)
+	return null
+
+
+## Draw the drop indicator of `target` on collection behavior `tb`: the
+## row class and an outline over an item, a bar between items.
+func _dnd_indicate(tb, target: Dictionary) -> void:
+	var mode := int(target.get("visual_mode", DragVisualMode.NONE))
+	var shown := tb != null and (mode == DragVisualMode.COPY or mode == DragVisualMode.MOVE)
+	var row = tb.row_of(int(target["index"])) if shown else null
+	var over: bool = shown and row != null and target["drop_position"] == DragPosition.OVER_ITEM
+	var hover = row.element if over else null
+	if hover != _dnd["hover"]:
+		if _dnd["hover"] != null:
+			UxmlParts.toggle_control_class(_dnd["hover"], "unity-collection-view__item--drag-hover", false)
+		if hover != null:
+			UxmlParts.toggle_control_class(hover, "unity-collection-view__item--drag-hover", true)
+		_dnd["hover"] = hover
+	var line := Rect2()
+	var box := Rect2()
+	if over:
+		box = tb.item_rect(int(target["index"]))
+	elif shown:
+		var k := int(target["insert_at_index"])
+		var r: Rect2 = tb.item_rect(k)
+		if r.has_area():
+			line = Rect2(r.position, Vector2(r.size.x, 0.0))
+		else:
+			r = tb.item_rect(k - 1)
+			if r.has_area():
+				line = Rect2(Vector2(r.position.x, r.end.y), Vector2(r.size.x, 0.0))
+	if not box.has_area() and line.size.x <= 0.0:
+		if _dnd_overlay != null:
+			_dnd_overlay.visible = false
+		return
+	if _dnd_overlay == null:
+		_dnd_overlay = Control.new()
+		_dnd_overlay.name = "UxmlDropIndicator"
+		_dnd_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_dnd_overlay.clip_contents = true
+		var bar := ColorRect.new()
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_dnd_overlay.add_child(bar)
+		var outline := ReferenceRect.new()
+		outline.editor_only = false
+		outline.border_width = 1.0
+		outline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_dnd_overlay.add_child(outline)
+		add_child(_dnd_overlay, false, Node.INTERNAL_MODE_BACK)
+	var inv := get_global_transform().affine_inverse()
+	var vp: Control = tb.viewport_control()
+	var clip := xform_rect(inv * vp.get_global_transform(), Rect2(Vector2.ZERO, vp.size)) if vp != null \
+		else Rect2(Vector2.ZERO, size)
+	_dnd_overlay.visible = true
+	_dnd_overlay.position = clip.position
+	_dnd_overlay.size = clip.size
+	var bar_c := _dnd_overlay.get_child(0) as ColorRect
+	var out_c := _dnd_overlay.get_child(1) as ReferenceRect
+	bar_c.visible = not over
+	out_c.visible = over
+	if over:
+		var b := xform_rect(inv, box)
+		out_c.position = b.position - clip.position
+		out_c.size = b.size
+		out_c.border_color = drag_indicator_color
+	else:
+		var l := xform_rect(inv, line)
+		bar_c.position = Vector2(l.position.x, l.position.y - 1.0) - clip.position
+		bar_c.size = Vector2(l.size.x, 2.0)
+		bar_c.color = drag_indicator_color
 
 
 ## Multi-column views: `bind.call(cell: Control, index)` fills the cell of

@@ -1961,6 +1961,22 @@ doc.seek_transitions(0.35)
 # Hit test (document coordinates)
 var hit := doc.element_at(point, true)        # respect picking-mode
 
+# Drag and drop of collection items (Unity canStartDrag, setupDragAndDrop,
+# dragAndDropUpdate, handleDrop) and row geometry
+doc.set_drag_and_drop("hierarchy", {
+    "can_start_drag": func(a): return a["index"] > 0,
+    "setup_drag_and_drop": func(a): return {"title": "Move", "data": a["ids"]},
+    "drag_and_drop_update": func(a): return UxmlDocument.DragVisualMode.MOVE,
+    "handle_drop": func(a): return UxmlDocument.DragVisualMode.MOVE})
+doc.items_drag_ended.connect(func(list, at, result): pass)  # "outside": the canvas
+var row := doc.get_item_index_at("hierarchy", global_point)
+var rr := doc.get_item_rect("hierarchy", row)
+
+# Element rectangles in another element's space (Unity ChangeCoordinatesTo)
+var r := doc.get_element_rect(child, parent)            # border box
+var pad := doc.get_element_rect(parent, null, "padding") # document space
+var t := doc.get_element_transform(child, parent)      # t * p, t.affine_inverse() * p
+
 # Catalog, templates
 var catalog := UxmlControls.catalog()
 var inst := model.instance_of(clone)          # the TemplateContainer
@@ -2092,6 +2108,91 @@ namespace, name, `container` (takes authored children), `editor_only`,
 type, default (UXML text) and enum choices. Names and defaults follow
 Unity 6000.3. A test keeps the catalog inside `UssControls`: every element
 is a known control and every attribute is in `KNOWN_ATTRIBUTES`.
+
+### Drag and drop of collection items
+
+`set_drag_and_drop(list, callbacks)` gives a ListView, TreeView,
+MultiColumnListView or MultiColumnTreeView Unity's four drag-and-drop
+callbacks, as a Dictionary (`can_start_drag`, `setup_drag_and_drop`,
+`drag_and_drop_update`, `handle_drop`; see the method's doc comment for
+the argument Dictionaries). The drag is godot-uxml's own, not Godot's
+`force_drag`: the pressed row keeps the mouse focus while the button is
+held, so every move and the release reach the row's `gui_input`, and a
+drag runs the same headless (`push_input`) as on screen. Godot's drag
+would need the mouse-over tracking that a headless window never gets, and
+would end at the first `MOUSE_FILTER_STOP` part of a row.
+
+1. A press records the item. A plain press on an item of a multiple
+   selection keeps the selection until the release (Unity), so that the
+   drag takes every selected item; a release without a drag selects the
+   item.
+2. After 5 pixels (Unity ListViewDragger), `can_start_drag` decides once
+   per press (without it, `reorderable`), then `setup_drag_and_drop`
+   gives the title and the data. `items_drag_started` is emitted.
+3. Each move finds the collection under the pointer with the hit test
+   (`element_at`, parts included, up to the collection element) among the
+   collections of the same document. `drop_args` reads the row under the
+   pointer, transforms applied: the 5-pixel top and bottom bands of a row
+   drop between items, the rest over the item; no row gives
+   `OUTSIDE_ITEMS` at the end (or the start above the viewport). A tree
+   adds the drop parent (`null`: the roots) and the child index (`-1`:
+   the end): over an item, into the item at the end; between items, the
+   parent and the index of the next visible item (the roots at the end
+   after the last). `drag_and_drop_update` of the target gives the
+   `DragVisualMode`; `items_drag_updated` carries the arguments and the
+   mode ({} outside every collection, which is where an editor's canvas
+   takes the drop). A pointer in the 5-pixel edge bands of the viewport
+   scrolls 20 pixels.
+4. The release calls `handle_drop` of the target when the last update
+   gave COPY or MOVE. `items_drag_ended` gives "dropped", "rejected",
+   "outside" or "canceled" (Escape on the focused list, `cancel_drag()`,
+   a reload, a release event marked `canceled`).
+
+Without update and drop callbacks a `reorderable` view moves its own
+items, as Unity's reorderable controllers: a list rejects a drop over an
+item and moves the dragged items, in order, to the insert index (Unity's
+shift bookkeeping, one `item_index_changed(from, to)` per move); a tree
+rejects a drop into a dragged item or below it, moves the dragged items
+whose parent does not also move under the drop parent, opens the parent,
+and emits `item_index_changed(id, parent_id)` per move (Unity TreeView's
+itemIndexChanged). The bound Array (`set_items_source`) and the tree
+roots and children Arrays (`set_tree_source`) change in place. The moved
+items stay selected. Views from other documents are not drop targets.
+
+The indicator for COPY and MOVE is not part of the element tree (so no
+structure or style check sees it): an internal child Control of the
+document, clipped to the target's viewport, with a 2-pixel ColorRect
+between items and a 1-pixel ReferenceRect over an item, in
+`drag_indicator_color`. The row under an over-item drop also gets Unity's
+class `unity-collection-view__item--drag-hover` (a control class, so the
+row restyles; the themes have no rule for it). The cursor of the pressed
+row follows the mode and is restored at the end.
+
+`get_item_index_at(list, global_point)` and `get_item_rect(list, index)`
+read the drawn, bound rows (inside the viewport for the point); an item on
+no row gives -1 / `Rect2()`. Both use global coordinates, as the drag
+signals.
+
+Cost when unused: two fields per collection behavior, and the motion
+handler that existed for `reorderable` now first checks the held button.
+
+### Element rectangles
+
+`get_element_transform(element, space)` is
+`space_global.affine_inverse() * element_global` of the two controls (the
+document's control for `space == null`), so translate, rotate, scale and
+transform-origin of both elements and their ancestors apply, and scroll
+offsets too. Local coordinates start at the top-left corner of the border
+box, as in Unity. `get_element_rect(element, space, box)` transforms the
+border, padding or content box and gives the bounding box. The padding box
+removes the border widths as the layout reads them (px, on the pixel
+grid when `pixel_grid`); the content box removes the content-box insets of
+the last layout: `_insets` on the GDScript path, `insets_of(i)` of the
+native placement (`Placement.last`) on the native path, so percentage
+padding is the resolved value on both. An element with no control, of
+another load or under `display: none` (the `_gone` flags of the last
+restyle) has no layout: `Rect2()` and a zero transform. A pending restyle
+runs first, as for `element_at`.
 
 ## Unsupported / out of scope (diagnosed, not silent)
 
