@@ -36,19 +36,19 @@
 }
 
 .unity-scroller--vertical > .unity-scroller__low-button {
-  background-image: url("arrow-up.svg");
+  background-image: url("scroller-up.svg");
 }
 
 .unity-scroller--vertical > .unity-scroller__high-button {
-  background-image: url("arrow-down.svg");
+  background-image: url("scroller-down.svg");
 }
 
 .unity-scroller--horizontal > .unity-scroller__low-button {
-  background-image: url("arrow-left.svg");
+  background-image: url("scroller-left.svg");
 }
 
 .unity-scroller--horizontal > .unity-scroller__high-button {
-  background-image: url("arrow-right.svg");
+  background-image: url("scroller-right.svg");
 }
 
 .unity-scroller__slider {
