@@ -22,8 +22,9 @@ extends StyleBox
 ## each side, the clipped image, the clip mask), its vertex colours white
 ## with the coverage in alpha (the mask: the coverage in the colour
 ## channels), drawn with the part's colour as the modulate. A colour change
-## (a hover, a colour transition) needs no new geometry; a new size builds
-## it once.
+## (a hover, a colour transition: set_colors on the installed box) needs no
+## new geometry unless it changes which sides are opaque or transparent or
+## whether the sides have one colour; a new size builds it once.
 
 var bg_color := Color(0, 0, 0, 0)
 ## Border widths: top, right, bottom, left (px, on the pixel grid).
@@ -97,8 +98,10 @@ func _draw(to_canvas_item: RID, rect: Rect2) -> void:
 			_mesh(to_canvas_item, 1 + k, xf, colors[k], RID())
 
 
-## The shared geometry for a size (this style's inputs do not change after
-## the applier built it, so a size is the only key per instance).
+## The shared geometry for a size (this style's geometry inputs do not
+## change after the applier built it, and set_colors drops the geometry
+## when new colours change its flags, so a size is the only key per
+## instance).
 var _geo_size := Vector2(-1.0, -1.0)
 var _img_round := false
 ## The side whose colour every drawn side has (-1: the sides differ).

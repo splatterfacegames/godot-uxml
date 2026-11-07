@@ -1274,8 +1274,13 @@ func fit_button(c: Button, want: Vector2, start: Vector2, end: Vector2) -> bool:
 	var fitted: bool = m != [start.x, start.y, end.x, end.y]
 	if not fitted and not c.has_meta(&"uxml_bfit"):
 		return false
+	var slots := _stylebox_slots(c)
+	if fitted and c.size == want and c.has_meta(&"uxml_bfit") and _fit_as(c, slots, m):
+		# Fitted the same at the last placement (a fitted Button is
+		# placed again by every layout): nothing to write.
+		return true
 	var seen := {}
-	for slot in _stylebox_slots(c):
+	for slot in slots:
 		if not c.has_theme_stylebox_override(slot):
 			continue
 		var s := c.get_theme_stylebox(slot)
@@ -1298,6 +1303,22 @@ func fit_button(c: Button, want: Vector2, start: Vector2, end: Vector2) -> bool:
 	c.update_minimum_size()
 	c.size = want
 	return fitted
+
+
+## Every stylebox override of `c` has the margins `m` ([l, t, r, b]) and
+## the uxml_margins meta of them.
+static func _fit_as(c: Control, slots: Array, m: Array) -> bool:
+	for slot in slots:
+		if not c.has_theme_stylebox_override(slot):
+			continue
+		var s := c.get_theme_stylebox(slot)
+		if s == null:
+			continue
+		if (s.content_margin_left != m[0] or s.content_margin_top != m[1]
+				or s.content_margin_right != m[2] or s.content_margin_bottom != m[3]
+				or s.get_meta("uxml_margins", null) != m):
+			return false
+	return true
 
 
 ## The height of a one-line Label with the font it has without fit_label:

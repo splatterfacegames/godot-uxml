@@ -364,6 +364,12 @@ pub struct Placement {
     /// Buttons fitted by UxmlStyleApplier.fit_button at their last
     /// placement.
     bfit: Vec<bool>,
+    /// What each fitted Button was last fitted for: its rect size, insets
+    /// and its minimum size after the fit. A fitted Button is placed again
+    /// by every layout; with the same inputs, the same minimum size (its
+    /// text) and its size at the rect, fit_button would write nothing, so
+    /// it is not called. A forced (re-applied) placement drops it.
+    bfit_at: Vec<Option<(Vector2, Vector2, Vector2, Vector2)>>,
 }
 
 impl Placement {
@@ -489,11 +495,28 @@ impl Placement {
             if let Some(a) = applier {
                 if self.bfit.len() != io.controls.len() {
                     self.bfit = vec![false; io.controls.len()];
+                    self.bfit_at = vec![None; io.controls.len()];
                 }
-                if io.buttons[i] && (self.bfit[i] || c.get_size() != r.size) {
+                if force {
+                    self.bfit_at[i] = None;
+                }
+                let size = c.get_size();
+                if io.buttons[i] && (self.bfit[i] || size != r.size) {
+                    if self.bfit[i]
+                        && size == r.size
+                        && self.bfit_at[i] == Some((r.size, start, end, c.get_minimum_size()))
+                    {
+                        self.hooked[i] = Some((start, end));
+                        return;
+                    }
                     let mut a = a.clone();
                     let fitted = a.call("fit_button", &[c.to_variant(), r.size.to_variant(), start.to_variant(), end.to_variant()]);
                     self.bfit[i] = fitted.try_to::<bool>().unwrap_or(false);
+                    self.bfit_at[i] = if self.bfit[i] {
+                        Some((r.size, start, end, c.get_minimum_size()))
+                    } else {
+                        None
+                    };
                     // fit_button sets the stylebox margins (uxml_margins).
                     if let Some(e) = io.margins.borrow_mut().get_mut(i) {
                         *e = None;

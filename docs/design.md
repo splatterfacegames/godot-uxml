@@ -2554,8 +2554,32 @@ same way where `StyleBoxFlat` cannot, and `StyleBoxFlat` draws the rest
   their vertices slightly outside the arc, so the chords cut it and the
   coverage of the edge pixels matches (measured to within 5 of 255).
   Straight edges on the pixel grid stay hard.
-- The tessellation is built at the first draw for a rect and kept until
-  the rect changes; a draw is one `canvas_item_add_triangle_array`.
+- The tessellation is built at the first draw of a size and shared by
+  every box with the same size and geometry inputs (`UxmlBoxStyle._cache`,
+  keyed by the size, widths, radii and what of the colours the geometry
+  depends on: which sides are opaque, whether the drawn sides have one
+  colour and which of them are transparent). It is one `ArrayMesh` per
+  part (background, each side, the clipped image, the clip mask) with
+  white vertex colours and the coverage in alpha; a draw adds each part
+  with its colour as the modulate. A box with nothing visible draws
+  nothing and builds no geometry.
+- A restyle reuses what it can (`UxmlStyleApplier.restyle_reuse`): the
+  values `_stylebox` reads become a record (kind of box, colours, widths,
+  radii, content margins) from a static cache keyed by those values, and
+  its shape (widths, radii, padding) from a second cache that colour
+  changes do not miss (a colour transition makes a new value every
+  frame). When only the colours change (a hover, a colour transition),
+  the installed `UxmlBoxStyle` or `StyleBoxFlat` takes them in place
+  (`_recolor`, without a `changed` signal) and the control redraws: no
+  new box, no override installs, no theme update, and the geometry stays
+  unless its colour flags changed. The box must still be the one built
+  for these margins (`_installed_as_built`); a box whose margins the
+  placement changed (percentage padding, a fitted Button) is built
+  again. Unchanged colour and font size overrides are not written again,
+  and the bulk theme override opens at the first write or property
+  change (`_ov`), so an apply that changes nothing updates no theme
+  (Godot's Button shapes its text again on a theme update but not on a
+  `clip_text` change, so a property change also opens it).
 - A Button without a USS box (a RepeatButton, `all: initial`) gets an
   empty stylebox, not Godot's theme box.
 

@@ -468,6 +468,96 @@ func test_restyled_boxes_match_fresh() -> void:
 		"a transparent side gives other one-colour geometry")
 
 
+## Buttons smaller than their text and padding (fitted by
+## UxmlStyleApplier.fit_button): name -> [style, text].
+const _FIT_STATES := {
+	"f1": ["width: 60px; height: 14px; padding: 6px 10px; -unity-text-align: middle-center;", "Fit"],
+	"f2": ["width: 40%; height: 16px; padding: 5px; border-width: 1px; border-color: rgb(9, 9, 9);", "A long button text"],
+	"f3": ["width: 50px; height: 30px; padding: 2px 12px; -unity-text-align: middle-right;", "Right"],
+}
+
+
+func _fit_doc(state: Dictionary, native: bool, size: Vector2) -> UxmlDocument:
+	UssCascade.use_native = native
+	var doc := UxmlDocument.new()
+	h.root.add_child(doc)
+	doc.size = size
+	var o := '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:VisualElement name="row" style="flex-direction: row; align-items: flex-start;">'
+	for n in _FIT_STATES:
+		o += '<ui:Button name="%s" style="%s" text="%s" />' % [n, state[n][0], state[n][1]]
+	doc.load_source(o + "</ui:VisualElement></ui:UXML>")
+	UssCascade.use_native = true
+	return doc
+
+
+static func _fit_values(b: Button) -> Array:
+	var out := [b.position, b.size, b.has_meta(&"uxml_bfit"), b.text]
+	for slot in [&"normal", &"hover", &"pressed", &"focus", &"disabled"]:
+		var sb := b.get_theme_stylebox(slot)
+		out.append([sb.content_margin_left, sb.content_margin_top, sb.content_margin_right,
+			sb.content_margin_bottom, sb.get_meta("uxml_margins", null)])
+	return out
+
+
+func _fit_same(doc: UxmlDocument, state: Dictionary, native: bool, what: String) -> void:
+	await h.process_frame
+	await h.process_frame
+	var ref := _fit_doc(state, native, doc.size)
+	await h.process_frame
+	await h.process_frame
+	var bad := ""
+	for n in _FIT_STATES:
+		var a := _fit_values(doc.get_native(n))
+		var b := _fit_values(ref.get_native(n))
+		if a != b:
+			bad = "%s: %s, fresh %s" % [n, a, b]
+			break
+	h.check(bad.is_empty(), "%s (%s): fitted Buttons as a fresh load %s" % [what, "native" if native else "GDScript", bad])
+	_unload(ref)
+
+
+# A fitted Button is placed again by every layout; the native placement
+# skips fit_button when its rect, insets and minimum size are those of its
+# last fit, and fit_button writes nothing when the margins are already
+# fitted. Every change still fits it as a fresh load does.
+func test_fitted_buttons_follow_changes() -> void:
+	for native in [true, false]:
+		var state := {}
+		for n in _FIT_STATES:
+			state[n] = (_FIT_STATES[n] as Array).duplicate()
+		var doc := _fit_doc(state, native, Vector2(400, 100))
+		await _fit_same(doc, state, native, "load")
+		var fitted := 0
+		for n in _FIT_STATES:
+			if doc.get_native(n).has_meta(&"uxml_bfit"):
+				fitted += 1
+		h.check(fitted >= 2, "the fixture fits Buttons (%d)" % fitted)
+		doc.relayout()
+		doc.relayout()
+		await _fit_same(doc, state, native, "relayout")
+		# Text set on the control, then relayout (no re-apply).
+		(doc.get_native("f1") as Button).text = "A much wider text"
+		state["f1"][1] = "A much wider text"
+		doc.relayout()
+		await _fit_same(doc, state, native, "longer text")
+		(doc.get_native("f1") as Button).text = "W"
+		state["f1"][1] = "W"
+		doc.relayout()
+		await _fit_same(doc, state, native, "shorter text")
+		doc.size = Vector2(700, 100)
+		await _fit_same(doc, state, native, "resize")
+		# A paint-only restyle (the box is recoloured in place).
+		for n in _FIT_STATES:
+			state[n][0] = state[n][0] + " background-color: rgb(40, 60, 80);"
+			doc.get_element_model(n).set_attribute("style", state[n][0])
+		await _fit_same(doc, state, native, "colour")
+		# New padding (a re-apply and a layout).
+		state["f3"][0] = state["f3"][0] + " padding: 9px;"
+		doc.get_element_model("f3").set_attribute("style", state["f3"][0])
+		await _fit_same(doc, state, native, "padding")
+		_unload(doc)
+
+
 func test_white_space() -> void:
 	var doc := _load()
 	await h.process_frame
