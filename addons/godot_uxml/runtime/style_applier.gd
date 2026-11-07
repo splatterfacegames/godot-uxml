@@ -1028,6 +1028,10 @@ static func _is_theme_path(path: String) -> bool:
 ## Load the url() `ref` written in style entry `e` (for diagnostics and the
 ## origin file relative references resolve against).
 func _texture_ref(ref: String, e: Dictionary, name: String, el: UxmlElement) -> Texture2D:
+	# `none` is the USS keyword for "no image" (the editor theme sets it on
+	# the checkmark of a ToolbarToggle), not a file name.
+	if ref.length() == 4 and ref.to_lower() == "none":
+		return null
 	var u := UssValues.parse_url(ref)
 	if not u["ok"]:
 		_warn(el, name, "%s: %s" % [name, u["problem"]])
@@ -1992,10 +1996,35 @@ func _report_resolver(res: Dictionary, el: UxmlElement, what: String) -> void:
 func _warn_diag(kind: String, key: String, el: UxmlElement, message: String) -> void:
 	if _warned.has(key):
 		return
-	_warned[key] = true
-	_warnings.append(UxmlDiagnostic.make(
-		kind, message, _source, el.open_tag_start, _uxml_path
-	))
+	var d := UxmlDiagnostic.make(kind, message, _source, el.open_tag_start, _uxml_path)
+	_warned[key] = d
+	_warnings.append(d)
+
+
+## Take every diagnostic this applier reported out of the runtime warnings
+## and forget them, so the next applies report again what still applies
+## (UxmlDocument.reload_stylesheet).
+func forget_warnings() -> void:
+	if _warned.is_empty():
+		return
+	# Keyed by value: a diagnostic of another source that equals one of
+	# these in every field would be dropped too, and is a duplicate.
+	var mine := {}
+	for k in _warned:
+		mine[_warned[k]] = true
+	var kept: Array = []
+	for w in _warnings:
+		if not mine.has(w):
+			kept.append(w)
+	_warnings.clear()
+	_warnings.append_array(kept)
+	_warned.clear()
+
+
+## The UXML text the applier's diagnostics point into (after
+## UxmlDocument.replace_source changed it in place).
+func set_source(source: String) -> void:
+	_source = source
 
 
 func _warn(el: UxmlElement, prop: String, message: String) -> void:

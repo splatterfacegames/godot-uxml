@@ -1541,3 +1541,215 @@ func _compute(i: int) -> void:
 				fcc[prop] = fc[prop]["value"]
 		_fc_customs[i] = [_next_cid, fcc]
 		_next_cid += 1
+
+
+# ---------------------------------------------------------------------------
+# Provenance (UxmlDocument.explain_style). A query path apart from update():
+# it reads the compiled rules, the element tree and the last computed
+# styles, and keeps nothing, so the cascade itself pays nothing for it.
+# Both backends compile the rules here and agree on the computed styles,
+# so the answer is the same on both.
+# ---------------------------------------------------------------------------
+
+## Every declaration that sets `property` on preorder index `i`, winner
+## first (see UxmlDocument.explain_style for the entry shape).
+## `bits_of.call(j) -> int` gives the pseudo-state bits (STATE_BITS,
+## BIT_ENABLED, BIT_INACTIVE) of any preorder index; `parent_style` is the
+## computed style of the inheritance parent ({} for the root).
+func explain(i: int, property: String, bits_of: Callable, parent_style: Dictionary) -> Array:
+	var ctx := {}  # preorder index -> [name, class set, bits]
+	var cand := PackedInt32Array()
+	var nm = _x_ctx(i, bits_of, ctx)[0]
+	if nm != null:
+		var l = _b_name.get(nm)
+		if l != null:
+			cand.append_array(l)
+	for c in _x_ctx(i, bits_of, ctx)[1]:
+		var l2 = _b_class.get(c)
+		if l2 != null:
+			cand.append_array(l2)
+	var l3 = _b_type.get(_local[i])
+	if l3 != null:
+		cand.append_array(l3)
+	cand.append_array(_b_any)
+	cand.sort()
+	# Matched declarations in cascade order: [prop, raw, flag, exp, origin,
+	# spec, rank, rule specificity key].
+	var decls: Array = []
+	var k := 0
+	var nc := cand.size()
+	while k < nc:
+		var s := cand[k]
+		var r := _sel_rule[s]
+		var k_end := k + 1
+		while k_end < nc and _sel_rule[cand[k_end]] == r:
+			k_end += 1
+		var lo := _rule_scope_lo[r]
+		if lo != -2 and (i < lo or i >= _rule_scope_hi[r]):
+			k = k_end
+			continue
+		var scope_idx := _rule_scope_idx[r]
+		var best_sel := -1
+		var best_spec := -1
+		for kk in range(k, k_end):
+			var ss := cand[kk]
+			var parts: Array = _sel_parts[ss]
+			if not _x_match(parts, parts.size() - 1, i, scope_idx, bits_of, ctx):
+				continue
+			var sp := _sel_spec[ss]
+			if best_sel < 0 or sp > best_spec:
+				best_sel = ss
+				best_spec = sp
+		k = k_end
+		if best_sel < 0:
+			continue
+		var origins := _origins_for(best_sel)
+		var theme := bool(doc.sheets[_rule_sheet[r]].get("theme", false))
+		var dp: PackedStringArray = _rule_dprop[r]
+		for d in dp.size():
+			decls.append([dp[d], _rule_dval[r][d], _rule_dflag[r][d], _rule_dexp[r][d],
+				origins[d], best_spec, "theme" if theme else "author"])
+	var st = els[i].get_attribute("style")
+	if st != null:
+		var inl := _inline(String(st))
+		var ip: PackedStringArray = inl[0]
+		for d in ip.size():
+			decls.append([ip[d], inl[1][d], inl[2][d], inl[3][d], _inline_origin(d), INLINE_SPEC, "inline"])
+	# Custom properties: the inherited ones, then the element's own winners
+	# (raw values, as update() substitutes against them).
+	var customs := {}
+	for prop in parent_style:
+		if String(prop).begins_with("--"):
+			customs[prop] = parent_style[prop]["value"]
+	var cw := {}
+	for j in decls.size():
+		if int(decls[j][2]) & F_CUSTOM:
+			var cur = cw.get(decls[j][0])
+			if cur == null or int(decls[j][5]) >= int(decls[cur][5]):
+				cw[decls[j][0]] = j
+	for prop in cw:
+		customs[prop] = decls[cw[prop]][1]
+	var out: Array = []
+	for j in decls.size():
+		var dc: Array = decls[j]
+		var dprop: String = dc[0]
+		var raw: String = dc[1]
+		var flag: int = dc[2]
+		var pairs = dc[3]
+		var failed := false
+		if flag & F_VAR:
+			var sub = UssStyleResolver._substitute_vars(raw, customs,
+				{dprop: true} if (flag & F_CUSTOM) else {})
+			failed = sub == null or UssStyleResolver._is_cycle(sub)
+			pairs = _expand(dprop, raw if failed else String(sub))
+		if pairs == null:
+			continue
+		for pair in (pairs as Array):
+			if pair[0] != property:
+				continue
+			var spec: int = dc[5]
+			var key: int = ALL_SPEC if (flag & F_ALL) else spec
+			var layerless := spec & ~(AUTHOR_LAYER | INLINE_SPEC)
+			out.append({
+				"value": String(pair[1]),
+				"property": dprop,
+				"declared": raw,
+				"winner": false,
+				"status": "overridden",
+				"rank": dc[6],
+				"specificity": Vector3i.ZERO if dc[6] == "inline" else Vector3i(
+					(layerless >> 40) & 0xFFFFF, (layerless >> 20) & 0xFFFFF, layerless & 0xFFFFF),
+				"order": j,
+				"origin": (dc[4] as Dictionary).duplicate(true),
+				"_key": key,
+				"_failed": failed,
+			})
+	# Winner first: the highest key, later declarations winning ties.
+	out.sort_custom(func(a, b):
+		if a["_key"] != b["_key"]:
+			return a["_key"] > b["_key"]
+		return a["order"] > b["order"])
+	var fallback := ""  # "inherited" or "default" when the winner gives no value
+	if out.is_empty():
+		fallback = "inherited" if _is_inherited(property) else "default"
+	else:
+		var w: Dictionary = out[0]
+		if w["_failed"]:
+			w["status"] = "dropped"
+			fallback = "inherited" if _is_inherited(property) else "default"
+		elif w["value"] == "initial":
+			w["status"] = "keyword"
+			fallback = "default"
+		elif w["value"] == "unset":
+			w["status"] = "keyword"
+			fallback = "inherited" if _is_inherited(property) else "default"
+		else:
+			w["status"] = "winner"
+			w["winner"] = true
+			if property == "font-size" and w["value"].ends_with("%"):
+				var pxv := _font_percent(w["value"], parent_style.get("font-size"))
+				if not pxv.is_empty():
+					w["value"] = pxv
+	for e in out:
+		if e["_failed"] and e["status"] == "overridden":
+			e["status"] = "dropped"
+		e.erase("_key")
+		e.erase("_failed")
+	if fallback == "inherited":
+		var pe = parent_style.get(property)
+		if pe != null:
+			var p := _parent[i]
+			out.append({"value": String(pe["value"]), "property": property, "declared": "",
+				"winner": true, "status": "inherited", "rank": "inherited",
+				"specificity": Vector3i.ZERO, "order": -1,
+				"origin": {"kind": "inherited", "from": els[p], "origin": (pe["origin"] as Dictionary).duplicate(true)}})
+		else:
+			fallback = "default"
+	if fallback == "default":
+		out.append({"value": UssTransitions.INITIAL.get(property), "property": property, "declared": "",
+			"winner": true, "status": "default", "rank": "default",
+			"specificity": Vector3i.ZERO, "order": -1, "origin": {"kind": "default"}})
+	return out
+
+
+## [name, class set, state bits] of preorder index `j`, read from the
+## element (the values the last update() read).
+func _x_ctx(j: int, bits_of: Callable, ctx: Dictionary) -> Array:
+	var c = ctx.get(j)
+	if c != null:
+		return c
+	var el: UxmlElement = els[j]
+	c = [el.get_attribute("name"), _class_set(el.get_attribute("class"), _local[j]), int(bits_of.call(j))]
+	ctx[j] = c
+	return c
+
+
+## _match_from over the explain context.
+func _x_match(parts: Array, k: int, i: int, scope_idx: int, bits_of: Callable, ctx: Dictionary) -> bool:
+	var cp: Array = parts[k]
+	var x := _x_ctx(i, bits_of, ctx)
+	for t in (cp[0] as PackedStringArray):
+		if _local[i] != t:
+			return false
+	for n in (cp[1] as PackedStringArray):
+		if x[0] != n:
+			return false
+	var set: Dictionary = x[1]
+	for cl in (cp[2] as PackedStringArray):
+		if not set.has(cl):
+			return false
+	var m: int = cp[3]
+	if m != 0 and (int(x[2]) & m) != m:
+		return false
+	if cp[4] and (scope_idx < 0 or i != scope_idx):
+		return false
+	if k == 0:
+		return true
+	var p := _sel_parent[i]
+	if cp[5]:
+		return p >= 0 and _x_match(parts, k - 1, p, scope_idx, bits_of, ctx)
+	while p >= 0:
+		if _x_match(parts, k - 1, p, scope_idx, bits_of, ctx):
+			return true
+		p = _sel_parent[p]
+	return false

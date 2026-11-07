@@ -547,6 +547,69 @@ func tick() -> bool:
 	return _flush_overrides()
 
 
+## Every running transition (in its delay or interpolating): Array of
+## {index, property, from, to, value, start_time, delay, duration, easing,
+## elapsed, progress}. Times in seconds on this clock: `start_time` is the
+## moment the transition was started, the interpolation begins `delay`
+## later and lasts `duration`; `elapsed` is the clock minus `start_time`;
+## `progress` the eased progress (0 in the delay).
+func snapshot() -> Array:
+	var out: Array = []
+	for i in _running:
+		var run: Dictionary = _running[i]
+		for prop in run:
+			var an: Dictionary = run[prop]
+			var kind: int = an["kind"]
+			var begin: float = float(an["start_ms"]) - float(an["delay"])
+			out.append({
+				"index": i, "property": prop,
+				"from": _serialize(kind, prop, an["a"], an["a_entry"]),
+				"to": _serialize(kind, prop, an["b"], an["b_entry"]),
+				"value": _serialize(kind, prop, an["cur"], an["cur_entry"]),
+				"start_time": begin / 1000.0,
+				"delay": float(an["delay"]) / 1000.0,
+				"duration": float(an["dur"]) / 1000.0,
+				"easing": UssProperties.EASING_MODES[int(an["ease"])],
+				"elapsed": (now_ms - begin) / 1000.0,
+				"progress": float(an["eased"]),
+			})
+	return out
+
+
+## Scrub: put every running transition `ms` after its start (the delay
+## included) and write the values. A transition put past its end shows the
+## end value and keeps running; tick() completes it (and queues its end
+## event) when the clock passes the end. No event is queued here. Returns
+## true when an override changed.
+func seek(ms: float) -> bool:
+	if _running.is_empty():
+		return false
+	var dirty := {}
+	for i in _running:
+		var run: Dictionary = _running[i]
+		for prop in run:
+			var an: Dictionary = run[prop]
+			an["start_ms"] = now_ms - ms + float(an["delay"])
+			var start: float = an["start_ms"]
+			var dur: int = an["dur"]
+			if now_ms < start:
+				an["eased"] = 0.0
+				an["started"] = false
+			elif dur <= 0 or now_ms >= start + dur:
+				an["eased"] = easing(int(an["ease"]), 1.0)
+				an["started"] = true
+			else:
+				an["eased"] = easing(int(an["ease"]), (now_ms - start) / float(dur))
+				an["started"] = true
+			var before = an["cur"]
+			_lerp(an)
+			if not is_same(before, an["cur"]):
+				dirty[i] = true
+	for i in dirty:
+		_write(i)
+	return _flush_overrides()
+
+
 func _lerp(an: Dictionary) -> void:
 	var t: float = an["eased"]
 	var kind: int = an["kind"]

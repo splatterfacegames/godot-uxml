@@ -61,6 +61,8 @@ static func load_source(
 		doc.warnings.append_array(expander.expand(doc.root, source, uxml_path))
 		style_from = expander.style_from
 		doc.element_paths = expander.element_paths
+		doc.element_instances = expander.instances
+		doc.template_offsets = expander._orig
 
 	# <Bindings> UxmlObjects are instructions, not elements: they leave the
 	# tree before any sheet, cascade or layout pass sees it.
@@ -182,9 +184,43 @@ static func _load_sheet(
 	doc.warnings.append_array(parsed["warnings"])
 	if not origin.is_empty():
 		loaded[origin] = index
-	chain.append(origin)
+	_link_sheet(parsed["items"], text, origin, scope, doc, resolver, loaded, chain)
+	return index
 
-	for item in parsed["items"]:
+
+## Parse `text` again as the stylesheet at `index` of `doc` (same origin
+## and scope): its items, its import and value diagnostics, and the sheets
+## of `@import`s it now has. The caller removes the sheet's old
+## diagnostics. Sheets that only the old text imported stay in
+## `doc.sheets`, unreferenced.
+static func reparse_sheet(doc: UxmlDocumentModel, index: int, text: String, resolver: UxmlResourceResolver) -> void:
+	var sheet: Dictionary = doc.sheets[index]
+	var origin: String = sheet["origin"]
+	var parsed := UssParser.new().parse(text, origin)
+	_check_values(parsed, text, origin, doc, resolver)
+	sheet["source"] = text
+	sheet["items"] = parsed["items"]
+	doc.warnings.append_array(parsed["warnings"])
+	var loaded := {}
+	for sh in doc.sheets:
+		if not String(sh["origin"]).is_empty() and not loaded.has(sh["origin"]):
+			loaded[sh["origin"]] = sh["index"]
+	_link_sheet(parsed["items"], text, origin, sheet["scope"], doc, resolver, loaded, [])
+
+
+## Diagnose the at-rules of a loaded sheet and load its `@import`s.
+static func _link_sheet(
+	items: Array,
+	text: String,
+	origin: String,
+	scope: UxmlElement,
+	doc: UxmlDocumentModel,
+	resolver: UxmlResourceResolver,
+	loaded: Dictionary,
+	chain: Array
+) -> void:
+	chain.append(origin)
+	for item in items:
 		# At-rules the grammar does not support (@media, @supports, @charset,
 		# ...) reach here as tagged `unknown` items. Diagnose them explicitly;
 		# their contents were already skipped by the parser and never apply.
@@ -219,7 +255,6 @@ static func _load_sheet(
 		)
 
 	chain.pop_back()
-	return index
 
 
 ## Units Unity's USS importer reads; any other unit fails the import.
