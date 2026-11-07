@@ -294,13 +294,17 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 	# All override writes for this control land as ONE theme-changed
 	# notification instead of one per slot/color (10+ for a Button).
 	if BULK_THEME_OVERRIDES:
-		# The bulk opens at the first override write (_ov): an apply that
-		# writes none (a recoloured box, unchanged text styling) updates
-		# no theme.
+		# A Button's bulk opens at the first override write or property
+		# change (_ov): an apply that changes nothing (a recoloured box,
+		# unchanged text styling) updates no theme. Other controls update
+		# their theme at every apply, as before: a Label shapes its text
+		# again on a theme update, and some of its sizes after runtime text
+		# and state changes depend on that (bench/equiv_runtime.gd differs
+		# without it).
 		var prev_c := _bulk_c
 		var prev_open := _bulk_open
 		_bulk_c = c
-		_bulk_open = not restyle_reuse
+		_bulk_open = not restyle_reuse or not c is BaseButton
 		if _bulk_open:
 			c.begin_bulk_theme_override()
 		_apply_themed_inner(c, style, el, include_skin)
