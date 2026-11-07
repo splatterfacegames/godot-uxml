@@ -212,7 +212,7 @@ func _render_case(c: Dictionary, dump: Dictionary) -> void:
 	doc.position = Vector2.ZERO
 	doc.size = Vector2(panel)
 	_vp.add_child(doc)
-	_load(doc, uxml, uxml_path, root, c["uss"])
+	_load(doc, uxml, uxml_path, root, c["uss"], actions)
 	if sidecar.has("bind"):
 		doc.set_data_source(_bind_target(String(sidecar["bind"]), root))
 	doc.size = Vector2(panel)
@@ -236,10 +236,32 @@ func _render_case(c: Dictionary, dump: Dictionary) -> void:
 ## UxmlDocument.load_source with the case sheet attached to the case root,
 ## as the dumper attaches it (host.styleSheets.Add) and bench/parity.gd
 ## loads it (UxmlLoader.load_source with the sheet).
-func _load(doc: UxmlDocument, uxml: String, uxml_path: String, root: String, uss: String) -> void:
+## C# properties that a case sets (`set-prop`; Unity 6000.3 has no UXML
+## attribute for them) become the attributes godot-uxml reads, before the
+## controls are built, as bench/parity.gd does.
+const PROP_ATTRS := {"flex": "flex", "choicesMasks": "choices-masks"}
+
+
+func _load(doc: UxmlDocument, uxml: String, uxml_path: String, root: String, uss: String,
+		actions: Array = []) -> void:
 	doc._clear()
 	doc._resolver = UxmlResourceResolver.new(root)
 	doc._doc = UxmlLoader.load_source(uxml, uxml_path, doc._resolver, uss)
+	for act in actions:
+		if String(act.get("op", "")) != "set-prop":
+			continue
+		var attr: String = PROP_ATTRS.get(String(act.get("prop", "")), "")
+		var el: UxmlElement = doc._doc.find_by_name(String(act.get("target", "")))
+		if attr.is_empty() or el == null:
+			continue
+		var v = act.get("value")
+		if v is Array:
+			var parts := PackedStringArray()
+			for x in v:
+				parts.append(str(int(x)) if x is float else str(x))
+			el.set_attribute(attr, ",".join(parts))
+		else:
+			el.set_attribute(attr, str(v).to_lower() if v is bool else str(v))
 	doc._effective_root = root
 	UxmlTheme.attach(doc._doc, doc.theme_path, doc.editor_theme, doc.editor_skin)
 	doc._index()
