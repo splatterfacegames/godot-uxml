@@ -1334,12 +1334,9 @@ func _font(c: Control, style: Dictionary, el: UxmlElement) -> Font:
 		_capture_base_font(c)
 		fv.base_font = c.get_meta("uxml_base_font", null)
 	if font_style == "bold" or font_style == "bold-and-italic":
-		fv.variation_embolden = 0.6
+		fv.variation_embolden = BOLD_EMBOLDEN
 	if font_style == "italic" or font_style == "bold-and-italic":
-		var t := Transform2D()
-		t.x = Vector2(1.0, 0.0)
-		t.y = Vector2(0.2, 1.0)
-		fv.variation_transform = t
+		fv.variation_transform = ITALIC_TRANSFORM
 	return fv
 
 
@@ -1369,12 +1366,9 @@ func _spaced_font(c: Control, font: Font, style: Dictionary, el: UxmlElement) ->
 	var fv := FontVariation.new()
 	fv.base_font = base
 	if font_style == "bold" or font_style == "bold-and-italic":
-		fv.variation_embolden = 0.6
+		fv.variation_embolden = BOLD_EMBOLDEN
 	if font_style == "italic" or font_style == "bold-and-italic":
-		var t := Transform2D()
-		t.x = Vector2(1.0, 0.0)
-		t.y = Vector2(0.2, 1.0)
-		fv.variation_transform = t
+		fv.variation_transform = ITALIC_TRANSFORM
 	fv.spacing_glyph = glyph
 	fv.spacing_space = space
 	_fv_cache[key] = fv
@@ -1934,6 +1928,16 @@ static func _px_of(e) -> float:
 ## offset_transform_visual_only = false: input follows the transform, as
 ## Unity picking does.
 const _NO_SNAP := 1e-5
+
+## Unity's synthetic bold and italic of a font without those faces
+## (TextCore): the glyphs are emboldened and slanted. Godot's FontVariation
+## transform is FreeType's matrix: the x axis (1, slant) shears x by y.
+## Measured on bench/pixels (uss-text `italic`, `bold`, `bi`): a slant of
+## 0.2 and an embolden of 0.6 give Unity's amount of ink (Bold: 188 text
+## pixels, Unity 183). Before, the transform sheared y by x (the y axis
+## (0.2, 1)), which draws upright glyphs.
+const BOLD_EMBOLDEN := 0.6
+const ITALIC_TRANSFORM := Transform2D(Vector2(1.0, 0.2), Vector2(0.0, 1.0), Vector2.ZERO)
 
 
 func _apply_transform(c: Control, style: Dictionary, el: UxmlElement) -> void:
