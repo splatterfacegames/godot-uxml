@@ -151,7 +151,8 @@ class Behavior extends RefCounted:
 					p.remove_attribute("style")
 			if role == "label" and UxmlParts.find_part(el, "input") != null:
 				UxmlParts.toggle_control_class(el, "unity-base-field--no-label", hidden)
-		doc.relayout()
+		if c == null:
+			doc.relayout()  # else _set_control_text lays out what the text can move
 
 
 ## Toggle and RadioButton. Unity sets :checked on the control element and

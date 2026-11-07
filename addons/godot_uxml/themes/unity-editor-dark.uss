@@ -420,3 +420,38 @@ UXML {
 .unity-search-field-base__cancel-button--off {
   background-image: none;
 }
+
+/* ---- Menus (GenericDropdownMenu: UxmlDocument.show_context_menu) ------ */
+/* Not measured (see unity-editor.uss): the skin's popup and selection
+ * colours. */
+.unity-base-dropdown__container-outer {
+  border-color: rgb(36, 36, 36);
+}
+
+.unity-base-dropdown__container-inner {
+  background-color: rgb(56, 56, 56);
+}
+
+.unity-base-dropdown__item:hover {
+  background-color: rgb(44, 93, 135);
+}
+
+.unity-base-dropdown__checkmark {
+  -unity-background-image-tint-color: rgb(196, 196, 196);
+}
+
+.unity-base-dropdown__item:hover .unity-base-dropdown__checkmark {
+  -unity-background-image-tint-color: rgb(255, 255, 255);
+}
+
+.unity-base-dropdown__label {
+  color: rgb(210, 210, 210);
+}
+
+.unity-base-dropdown__item:hover .unity-base-dropdown__label {
+  color: rgb(255, 255, 255);
+}
+
+.unity-base-dropdown__separator-line {
+  background-color: rgb(76, 76, 76);
+}

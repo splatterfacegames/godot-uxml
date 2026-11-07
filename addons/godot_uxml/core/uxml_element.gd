@@ -24,6 +24,9 @@ var children: Array = []
 ## still works for code that reads the model, but a running UxmlDocument
 ## only sees such edits after refresh().
 var changed: Callable
+## While `changed` runs: the name of the attribute that set_attribute or
+## remove_attribute changed ("" otherwise).
+var changed_attribute := ""
 ## Half-open span of the open tag in the UXML source, for diagnostics.
 var open_tag_start: int = 0
 var open_tag_end: int = 0
@@ -73,11 +76,15 @@ func set_attribute(attr_name: String, value: String) -> void:
 				return
 			attr["value"] = value
 			if changed.is_valid():
+				changed_attribute = attr_name
 				changed.call(self)
+				changed_attribute = ""
 			return
 	attributes.append({"name": attr_name, "value": value, "offset": 0})
 	if changed.is_valid():
+		changed_attribute = attr_name
 		changed.call(self)
+		changed_attribute = ""
 
 
 ## Remove every attribute named `attr_name`; notifies `changed` if any was
@@ -91,7 +98,9 @@ func remove_attribute(attr_name: String) -> void:
 		return
 	attributes = kept
 	if changed.is_valid():
+		changed_attribute = attr_name
 		changed.call(self)
+		changed_attribute = ""
 
 
 ## The `class` attribute split on whitespace. Order preserved.

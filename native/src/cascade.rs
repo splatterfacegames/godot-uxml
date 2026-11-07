@@ -31,6 +31,17 @@ const F_ALL: i32 = 4;
 const BIT_ACTIVE: i32 = 2;
 const BIT_INACTIVE: i32 = 4;
 
+/// The `severity` of a diagnostic of `kind` (UxmlDiagnostic.severity_of).
+pub fn severity_of(kind: &str) -> &'static str {
+    match kind {
+        "malformed" | "import-unresolved" | "import-cycle" | "missing-file" | "path-outside-root"
+        | "malformed-reference" | "template-not-declared" | "template-cycle"
+        | "template-depth-exceeded" => "error",
+        "version-dependent" => "info",
+        _ => "warning",
+    }
+}
+
 fn state_bit(name: &str) -> i32 {
     match name {
         "hover" => 1,
@@ -532,6 +543,7 @@ impl Cascade {
         let e = &self.els[i];
         let mut d = VarDictionary::new();
         d.set("kind", kind);
+        d.set("severity", severity_of(kind));
         d.set("message", message.as_str());
         d.set("file", &self.source_file);
         d.set("offset", e.offset);

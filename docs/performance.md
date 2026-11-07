@@ -1701,3 +1701,130 @@ PARITY 32 match / 12 differ, as on main; `bench/equiv.gd` 1530 (native)
   the object, so this is now paid at loads and shape changes only.
 - The native cascade update is most of a hover now (0.6 to 0.7 ms of the
   1.1 to 1.2 ms button hover).
+
+## Build and update cost (`feat/editor-apis-3`)
+
+Request R15 of the uxml-editor: the cost of a load, of a text change and
+of a `display` change. Document: `bench/load_cost.gd`, 507 elements (987
+controls), 12 panels of rows of a Label, a Button, a Toggle and a
+TextField.
+
+### Method
+
+Interleaved rounds, the order rotated per round, three arms: `main`
+(`6137987`), a second copy of `main` (the noise floor) and the branch.
+Five rounds of `bench/load_cost.gd`, `bench/bench.gd --quick` and
+`bench/workloads.gd --quick`; values are the median of the rounds. Other
+sessions load the machine: in a first run `load` differed by up to 3.2
+times between the two copies of `main` in one round, so only the second
+run (quieter) is reported. Read a ratio against its `main copy / main`
+ratio: on this machine a difference under about 10% on one op is noise.
+
+### Load and updates (ms)
+
+| Native core | main | main copy | branch | branch / main |
+| --- | ---: | ---: | ---: | ---: |
+| runtime: load | 401 | 359 | 369 | 0.92 (copy 0.90) |
+| editor: load | 388 | 356 | 368 | 0.95 (copy 0.92) |
+| first frame | 14.5 | 13.9 | 13.7 | 0.95 |
+| first text change after a load, fixed Label | 122 | 110 | 1.5 | 0.012 |
+| text change, Label of its own width | 10.4 | 10.0 | 10.9 | 1.05 |
+| model text | 0.35 | 0.35 | 0.54 | 1.52 (see below) |
+| display change | 7.2 | 6.6 | 7.7 | 1.07 |
+| display change, next frame | 6.8 | 6.4 | 1.2 | 0.18 |
+
+| GDScript | main | main copy | branch | branch / main |
+| --- | ---: | ---: | ---: | ---: |
+| runtime: load | 886 | 976 | 907 | 1.02 (copy 1.10) |
+| editor: load | 924 | 913 | 851 | 0.92 (copy 0.99) |
+| first text change after a load, fixed Label | 169 | 179 | 4.2 | 0.025 |
+| text change, Label of its own width | 72 | 73 | 71 | 0.99 |
+| display change | 69 | 71 | 70 | 1.01 |
+| display change, next frame | 65 | 66 | 4.0 | 0.06 |
+
+- **`load_document` itself did not get faster.** The ratios are the same
+  as the ratios of the two copies of `main`; the best rounds are 352 ms
+  (main) and 359 ms (branch). The gain is after the load: the restyle
+  that follows it no longer applies every control again.
+- `model text` on `main` is the cost of a change that did not reach the
+  control (the bug of R15). On the branch the control gets the text.
+- A `display` change is 5 to 12% more in its own flush (the snapshot) and
+  a fifth of the cost in the next frame: 14.0 ms for both on `main`,
+  8.9 ms on the branch.
+- Loads with a settling frame gain: `workloads.gd` load + first layout is
+  0.91 (settings), 0.83 (inventory), 0.86 (dialog), 0.77 (1,000-row list)
+  and 0.99 (ListView), with copies of `main` between 0.98 and 1.04.
+
+### Where a load goes (native core, runtime, ms)
+
+| Step | main | branch |
+| --- | ---: | ---: |
+| parse (uxml, uss, imports) | 11.4 | 11.3 |
+| theme attach | 1.1 | 1.1 |
+| part trees | 17.5 | 18.3 |
+| index (parents, names) | 3.4 | 3.3 |
+| control creation | 46.8 | 48.9 |
+| cascade (first resolve) | 35.1 | 36.4 |
+| add_child (built controls) | 53.7 | 54.1 |
+| signal wiring | 14.7 | 15.3 |
+| behaviors, attributes, bindings | 29.3 | 31.1 |
+| first restyle | 164.5 | 171.0 (apply 109.2, layout 58.3, rest 3.6) |
+| next restyle (a first text change) | 114 | 1.6 |
+
+Three runs of `bench/load_cost.gd --profile`, median (`main` does not
+split the first restyle). The steps do not change, within the noise. The
+theme notification is about 293 µs per Label, about 40% of a Label apply:
+the largest lever that is left.
+
+### The drift of `bench.gd`
+
+An earlier 3-round A/B showed `bench.gd` 5 to 15% slower on the branch,
+on ops the change does not touch. Two causes, one of them real:
+
+- **Noise.** The parsers do not change, and the A/A arm moved as much as
+  the branch. In the quieter run `parse_uxml` is 1.03 (copy 1.03),
+  `parse_uss` 0.98 (copy 1.01), `cascade resolve` 0.99 (copy 0.97).
+- **A real cost: the settle snapshot in a stream of layouts.** Timed in
+  one process, the snapshot is 3 to 15% of a layout (see `docs/design.md`,
+  "Settling"). In a stream the next layout overtakes every snapshot, so
+  each one was lost. Now a snapshot that a layout overtakes turns
+  snapshots off until a layout leaves the document settled.
+
+| `bench.gd` | main | main copy | branch | branch / main |
+| --- | ---: | ---: | ---: | ---: |
+| transition frame (width) | 12.17 | 11.42 | 11.82 | 0.97 (before the fix 1.17) |
+| hud frame (8 labels + relayout) | 0.606 | 0.604 | 0.606 | 1.00 (before the fix 1.10) |
+| set_class churn (card) | 15.2 | 14.3 | 15.5 | 1.02 (before the fix 1.18) |
+| geomean of 25 ops | | | | 0.97 (copy 0.97) |
+
+The "before" ratios are from the noisier run, so they are not a measure
+of the fix alone.
+
+`workloads.gd` geomean: 0.99 (copy 1.00). Four flushes stay slower, as
+they pay for a snapshot: select slot 1.22, count change + relayout 1.19,
+switch tab 1.10, typewriter character 1.09. `workloads.gd` does not time
+the settling restyle that follows them. With that restyle in the timed
+region (four rounds, median):
+
+| Flush + settling restyle | main | branch | branch / main |
+| --- | ---: | ---: | ---: |
+| inventory: select slot | 3.56 | 2.91 | 0.82 |
+| inventory: count change + relayout | 2.52 | 1.82 | 0.72 |
+| settings: switch tab | 19.9 | 20.8 | 1.05 |
+
+The switch tab gains nothing: a measure changes in the re-apply of the
+page that is shown, the check fails and the settling restyle lays out,
+as on `main`. The snapshot and the check are then a real, small cost.
+
+### Tried and dropped
+
+A first apply off the tree: no gain in interleaved profiling on a quiet
+machine (main 296 ms, the change 314 ms).
+
+### What remains
+
+- The theme notification of a Label (above).
+- Request 1 of R15, the build cost per control, is not met: the steps of
+  a load cost what they did.
+- The switch tab: find the measure that changes in the re-apply, so that
+  the check can confirm that settling pass too.

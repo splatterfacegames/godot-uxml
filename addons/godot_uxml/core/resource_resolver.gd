@@ -269,6 +269,7 @@ func _fail(kind: String, reference: String, message: String) -> Dictionary:
 		"text": "",
 		"diagnostic": {
 			"kind": kind,
+			"severity": UxmlDiagnostic.severity_of(kind),
 			"message": message,
 			"file": "",
 			"offset": 0,

@@ -158,6 +158,17 @@ var _insets: Dictionary = {}           # paint-only restyle skips the layout
 # point the full re-apply/re-layout reaches — before paint-only restyles
 # are allowed to skip the layout.
 var _reapply: Array = []
+## Measures of the controls after the last layout that left the document
+## unsettled ([minimum sizes, natural sizes], in the order of _snap_cs, see
+## _settle_snapshot), or [] when the next settling layout must run.
+var _settle_ms: Array = []
+## A layout came before the last snapshot was read: layouts run in a stream
+## (a transition of a size, relayout() every frame), and a snapshot there
+## only costs time (3 to 15% of a layout). No snapshot until a layout leaves
+## the document settled; without a snapshot, it settles with a layout.
+var _settle_skip := false
+## The next restyle is the first of a load.
+var _first_pass := false
 var _unsettled := true
 var _pending_fresh := false
 var _el_of: Dictionary = {}           # outer Control -> UxmlElement
@@ -808,6 +819,8 @@ func reload() -> int:
 func _clear() -> void:
 	if not _dnd.is_empty():
 		cancel_drag()
+	close_context_menu()
+	_ctx_menus = {}
 	for child in _root_box.get_children():
 		_root_box.remove_child(child)
 		child.queue_free()
@@ -836,6 +849,13 @@ func _clear() -> void:
 	_rects = {}
 	_insets = {}
 	_reapply = []
+	_settle_ms = []
+	_settle_skip = false
+	_snap_of = null
+	_snap_cs = []
+	_first_pass = false
+	_text_dirty = {}
+	layout_count = 0
 	_unsettled = true
 	_pending_fresh = false
 	_el_of = {}
@@ -911,6 +931,7 @@ func _index() -> void:
 	for c in built:
 		if not c.has_meta(&"uxml_parked"):
 			_root_box.add_child(c)
+	_first_pass = true
 	# Observable model: set_attribute() on any element restyles just it.
 	var on_changed := _on_model_changed
 	for el in _doc.root.walk():
@@ -968,6 +989,17 @@ func _wire(el: UxmlElement, c: Control) -> void:
 ## consumed only while the view can scroll, so focus moves on at a bound.
 func _on_gui_input(ev: InputEvent, el: UxmlElement) -> void:
 	var mb := ev as InputEventMouseButton
+	if mb != null and mb.button_index == MOUSE_BUTTON_RIGHT and not mb.pressed and not _ctx_menus.is_empty():
+		# ContextualMenuManipulator (Windows: on the release).
+		# Godot passes an event that is not accepted on to the parent control:
+		# the walk of _context_click runs once per click.
+		var stamp := [Engine.get_process_frames(), mb.global_position]
+		if stamp == _ctx_walked:
+			return
+		_ctx_walked = stamp
+		if _context_click(get_global_transform() * (get_global_transform_with_canvas().affine_inverse() * mb.global_position)):
+			_controls[el].accept_event()
+		return
 	if mb != null and mb.button_index == MOUSE_BUTTON_LEFT:
 		# Unity sets :active on the clickable control, not on its parts: a
 		# part passes the press on to its control, which takes the state.
@@ -1086,12 +1118,16 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		_applier.element_paths = _doc.element_paths
 		_applier.unity_line_metrics = theme_path == UxmlTheme.DEFAULT
 	var need_layout := _force_layout or _full_apply or _unsettled
+	# Non-empty while the layout would run only to settle the last pass.
+	var settle_layout_only: Array = _settle_ms if _unsettled and not (_force_layout or _full_apply) else []
 	var applied: Array = []
 	var fresh := 0  # applied[0..fresh) changed this pass; the rest are re-applies
 	# Only applies that can change a measure keep the document unsettled:
 	# paint-only changes (colors, radii, ...) never move a minimum size, so
 	# a stream of hovers right after a load must not relayout forever.
 	var measure_fresh := _full_apply
+	var load_pass := _first_pass
+	_first_pass = false
 	if _full_apply:
 		applied = _controls.keys()
 		fresh = applied.size()
@@ -1103,6 +1139,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			seen[el] = true
 			if not _paint_only(olds[k], _styles[el]):
 				need_layout = true
+				settle_layout_only = []
 				measure_fresh = true
 		# Effective disabled / display:none flips (ancestors included).
 		# Disabled flips relayout too: native disabled styling may change
@@ -1110,12 +1147,14 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		for el in flipped:
 			seen[el] = true
 			need_layout = true
+			settle_layout_only = []
 			measure_fresh = true
 		if not _inject.is_empty():
 			# Controls whose style changed under a new cascade (_swap_cascade).
 			for el in _inject:
 				seen[el] = true
 			need_layout = true
+			settle_layout_only = []
 			measure_fresh = true
 			_inject = []
 		for el in seen:
@@ -1130,12 +1169,14 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			var del = _el_of.get(c)
 			if del != null:
 				need_layout = true
+				settle_layout_only = []
 				measure_fresh = true
 				if not seen.has(del):
 					seen[del] = true
 					applied.append(del)
-	_reapply = applied.slice(0, fresh)
+	_reapply = applied.slice(0, fresh) if not load_pass else []
 	var cindex: Dictionary = _cascade.index
+	var pt := Time.get_ticks_usec() if profile != null else 0
 	for el in applied:
 		var c: Control = _controls[el]
 		var st: Dictionary = _styles.get(el, {})
@@ -1144,28 +1185,57 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			_dis[ci] == 1, _gone[ci] == 1)
 		if c is UxmlToggle:
 			(c as UxmlToggle).disabled = _dis[ci] == 1 or _gone[ci] == 1
+	if profile != null:
+		pt = _profile_add("apply", pt)
 	_full_apply = false
 	_force_layout = false
+	var text_placed: Array = []
+	if not _text_dirty.is_empty():
+		var td := _text_dirty
+		_text_dirty = {}
+		if not need_layout or not settle_layout_only.is_empty():
+			for tel in td:
+				if not _text_stable(tel, td[tel]):
+					need_layout = true
+					settle_layout_only = []
+					text_placed = []
+					break
+				if _controls.has(tel) and not applied.has(tel):
+					text_placed.append(tel)
+	if need_layout and settle_layout_only.is_empty() and not _settle_ms.is_empty():
+		_settle_skip = true
+	if need_layout and not settle_layout_only.is_empty() and _settled_without_layout(text_placed):
+		# The pass that left the document unsettled is confirmed: the
+		# controls measure as after its layout, so a layout would give the
+		# same rects.
+		need_layout = false
+		_unsettled = false
+	_settle_ms = []
 	if need_layout:
 		_pending_fresh = measure_fresh
 		_placed_force = applied
 		_do_layout()
 		_placed_force = []
+		if profile != null:
+			pt = _profile_add("layout", pt)
 	else:
 		# Re-applied themed controls got fresh styleboxes: hand them the
 		# resolved insets of the (unchanged) last layout.
+		# Text leaves of a stable size are placed again too (their fit and
+		# elision follow the text).
+		var placed: Array = applied + text_placed if not text_placed.is_empty() else applied
 		if _native_layout():
 			var idx := PackedInt32Array()
-			for el in applied:
+			for el in placed:
 				idx.append(cindex[el])
 			_cascade._native.call("place_only", _applier, idx)
 		else:
-			for el in applied:
+			for el in placed:
 				_place_control(el)
 		# No layout: only the re-applied controls can elide differently.
-		if _applier != null and not _applier.elide.is_empty() and not applied.is_empty():
+		if _applier != null and not _applier.elide.is_empty() and not placed.is_empty():
 			var cs: Array = []
-			for el in applied:
+			for el in placed:
 				cs.append(_controls[el])
 			_applier.update_elision(cs)
 	# Runtime warnings accumulate during apply/layout — surface last so they
@@ -1174,6 +1244,96 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	if _transitions != null:
 		set_process(_transitions.active() and not transitions_manual)
 		_transitions.flush_events(_emit_transition_event)
+
+
+## When a Dictionary, restyles add the milliseconds of their steps to it
+## ("apply", "layout"): for bench/load_cost.gd.
+static var profile = null
+
+
+static func _profile_add(step: String, t0: int) -> int:
+	var t := Time.get_ticks_usec()
+	profile[step] = float(profile.get(step, 0.0)) + (t - t0) / 1000.0
+	return t
+
+
+## After a layout that left the document unsettled: the measures the
+## layout reads ([controls, minimum sizes, natural sizes]): the controls
+## of the leaf elements, and of a container that is not a plain UxmlBox
+## or has a natural size (a container is measured from its children). A
+## document with wrapping or best-fit text keeps no snapshot: those
+## measures follow the widths the placement just gave, so only a layout
+## can confirm them.
+func _settle_snapshot() -> void:
+	if not _settle_ms.is_empty():
+		_settle_skip = true  # a layout outside a restyle (resize, ...)
+	_settle_ms = []
+	if _settle_skip or (_applier != null and _applier.auto_sizes > 0):
+		return
+	if _snap_of != _doc:
+		# The measured controls of this load, found once. Kind: 0 other,
+		# 1 a leaf UxmlBox, 2 text, 3 a container UxmlBox (measured from
+		# its children, unless it gets a natural size).
+		_snap_of = _doc
+		_snap_cs = []
+		_snap_kind = PackedByteArray()
+		for el in _controls:
+			var c: Control = _controls[el]
+			var box := c is UxmlBox
+			if box and not (el as UxmlElement).children.is_empty() and el != _doc.root:
+				_snap_cs.append(c)
+				_snap_kind.append(3)
+				continue
+			_snap_cs.append(c)
+			_snap_kind.append(1 if box else (2 if c is Label or c is RichTextLabel or c is Button else 0))
+	var n := _snap_cs.size()
+	var mins := PackedVector2Array()
+	var nats := PackedVector2Array()
+	mins.resize(n)
+	nats.resize(n)
+	for k in n:
+		var c: Control = _snap_cs[k]
+		var kind := _snap_kind[k]
+		if kind == 3:
+			nats[k] = c.natural_size
+			if nats[k] == Vector2.ZERO:
+				continue
+		elif kind == 1:
+			nats[k] = c.natural_size
+		elif kind == 2 and c.autowrap_mode != TextServer.AUTOWRAP_OFF:
+			return
+		mins[k] = c.get_combined_minimum_size()
+	_settle_ms = [mins, nats]
+
+
+var _snap_of = null
+var _snap_cs: Array = []
+var _snap_kind := PackedByteArray()
+
+
+## True when every control measures as in the snapshot of the unsettled
+## layout (the re-applies of the settling pass included). The text leaves
+## in `stable` (_text_stable) may measure otherwise: their size does not
+## follow the measure.
+func _settled_without_layout(stable: Array) -> bool:
+	var mins: PackedVector2Array = _settle_ms[0]
+	var nats: PackedVector2Array = _settle_ms[1]
+	var skip := {}
+	for el in stable:
+		skip[_controls[el]] = true
+	for k in _snap_cs.size():
+		var c = _snap_cs[k]
+		var kind := _snap_kind[k]
+		if kind == 1 or kind == 3:
+			if not is_instance_valid(c) or c.natural_size != nats[k]:
+				return false
+			if kind == 3 and nats[k] == Vector2.ZERO:
+				continue
+		if not skip.is_empty() and skip.has(c):
+			continue
+		if not is_instance_valid(c) or c.get_combined_minimum_size() != mins[k]:
+			return false
+	return true
 
 
 ## The cascade inputs of the runtime state: pseudo-states per element and
@@ -1546,9 +1706,17 @@ func _native_layout() -> bool:
 	return _cascade != null and _cascade._native != null and use_native_layout
 
 
+## The layout passes of the document since its load (each runs the flex
+## pass over the whole element tree). For tools and tests: a text change
+## that cannot move anything, a settling pass that the measures confirm and
+## a paint-only restyle add none.
+var layout_count := 0
+
+
 func _do_layout() -> void:
 	if _doc == null:
 		return
+	layout_count += 1
 	if _native_layout():
 		# Native layout + placement; results stay native.
 		_cascade._native.call("set_pixel_grid", pixel_grid)
@@ -1566,6 +1734,10 @@ func _do_layout() -> void:
 		_after_layout()
 		_update_elision()
 		_run_layout_hooks()
+		if _unsettled:
+			_settle_snapshot()
+		else:
+			_settle_skip = false
 		return
 	var prev := _rects
 	var res := _compute_layout(size)
@@ -1582,6 +1754,10 @@ func _do_layout() -> void:
 	_after_layout()
 	_update_elision()
 	_run_layout_hooks()
+	if _unsettled:
+		_settle_snapshot()
+	else:
+		_settle_skip = false
 
 
 ## Controls that place parts from the layout (UxmlInputBehaviors) update
@@ -2133,6 +2309,92 @@ func _layout_insets(element: UxmlElement) -> Array:
 # Forced pseudo-states (state preview)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# R16: context menus (Unity ContextualMenuManipulator, DropdownMenu)
+# ---------------------------------------------------------------------------
+
+## The user chose item `index` (an index into the `items` of
+## show_context_menu, or into the items a set_context_menu callback gave).
+signal menu_chosen(index)
+
+var _ctx_menus: Dictionary = {}       # UxmlElement -> Callable (set_context_menu)
+var _ctx_open: UxmlPopupMenu = null   # the open context menu
+var _ctx_walked: Array = []           # [frame, position] of the last right-click walk
+
+
+## A context menu at `global_point` (global coordinates, as
+## get_global_rect) with `items`, Unity's DropdownMenu shown by the
+## ContextualMenuManager: the GenericDropdownMenu tree of UxmlPopupMenu,
+## styled by this document's theme (the runtime theme, or the editor theme
+## in this document's skin) and its author sheets. An item is a String
+## ("-" is a separator) or a Dictionary {text, checked, disabled, hidden,
+## separator} (DropdownMenuAction.Status). A click, or `ui_accept` on the
+## highlighted item, emits menu_chosen(index) and closes the menu; Escape
+## or a click outside closes it. One context menu is open at a time.
+## Returns the menu (`hide()` closes it), or null for no items.
+func show_context_menu(global_point: Vector2, items) -> UxmlPopupMenu:
+	close_context_menu()
+	var entries := UxmlPopupMenu.menu_entries(items)
+	if entries.is_empty() or not is_inside_tree():
+		return null
+	var m := UxmlPopupMenu.open_at(self, global_point, entries)
+	m.chosen.connect(func(i): menu_chosen.emit(i))
+	m.popup_hide.connect(func():
+		if _ctx_open == m:
+			_ctx_open = null)
+	_ctx_open = m
+	return m
+
+
+## The open context menu, or null.
+func get_context_menu() -> UxmlPopupMenu:
+	return _ctx_open if is_instance_valid(_ctx_open) else null
+
+
+func close_context_menu() -> void:
+	if is_instance_valid(_ctx_open):
+		_ctx_open.hide()
+	_ctx_open = null
+
+
+## Unity's ContextualMenuManipulator on `element`: a right-click (on the
+## release, as Unity on Windows) on the element or inside it calls
+## `populate.call({target, element, position})` and shows the items it
+## returns. As Unity's ContextualMenuPopulateEvent, the event goes from the
+## picked element (`target`, picking-mode respected) up to the root: every
+## element with a callback on the way appends its items (`element` is that
+## element), and a callback may return [] to add nothing. `position` is
+## global. An invalid Callable removes the manipulator. Lasts until the
+## next load.
+func set_context_menu(element: UxmlElement, populate: Callable) -> void:
+	if element == null or not _controls.has(element):
+		return
+	if populate.is_valid():
+		_ctx_menus[element] = populate
+	else:
+		_ctx_menus.erase(element)
+
+
+## The right-click of a ContextualMenuManipulator at `gp` (global): the
+## items of every manipulator from the picked element up. True when a
+## menu opened.
+func _context_click(gp: Vector2) -> bool:
+	var target := element_at(get_global_transform().affine_inverse() * gp, true, true)
+	var items: Array = []
+	var el := target
+	while el != null:
+		var cb = _ctx_menus.get(el)
+		if cb != null:
+			var got = (cb as Callable).call({"target": target, "element": el, "position": gp})
+			if got is Array or got is PackedStringArray:
+				for it in got:
+					items.append(it)
+		el = _parents.get(el)
+	if items.is_empty():
+		return false
+	return show_context_menu(gp, items) != null
+
+
 ## Pseudo-states set_forced_states() accepts. `:inactive` follows
 ## `:active`; `:selected` is the old name of `:checked`.
 const FORCEABLE_STATES := ["hover", "active", "focus", "checked", "selected", "disabled", "enabled"]
@@ -2305,7 +2567,8 @@ func _merge_forced(element_states: Dictionary, runtime_disabled: Dictionary, run
 
 ## Set a Label's or Button's text. Rich text tags are parsed for a Label
 ## that was created with rich text (a RichTextLabel); setting `text` on that
-## control directly would bypass the Unity tags. Re-lays out.
+## control directly would bypass the Unity tags. The next restyle lays out
+## the document only when the text can move an element (_text_stable).
 func set_text(element_name: String, text: String) -> void:
 	var el: UxmlElement = _by_name.get(element_name)
 	if el == null:
@@ -2330,13 +2593,149 @@ func _set_control_text(c: Control, text: String) -> bool:
 		refresh()
 		return true
 	if c is Label or c is Button:
+		var el = _text_leaf(c)
+		if el != null and not _text_dirty.has(el):
+			_text_dirty[el] = _measure_leaf(el, _styles.get(el, {}), -1.0)
 		if c.has_meta("uxml_full_text"):
 			c.remove_meta("uxml_full_text")
 			c.remove_meta("uxml_elided")
 		c.set("text", text)
-		relayout()
+		if el != null:
+			_queue_restyle()
+		else:
+			relayout()
 		return true
 	return false
+
+
+# ---------------------------------------------------------------------------
+# Text changes without a layout (Unity's dirty layout: a change that cannot
+# move anything outside the element lays out nothing outside it)
+# ---------------------------------------------------------------------------
+
+## Text leaves whose text changed since the last restyle: element -> the
+## layout measure before the first change (_measure_leaf).
+var _text_dirty: Dictionary = {}
+
+
+## The element of a text control whose text change the restyle can check
+## (_text_stable): a Label or Button element without children, text that
+## does not wrap and no best-fit size. Else null (the change lays out the
+## document).
+func _text_leaf(c: Control):
+	if _doc == null or _cascade == null or _controls.is_empty():
+		return null
+	var el = _el_of.get(c)
+	if el == null or not (el as UxmlElement).children.is_empty():
+		return null
+	if c.autowrap_mode != TextServer.AUTOWRAP_OFF or c.has_meta(&"uxml_autosize"):
+		return null
+	return el
+
+
+## True when the text change of `el` cannot move any element: its layout
+## measure is the same (`old`, before the change), or each axis whose
+## measure changed has a size that does not follow the measure. An axis
+## does not follow the measure when its length is in px (the main axis:
+## a px or % flex-basis, or `auto` with a px length), or, on the cross axis,
+## when the element stretches (align-self / align-items stretch, no auto
+## margin) in a parent that does not wrap and whose own size on that axis
+## does not follow its content (_definite).
+func _text_stable(el: UxmlElement, old: Vector2) -> bool:
+	var c = _controls.get(el)
+	var ci = _cascade.index.get(el)
+	if c == null or ci == null or not is_instance_valid(c):
+		return false
+	if _gone[ci] == 1:
+		return true
+	var st: Dictionary = _styles.get(el, {})
+	var now := _measure_leaf(el, st, -1.0)
+	if now == old:
+		return true
+	return ((now.x == old.x or _fixed_axis(el, st, true))
+		and (now.y == old.y or _fixed_axis(el, st, false)))
+
+
+static func _sv(st: Dictionary, prop: String, default: String) -> String:
+	var e = st.get(prop)
+	return default if e == null else String(e["value"]).strip_edges()
+
+
+static func _is_px(v: String) -> bool:
+	return v.ends_with("px") and v.substr(0, v.length() - 2).is_valid_float()
+
+
+static func _is_pct(v: String) -> bool:
+	return v.ends_with("%") and v.substr(0, v.length() - 1).is_valid_float()
+
+
+## Whether the size of `el` on the horizontal (or vertical) axis does not
+## follow the measure of its content (see _text_stable).
+func _fixed_axis(el: UxmlElement, st: Dictionary, horizontal: bool) -> bool:
+	var dim := "width" if horizontal else "height"
+	if _is_px(_sv(st, dim, "auto")):
+		var mn := _sv(st, "min-" + dim, "auto")
+		var mx := _sv(st, "max-" + dim, "none")
+		return (mn == "auto" or _is_px(mn)) and (mx == "none" or _is_px(mx))
+	if _sv(st, "position", "relative") == "absolute":
+		return false
+	var parent: UxmlElement = _parents.get(el)
+	if parent == null:
+		return false
+	var pst: Dictionary = _styles.get(parent, {})
+	var row := _sv(pst, "flex-direction", "column").begins_with("row")
+	if row == horizontal:
+		var basis := _sv(st, "flex-basis", "auto")
+		return _is_px(basis) or _is_pct(basis)
+	# Cross axis: stretched in a parent of a size that does not follow
+	# its content.
+	var align := _sv(st, "align-self", "auto")
+	if align == "auto":
+		align = _sv(pst, "align-items", "stretch")
+	if align != "stretch" or _sv(pst, "flex-wrap", "nowrap") != "nowrap":
+		return false
+	for side in (["left", "right"] if horizontal else ["top", "bottom"]):
+		if _sv(st, "margin-" + side, "0px") == "auto":
+			return false
+	return _definite(parent, horizontal, 0)
+
+
+## Whether the size of container `el` on an axis does not follow its
+## content: the document root, a px length, or stretched on the cross axis
+## of a parent of that kind (a main axis: a px or % flex-basis, or `auto`
+## with a px length).
+func _definite(el: UxmlElement, horizontal: bool, depth: int) -> bool:
+	if el == _doc.root:
+		return true
+	if depth > 32:
+		return false
+	var st: Dictionary = _styles.get(el, {})
+	var dim := "width" if horizontal else "height"
+	var mn := _sv(st, "min-" + dim, "auto")
+	var mx := _sv(st, "max-" + dim, "none")
+	if not ((mn == "auto" or _is_px(mn)) and (mx == "none" or _is_px(mx))):
+		return false
+	if _is_px(_sv(st, dim, "auto")):
+		return true
+	if _sv(st, "position", "relative") == "absolute":
+		return false
+	var parent: UxmlElement = _parents.get(el)
+	if parent == null:
+		return false
+	var pst: Dictionary = _styles.get(parent, {})
+	var row := _sv(pst, "flex-direction", "column").begins_with("row")
+	if row == horizontal:
+		var basis := _sv(st, "flex-basis", "auto")
+		return _is_px(basis) or _is_pct(basis)
+	var align := _sv(st, "align-self", "auto")
+	if align == "auto":
+		align = _sv(pst, "align-items", "stretch")
+	if align != "stretch" or _sv(pst, "flex-wrap", "nowrap") != "nowrap":
+		return false
+	for side in (["left", "right"] if horizontal else ["top", "bottom"]):
+		if _sv(st, "margin-" + side, "0px") == "auto":
+			return false
+	return _definite(parent, horizontal, depth + 1)
 
 
 ## Replace the element's `class` attribute and re-resolve. Runtime class
@@ -2357,6 +2756,28 @@ func _on_model_changed(el: UxmlElement) -> void:
 	var b = _behaviors.get(el)
 	if b != null:
 		b.on_model_changed()
+	elif el.changed_attribute == "text" and _OWN_TEXT.has(el.local):
+		_sync_own_text(el)
+
+
+## The tags whose control draws the element's own `text` attribute (Unity
+## TextElement.text): Label, Button, RepeatButton and TextElement.
+## PopupWindow has a behavior (OwnTextBehavior).
+const _OWN_TEXT := {"Label": true, "Button": true, "RepeatButton": true, "TextElement": true,
+	"PopupTextElement": true}
+
+
+## A `text` change of the model reaches the control (UxmlElement.set_attribute
+## on a Label, a Button, a RepeatButton or a TextElement, text parts
+## included): the text the factory would show for the new value
+## (UxmlControlFactory.text_of), through the same path as set_text.
+func _sync_own_text(el: UxmlElement) -> void:
+	var c = _natives.get(el, _controls.get(el))
+	if not (c is Label or c is RichTextLabel or c is Button):
+		return
+	var t := UxmlControlFactory.text_of(el, c is Button or (el.local != "Label" and c is Label))
+	if UxmlBinding._shown_text(c) != t:
+		_set_control_text(c, t)
 
 
 ## Re-resolve and re-lay out after changes the runtime cannot see — e.g.
@@ -2981,6 +3402,8 @@ func move_tab(view_name: String, from: int, to: int) -> void:
 ## map now and the cascade and layout caches on the next restyle. Part
 ## trees are otherwise fixed after load.
 func _structure_changed() -> void:
+	_snap_of = null
+	_settle_ms = []
 	_parents.clear()
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():

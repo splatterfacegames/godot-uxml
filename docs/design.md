@@ -420,8 +420,16 @@ Stylesheets dedupe by resolved path (diamond imports load once); a true
 
 ## Diagnostics
 
-Plain Dictionaries: `{kind, message, file, line, column, offset,
-end_offset}` — see `UxmlDiagnostic` for the kind list. `offset` and
+Plain Dictionaries: `{kind, severity, message, file, line, column, offset,
+end_offset}` — see `UxmlDiagnostic` for the kind list. `severity` is
+`"error"` (part of the document did not load: `malformed`,
+`import-unresolved`, `import-cycle`, `missing-file`, `path-outside-root`,
+`malformed-reference`, `template-not-declared`, `template-cycle`,
+`template-depth-exceeded`), `"info"` (`version-dependent`) or
+`"warning"` (every other kind), from `UxmlDiagnostic.severity_of(kind)`;
+the native cascade and layout set the same value (`severity_of` in
+`native/src/cascade.rs`), and both parsers build their diagnostics
+through `UxmlDiagnostic.make`. `offset` and
 `end_offset` are String indices into the source of `file`: an element
 diagnostic spans the element's open tag (`open_tag_start` to
 `open_tag_end`), an attribute diagnostic `name="value"`, a USS diagnostic
@@ -498,7 +506,47 @@ sees the result of the steps before it.
    behaviors, before the first restyle.
 8. The first restyle (incremental cascade update with the states and
    attribute writes of step 7, transitions bookkeeping, applier, layout),
-   then the restore of view data.
+   then the restore of view data. The settling restyle after it applies
+   no control again (see "Settling").
+
+#### Settling
+
+A restyle that applied controls left the document *unsettled*: the next
+restyle applied those controls again and laid out again, until a layout
+gave the rects of the one before (the fixed point of a full re-apply and
+re-layout). That cost a second layout pass after every change that
+applied a control, and after a load the next restyle applied every
+control again. Now:
+
+- A layout that leaves the document unsettled keeps a snapshot of the
+  measures the layout reads (minimum size of each control, natural size
+  of each UxmlBox). The settling restyle applies the controls again as
+  before, and when every control measures as in the snapshot, the layout
+  would give the same rects: the document is settled without a layout. A
+  document with wrapping or best-fit text keeps no snapshot (those
+  measures follow the widths the placement gave), so its settling
+  restyle lays out as before.
+- The settling restyle of a load applies no control again: the controls
+  were applied in the tree and measure as applied, and the snapshot (or,
+  with wrapping text, a layout) confirms the layout
+  (`bench/equiv_runtime.gd` compares every control with a document that
+  runs `refresh()` before every flush).
+
+- Layouts in a stream (a transition of a size, `relayout()` every frame)
+  never read a snapshot: the next layout comes first. A snapshot costs
+  3 to 15% of a layout (0.44 ms of 15.8 ms on the 1,951-control document,
+  1.0 ms of 9.1 ms on the 987-control one, 25 µs of 164 µs on the HUD), so
+  a snapshot that a layout overtakes turns snapshots off
+  (`_settle_skip`) until a layout leaves the document settled. Without a
+  snapshot the document settles with a layout, the fixed point itself.
+
+So a `display` change of a settled document costs one layout pass when
+the measures confirm the settling restyle, and the first restyle after
+a load (a hover, a text change) costs the snapshot check (about 1.5 ms on
+the 507-element document) instead of a full apply and layout. When the
+re-apply changes a measure (a settings page that a tab shows: 148
+controls applied again), the check fails and the settling restyle lays
+out as before.
 
 | file | class | role |
 | --- | --- | --- |
@@ -1977,6 +2025,22 @@ var r := doc.get_element_rect(child, parent)            # border box
 var pad := doc.get_element_rect(parent, null, "padding") # document space
 var t := doc.get_element_transform(child, parent)      # t * p, t.affine_inverse() * p
 
+# Text and display updates (R15): a text change that cannot move anything
+# lays out nothing; a display change is one layout pass
+doc.set_text("status", "Saved")                 # fixed size: no layout
+model.root.children[0].set_attribute("text", "x")  # reaches the Label control
+print(doc.layout_count)                         # layout passes since the load
+
+# Context menus (Unity DropdownMenu, ContextualMenuManipulator)
+doc.menu_chosen.connect(func(index): print(index))
+doc.show_context_menu(global_point, ["Cut", {"text": "Copy", "disabled": true}, "-", "Paste"])
+doc.set_context_menu(el, func(a): return ["Rename", "Delete"])  # right-click
+doc.close_context_menu()
+
+# Diagnostics carry a severity (R11)
+for d in doc.diagnostics:
+    print(d["severity"], " ", d["kind"])        # "error" / "warning" / "info"
+
 # Catalog, templates
 var catalog := UxmlControls.catalog()
 var inst := model.instance_of(clone)          # the TemplateContainer
@@ -2194,6 +2258,81 @@ another load or under `display: none` (the `_gone` flags of the last
 restyle) has no layout: `Rect2()` and a zero transform. A pending restyle
 runs first, as for `element_at`.
 
+### Text changes and the layout
+
+A text change (`set_text`, a `text` attribute through
+`UxmlElement.set_attribute`, a text binding, a text part) of a Label or a
+Button element without children whose text does not wrap and has no
+best-fit size is checked in the next restyle instead of laying out the
+document. As in Unity's dirty layout, a change that cannot move anything
+outside the element lays out nothing: the element is only placed again
+(fit, elision). The change cannot move anything when the element's layout
+measure (`_measure_leaf`, before the first change and after the last) is
+the same, or when each axis whose measure changed has a size that does
+not follow the measure:
+
+- a px length on that axis (with px or no min/max), or on the main axis a
+  px or % `flex-basis`;
+- on the cross axis: stretched (`align-self`, else the parent's
+  `align-items`, is `stretch`, no auto margin) in a parent that does not
+  wrap and whose size on that axis does not follow its content: the
+  document root, a px length, or a parent stretched the same way.
+
+So a Label of a fixed size, a single-line Label stretched in a column of
+a fixed width, and an element under `display: none` change their text
+without a layout. Any other text change lays out the document, as before
+(`relayout()`). The text binding returns "written" instead of "written,
+lay out" for these controls. `layout_count` counts the layout passes
+since the load. A model `text` change of a Label, Button, RepeatButton
+or TextElement now reaches the control
+(`UxmlControlFactory.text_of`: escape sequences with
+parse-escape-sequences; a Button or TextElement without rich text tags).
+Tests: `test_model_text_reaches_the_control` and
+`test_text_changes_without_a_layout` (both paths, against a fresh load);
+`bench/equiv_runtime.gd` drives text changes on the incremental document
+against `refresh()`.
+
+### Context menus
+
+`show_context_menu(global_point, items)` is Unity's DropdownMenu shown by
+the ContextualMenuManager: `UxmlPopupMenu.open_at` builds the
+GenericDropdownMenu tree (`.unity-base-dropdown` >
+`__container-outer` > ScrollView `__container-inner` > `__item` >
+`__item-content` > `__checkmark`, `__label`) in a borderless Godot
+`Popup` with its top-left corner at the point, moved up and left to stay
+inside the visible rect (Unity's EnsureVisibilityInParent), as wide as
+its widest item (`anchored: false`). A menu taller than the visible rect
+gets `max-height` and scrolls. Items: a String ("-" is a separator), or
+`{text, checked, disabled, hidden, separator}` (DropdownMenuAction.Status:
+Checked sets `:checked` on the item; Disabled is SetEnabled(false), so
+`:disabled` and `.unity-disabled`; Hidden is not shown and keeps its
+index). Separators are Unity's `__separator-container` >
+`__separator-line`. A click or `ui_accept` on the highlighted item emits
+`menu_chosen(index)` (the index in `items`) and closes the menu;
+`ui_up` / `ui_down` skip separators and disabled items; Escape or a click
+outside closes it. One context menu is open at a time
+(`get_context_menu`, `close_context_menu`); a load closes it.
+
+The menu document has the theme of the owner document: the theme path,
+and the editor theme with the owner's skin when the owner has the editor
+look (`UxmlTheme.editor_skin_of`), else the runtime theme; the owner's
+author sheets style it too (`shared_sheets`), as Unity attaches the menu
+under the panel root. The runtime theme's menu values are measured
+(ctl-dropdown-open, ctl-dropdown-menu-hover); the separator values and
+the editor theme's menu rules are not: Unity's editor panels show their
+context menus as OS menus, so the editor rules are the runtime geometry
+at the editor font size with the skin's popup and selection colours.
+
+`set_context_menu(element, populate)` is Unity's
+ContextualMenuManipulator: a right-click (on the release, as Unity on
+Windows) on the element or inside it builds the menu. As Unity's
+ContextualMenuPopulateEvent, the event goes from the picked element
+(`element_at` with picking-mode) up to the root, and every element with a
+callback appends the items its `populate.call({target, element,
+position})` returns. Not modelled: submenus (a `/` in a name is shown as
+is), the keyboard Menu key, and actions of other elements' manipulators
+than the ones on the path. Test: `test_context_menu`.
+
 ## Unsupported / out of scope (diagnosed, not silent)
 
 - Unsupported at-rules (`@media`, `@supports`, other unknown at-rules) —
@@ -2322,6 +2461,12 @@ runs first, as for `element_at`.
   runtime showed some stale until its next restyle.
 - 100 repeated `load_document` calls hold `OBJECT_NODE_COUNT` flat in
   tests.
+- Tried and dropped: a first apply off the tree (the built controls enter
+  the tree in the first restyle, after their styles are applied, so that
+  the theme notifications of the apply cost less). Interleaved profiling
+  on a quiet machine showed no gain on the 507-element document: main
+  296 ms, the change 314 ms. The controls are applied in the tree, as
+  before.
 - The default theme costs about 2.4 ms per load (rule compilation) and
   extra apply work per Label/Button; see docs/performance.md. Set
   `theme_path = ""` for a document that needs neither the Unity look nor

@@ -14,6 +14,11 @@ extends RefCounted
 ##             closing quote of an attribute value, the end of a USS
 ##             declaration or rule head (before `;`, `{`, `}` or the line
 ##             end). Equal to `offset` when there is no source text.
+##   severity - "error" (part of the document did not load: broken syntax,
+##             a file that could not be read, a template that could not
+##             expand), "info" (`version-dependent`) or "warning" (every
+##             other kind: the document loaded, something in it is ignored
+##             or approximated). See `severity_of`.
 ##
 ## Kinds emitted by milestone 1:
 ##   malformed             - broken UXML/USS syntax that was recovered from
@@ -40,6 +45,26 @@ extends RefCounted
 ##                           unresolved path, a target the control does not
 ##                           have, an unknown converter group (runtime)
 
+## The kinds whose diagnostic is an error: part of the document did not
+## load.
+const ERROR_KINDS := {"malformed": true, "import-unresolved": true, "import-cycle": true,
+	"missing-file": true, "path-outside-root": true, "malformed-reference": true,
+	"template-not-declared": true, "template-cycle": true, "template-depth-exceeded": true}
+## The kinds whose diagnostic is information only.
+const INFO_KINDS := {"version-dependent": true}
+
+
+## The `severity` of a diagnostic of `kind`: "error", "warning" or "info".
+## The native core (cascade.rs `severity_of`) maps the kinds it reports the
+## same way.
+static func severity_of(kind: String) -> String:
+	if ERROR_KINDS.has(kind):
+		return "error"
+	if INFO_KINDS.has(kind):
+		return "info"
+	return "warning"
+
+
 static func make(
 	kind: String,
 	message: String,
@@ -51,6 +76,7 @@ static func make(
 	var lc := line_col(source, offset)
 	return {
 		"kind": kind,
+		"severity": severity_of(kind),
 		"message": message,
 		"file": file,
 		"offset": offset,
