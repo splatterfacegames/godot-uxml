@@ -1843,6 +1843,7 @@ impl UxmlNativeCascade {
             maxc_on: std::cell::Cell::new(false),
             unfit: std::cell::RefCell::new(vec![None; ks.len()]),
             margins: std::cell::RefCell::new(vec![None; ks.len()]),
+            cliptext: std::cell::RefCell::new(vec![None; ks.len()]),
         });
         self.placement = crate::layout::Placement::default();
     }
@@ -1897,16 +1898,19 @@ impl UxmlNativeCascade {
             let mut mc = io.maxc.borrow_mut();
             let mut uf = io.unfit.borrow_mut();
             let mut mg = io.margins.borrow_mut();
+            let mut ct = io.cliptext.borrow_mut();
             if force_all {
                 mc.iter_mut().for_each(|e| *e = None);
                 uf.iter_mut().for_each(|e| *e = None);
                 mg.iter_mut().for_each(|e| *e = None);
+                ct.iter_mut().for_each(|e| *e = None);
             } else {
                 for &k in force.as_slice() {
                     if k >= 0 && (k as usize) < mc.len() {
                         mc[k as usize] = None;
                         uf[k as usize] = None;
                         mg[k as usize] = None;
+                        ct[k as usize] = None;
                     }
                 }
             }
@@ -1942,6 +1946,10 @@ impl UxmlNativeCascade {
         let applier = applier.try_to::<Gd<Object>>().ok();
         for &k in indices.as_slice() {
             if k >= 0 {
+                // Re-applied: apply() may have set or removed `uxml_clip_text`.
+                if let Some(e) = io.cliptext.borrow_mut().get_mut(k as usize) {
+                    *e = None;
+                }
                 self.placement.place(io, k as usize, &applier, true);
             }
         }

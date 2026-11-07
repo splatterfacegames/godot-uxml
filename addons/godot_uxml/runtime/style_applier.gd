@@ -419,6 +419,8 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 	if c.has_meta(&"uxml_maxc"):
 		# The font, size or stylebox may change: measure the width again.
 		c.remove_meta(&"uxml_maxc")
+	if c.has_meta(&"uxml_clip_full"):
+		c.remove_meta(&"uxml_clip_full")
 	if c.has_meta(&"uxml_unfit"):
 		c.remove_meta(&"uxml_unfit")
 	if unity_line_metrics and (c is Label or c is Button or c is LineEdit or c is TextEdit
@@ -1551,6 +1553,8 @@ func apply_resolved_insets(c: Control, start: Vector2, end: Vector2) -> void:
 	_inset_memo[c] = [start, end]
 	if c.has_meta(&"uxml_maxc"):
 		c.remove_meta(&"uxml_maxc")
+	if c.has_meta(&"uxml_clip_full"):
+		c.remove_meta(&"uxml_clip_full")
 	if c.has_meta(&"uxml_unfit"):
 		c.remove_meta(&"uxml_unfit")
 	if _clip_content.has(c):
@@ -1745,12 +1749,22 @@ static func _gate(c: Control, style: Dictionary, keys: Array, flag: StringName) 
 func _apply_visual(el: UxmlElement, c: Control, native: Control, style: Dictionary) -> void:
 	if not _gate(c, style, _VISUAL_KEYS, &"uxml_vis"):
 		return
-	_apply_opacity(c, style, el)
+	# Each call below returns at once when its property is absent and it
+	# wrote nothing before; the same tests are made here first, because
+	# overflow alone (the default theme clips many control parts) brings
+	# most controls onto this path.
+	if style.has("opacity") or c.modulate.a != 1.0:
+		_apply_opacity(c, style, el)
 	_apply_overflow(c, style, el)
-	_apply_transform(c, style, el)
-	_apply_cursor(c, native, style, el)
-	_apply_filter(c, style, el)
-	_apply_material(c, native, style, el)
+	if (c.offset_transform_enabled or style.has("translate") or style.has("rotate")
+			or style.has("scale") or style.has("transform-origin")):
+		_apply_transform(c, style, el)
+	if style.has("cursor") or c.has_meta(&"uxml_cursor_default"):
+		_apply_cursor(c, native, style, el)
+	if style.has("filter") or c.has_meta(&"uxml_filter"):
+		_apply_filter(c, style, el)
+	if style.has("-unity-material") or c.has_meta(&"uxml_mat_default"):
+		_apply_material(c, native, style, el)
 
 
 ## opacity -> modulate alpha. Godot multiplies each canvas item of the
@@ -1784,10 +1798,11 @@ func _apply_overflow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 		# Unity's ScrollView content container is `scroll` for the layout
 		# but does not clip (disableClipping); the viewport clips.
 		hidden = false
-	if hidden or c.has_meta("uxml_clip_default"):
-		if not c.has_meta("uxml_clip_default"):
-			c.set_meta("uxml_clip_default", c.clip_contents)
-		var want: bool = hidden or bool(c.get_meta("uxml_clip_default"))
+	var had := c.has_meta(&"uxml_clip_default")
+	if hidden or had:
+		if not had:
+			c.set_meta(&"uxml_clip_default", c.clip_contents)
+		var want: bool = hidden or bool(c.get_meta(&"uxml_clip_default"))
 		if c.clip_contents != want:
 			c.clip_contents = want
 	var box := _str(style, "-unity-overflow-clip-box")
@@ -1804,7 +1819,7 @@ func _apply_overflow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 				inset = _px_insets(style, true)
 		else:
 			inset = _px_insets(style, false)
-	var clip = (c.get_meta("uxml_clip") if c.has_meta("uxml_clip") else null)
+	var clip = (c.get_meta(&"uxml_clip") if c.has_meta(&"uxml_clip") else null)
 	# Unity clips to the rounded inner outline of a box with a radius.
 	var radii := PackedFloat64Array()
 	if hidden:
@@ -1834,16 +1849,34 @@ func _apply_overflow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 ## Border (and, with padding, px padding) insets as left, top, right,
 ## bottom. Percentage padding is resolved later by apply_resolved_insets.
 func _px_insets(style: Dictionary, with_padding: bool) -> Vector4:
-	var v := [0.0, 0.0, 0.0, 0.0]  # top right bottom left
-	for k in 4:
-		for prop in ([_BW[k], _PAD[k]] if with_padding else [_BW[k]]):
-			var e = style.get(prop)
-			if e == null:
-				continue
-			var p := UssValues.parse_length(String(e["value"]))
-			if p["kind"] == "px":
-				v[k] += maxf(0.0, p["value"])
-	return Vector4(v[3], v[0], v[1], v[2])
+	# Most clipped controls have no border: absent entries skip the call.
+	var e = style.get("border-top-width")
+	var t := 0.0 if e == null else _px_of(e)
+	e = style.get("border-right-width")
+	var r := 0.0 if e == null else _px_of(e)
+	e = style.get("border-bottom-width")
+	var b := 0.0 if e == null else _px_of(e)
+	e = style.get("border-left-width")
+	var l := 0.0 if e == null else _px_of(e)
+	if with_padding:
+		e = style.get("padding-top")
+		t += 0.0 if e == null else _px_of(e)
+		e = style.get("padding-right")
+		r += 0.0 if e == null else _px_of(e)
+		e = style.get("padding-bottom")
+		b += 0.0 if e == null else _px_of(e)
+		e = style.get("padding-left")
+		l += 0.0 if e == null else _px_of(e)
+	return Vector4(l, t, r, b)
+
+
+## A non-negative px length entry, else 0 (percentages are resolved by the
+## layout, see apply_resolved_insets).
+static func _px_of(e) -> float:
+	if e == null:
+		return 0.0
+	var p := UssValues.parse_length(String(e["value"]))
+	return maxf(0.0, p["value"]) if p["kind"] == "px" else 0.0
 
 
 ## translate / rotate / scale / transform-origin -> Control.offset_transform
@@ -2451,42 +2484,52 @@ func _unelide(c: Control) -> void:
 ## intrinsic size is the full text's, as in Unity. Text that game code set
 ## in the meantime is taken as the new full text.
 func update_elision(only: Array = []) -> void:
-	for c in (elide.keys() if only.is_empty() else only):
+	# This runs after every layout: the common case (nothing changed) is
+	# kept to the memo test, without copying the keys.
+	var gone: Array = []
+	for c in (elide if only.is_empty() else only):
 		if only.size() > 0 and not elide.has(c):
 			continue
 		if not is_instance_valid(c):
-			elide.erase(c)
-			_elide_memo.erase(c)
+			gone.append(c)
 			continue
-		var cur := String(c.get("text"))
-		# Nothing to redo when the text, the width and the position are
+		# Nothing to redo when the width, the text and the position are
 		# those of the last pass (an apply of the control forgets the memo:
 		# a style can change the font).
 		var memo = _elide_memo.get(c)
-		if memo != null and memo[0] == cur and memo[1] == c.size.x and memo[2] == elide[c] and memo[3] == c.get_theme_font_size("font_size"):
+		if (memo != null and memo[1] == c.size.x and memo[0] == c.get(&"text") and memo[2] == elide[c]
+				and memo[3] == c.get_theme_font_size(&"font_size")):
 			continue
-		var full := cur
-		if c.has_meta("uxml_full_text") and cur == String(c.get_meta("uxml_elided")):
-			full = c.get_meta("uxml_full_text")
-		var font: Font = c.get_theme_font("font")
-		var fs: int = c.get_theme_font_size("font_size")
-		var sb: StyleBox = c.get_theme_stylebox("normal")
-		var width: float = c.size.x - (sb.get_minimum_size().x if sb != null else 0.0)
-		var shown := full if font == null else elide_text(full, width, elide[c], font, fs)
-		if shown == full:
-			if c.has_meta("uxml_full_text"):
-				c.remove_meta("uxml_full_text")
-				c.remove_meta("uxml_elided")
-			if cur != full:
-				c.set("text", full)
-			_elided_tooltip(c, false, full)
-		else:
-			c.set_meta("uxml_full_text", full)
-			c.set_meta("uxml_elided", shown)
-			if cur != shown:
-				c.set("text", shown)
-			_elided_tooltip(c, true, full)
-		_elide_memo[c] = [String(c.get("text")), c.size.x, elide[c], fs]
+		_elide_one(c)
+	for c in gone:
+		elide.erase(c)
+		_elide_memo.erase(c)
+
+
+func _elide_one(c: Control) -> void:
+	var cur := String(c.get("text"))
+	var full := cur
+	if c.has_meta("uxml_full_text") and cur == String(c.get_meta("uxml_elided")):
+		full = c.get_meta("uxml_full_text")
+	var font: Font = c.get_theme_font("font")
+	var fs: int = c.get_theme_font_size("font_size")
+	var sb: StyleBox = c.get_theme_stylebox("normal")
+	var width: float = c.size.x - (sb.get_minimum_size().x if sb != null else 0.0)
+	var shown := full if font == null else elide_text(full, width, elide[c], font, fs)
+	if shown == full:
+		if c.has_meta("uxml_full_text"):
+			c.remove_meta("uxml_full_text")
+			c.remove_meta("uxml_elided")
+		if cur != full:
+			c.set("text", full)
+		_elided_tooltip(c, false, full)
+	else:
+		c.set_meta("uxml_full_text", full)
+		c.set_meta("uxml_elided", shown)
+		if cur != shown:
+			c.set("text", shown)
+		_elided_tooltip(c, true, full)
+	_elide_memo[c] = [String(c.get("text")), c.size.x, elide[c], fs]
 
 
 ## display-tooltip-when-elided (default true): the full text becomes the

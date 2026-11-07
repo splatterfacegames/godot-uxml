@@ -224,6 +224,102 @@ func test_elision() -> void:
 	_unload(doc)
 
 
+# overflow: hidden text measures as its full text; the measurers keep that
+# measure (`uxml_clip_full`) and the native layout keeps which controls
+# clip text, across layouts. Every change below must land as a fresh load
+# of the final state does: text set directly or through set_text, a font
+# size, overflow switched off and on (a paint-only restyle), on both paths.
+const _CLIP_ROW := "flex-direction: row; align-items: flex-start;"
+const _CLIP_NAMES := ["ca", "cb", "cc", "cd"]
+
+
+func _clip_uxml(state: Dictionary) -> String:
+	var o := '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:VisualElement name="row" style="%s">' % _CLIP_ROW
+	for n in _CLIP_NAMES:
+		var tag := "Button" if n == "cd" else "Label"
+		o += '<ui:%s name="%s" style="%s" text="%s" />' % [tag, n, state[n][0], state[n][1]]
+	return o + "</ui:VisualElement></ui:UXML>"
+
+
+func _clip_doc(state: Dictionary, native: bool, size := Vector2(800, 200)) -> UxmlDocument:
+	UssCascade.use_native = native
+	var doc := UxmlDocument.new()
+	h.root.add_child(doc)
+	doc.size = size
+	doc.load_source(_clip_uxml(state))
+	UssCascade.use_native = true
+	return doc
+
+
+func _clip_same(doc: UxmlDocument, state: Dictionary, native: bool, what: String) -> void:
+	await h.process_frame
+	await h.process_frame
+	var ref := _clip_doc(state, native, doc.size)
+	await h.process_frame
+	await h.process_frame
+	var bad := ""
+	for n in _CLIP_NAMES:
+		var a: Control = doc.get_native(n)
+		var b: Control = ref.get_native(n)
+		if a.position != b.position or a.size != b.size:
+			bad = "%s at %s %s, fresh %s %s" % [n, a.position, a.size, b.position, b.size]
+		elif String(a.get("text")) != String(b.get("text")) or a.get("clip_text") != b.get("clip_text"):
+			bad = "%s shows %s (clip %s), fresh %s (clip %s)" % [n, a.get("text"), a.get("clip_text"), b.get("text"), b.get("clip_text")]
+		elif a.tooltip_text != b.tooltip_text:
+			bad = "%s tooltip %s, fresh %s" % [n, a.tooltip_text, b.tooltip_text]
+		if not bad.is_empty():
+			break
+	h.check(bad.is_empty(), "%s (%s): as a fresh load %s" % [what, "native" if native else "GDScript", bad])
+	_unload(ref)
+
+
+func test_clipped_text_measure_follows_changes() -> void:
+	var hidden := "overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 160px;"
+	for native in [true, false]:
+		var state := {
+			"ca": [hidden, "Short"],
+			"cb": [hidden, "A label that is too long to fit"],
+			"cc": [hidden.replace("ellipsis", "clip"), "Clipped, not elided, text"],
+			"cd": [hidden, "A button with long text in it"],
+		}
+		var doc := _clip_doc(state, native)
+		await _clip_same(doc, state, native, "load")
+		# Text set on the control by game code, then relayout.
+		(doc.get_native("ca") as Label).text = "Longer text now"
+		state["ca"][1] = "Longer text now"
+		doc.relayout()
+		await _clip_same(doc, state, native, "text set directly")
+		# ... long enough to elide, through set_text.
+		doc.set_text("ca", "Far too long to fit in its box at all")
+		state["ca"][1] = "Far too long to fit in its box at all"
+		await _clip_same(doc, state, native, "set_text elides")
+		# Back to short text on an elided Label.
+		doc.set_text("ca", "Tiny")
+		state["ca"][1] = "Tiny"
+		await _clip_same(doc, state, native, "set_text on an elided Label")
+		# A new font size (a restyle that re-applies).
+		for n in ["cb", "cc", "cd"]:
+			state[n][0] = state[n][0] + " font-size: 20px;"
+			doc.get_element_model(n).set_attribute("style", state[n][0])
+		await _clip_same(doc, state, native, "font size")
+		# overflow switched off (a paint-only restyle): no clip_text, the
+		# box grows to its text.
+		for n in ["cb", "cc", "cd"]:
+			state[n][0] = state[n][0].replace("overflow: hidden;", "overflow: visible;")
+			doc.get_element_model(n).set_attribute("style", state[n][0])
+		await _clip_same(doc, state, native, "overflow visible")
+		doc.relayout()
+		await _clip_same(doc, state, native, "overflow visible, relayout")
+		# ... and on again.
+		for n in ["cb", "cc", "cd"]:
+			state[n][0] = state[n][0].replace("overflow: visible;", "overflow: hidden;")
+			doc.get_element_model(n).set_attribute("style", state[n][0])
+		await _clip_same(doc, state, native, "overflow hidden again")
+		doc.size = Vector2(700, 200)
+		await _clip_same(doc, state, native, "resize")
+		_unload(doc)
+
+
 func test_white_space() -> void:
 	var doc := _load()
 	await h.process_frame

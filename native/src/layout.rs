@@ -320,6 +320,12 @@ pub struct LayoutIn {
     /// entry is dropped when its control is re-applied (`force`) or its
     /// inset hook runs. Used only while `maxc_on`.
     pub margins: std::cell::RefCell<Vec<Option<Option<[f64; 4]>>>>,
+    /// Whether each control carries `uxml_clip_text`, across layouts. Only
+    /// the style applier's apply() sets or removes the meta, so an entry is
+    /// dropped when its control is re-applied (`force`, and place_only).
+    /// Used only while `maxc_on`: a meta check per text control and pass
+    /// cost as much as the rest of its measure.
+    pub cliptext: std::cell::RefCell<Vec<Option<bool>>>,
 }
 
 impl LayoutIn {
@@ -595,6 +601,7 @@ pub struct Pass<'a> {
     sn_text: StringName,
     sn_cliptext: StringName,
     sn_clip: StringName,
+    sn_clipfull: StringName,
     sn_fit: StringName,
     sn_unfit: StringName,
 }
@@ -666,6 +673,7 @@ impl<'a> Pass<'a> {
             sn_text: StringName::from("text"),
             sn_cliptext: StringName::from("uxml_clip_text"),
             sn_clip: StringName::from("clip_text"),
+            sn_clipfull: StringName::from("uxml_clip_full"),
             sn_fit: StringName::from("uxml_fit"),
             sn_unfit: StringName::from("uxml_unfit"),
         }
@@ -1109,6 +1117,17 @@ impl<'a> Pass<'a> {
             _ if self.hinted[i] => false,
             CtlKind::Boxed => false,
             _ if !self.io.text_clip => false,
+            _ if self.io.maxc_on.get() => {
+                let kept = self.io.cliptext.borrow()[i];
+                match kept {
+                    Some(v) => v,
+                    None => {
+                        let v = c.has_meta(&self.sn_cliptext);
+                        self.io.cliptext.borrow_mut()[i] = Some(v);
+                        v
+                    }
+                }
+            }
             _ => *self.cliptext_m[i].get_or_insert_with(|| c.has_meta(&self.sn_cliptext)),
         };
         let mut ms = match self.kinds[i] {
@@ -1121,20 +1140,44 @@ impl<'a> Pass<'a> {
             CtlKind::Boxed => c.clone().upcast::<Object>().get(&self.sn_natural).try_to::<Vector2>().unwrap_or(Vector2::ZERO),
             _ if clipped => {
                 // overflow: hidden / elided text measures as its full text
-                // with clip_text off (UxmlDocument._measure_leaf).
+                // with clip_text off (UxmlDocument._measure_leaf), kept in
+                // `uxml_clip_full` for the full text and the clipped
+                // minimum size.
                 let mut o = c.clone().upcast::<Object>();
                 let shown = o.get(&self.sn_text);
                 let swap = c.has_meta(&self.sn_full) && shown == c.get_meta(&self.sn_elided);
-                o.set(&self.sn_clip, &false.to_variant());
-                if swap {
-                    o.set(&self.sn_text, &c.get_meta(&self.sn_full));
+                let full = if swap { c.get_meta(&self.sn_full) } else { shown.clone() };
+                let clipped_ms = c.get_combined_minimum_size();
+                let hit = if c.has_meta(&self.sn_clipfull) {
+                    c.get_meta(&self.sn_clipfull).try_to::<VarArray>().ok().and_then(|a| {
+                        let same = a.len() == 3
+                            && a.get(0).map(|v| v == full).unwrap_or(false)
+                            && a.get(1).and_then(|v| v.try_to::<Vector2>().ok()) == Some(clipped_ms);
+                        if same { a.get(2).and_then(|v| v.try_to::<Vector2>().ok()) } else { None }
+                    })
+                } else {
+                    None
+                };
+                match hit {
+                    Some(m) => m,
+                    None => {
+                        o.set(&self.sn_clip, &false.to_variant());
+                        if swap {
+                            o.set(&self.sn_text, &full);
+                        }
+                        let m = c.get_combined_minimum_size();
+                        if swap {
+                            o.set(&self.sn_text, &shown);
+                        }
+                        o.set(&self.sn_clip, &true.to_variant());
+                        let mut arr = VarArray::new();
+                        arr.push(&full);
+                        arr.push(&clipped_ms.to_variant());
+                        arr.push(&m.to_variant());
+                        o.set_meta(&self.sn_clipfull, &arr.to_variant());
+                        m
+                    }
                 }
-                let m = c.get_combined_minimum_size();
-                if swap {
-                    o.set(&self.sn_text, &shown);
-                }
-                o.set(&self.sn_clip, &true.to_variant());
-                m
             }
             _ => c.get_combined_minimum_size(),
         };

@@ -908,16 +908,28 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 	elif _applier != null and _applier.clip_texts > 0 and c.has_meta(&"uxml_clip_text"):
 		# overflow: hidden text (clip_text, so the box may be narrower than
 		# the text) and elided text measure as the full text, as Unity
-		# measures them; the shown state is put back afterwards.
+		# measures them; the shown state is put back afterwards. Switching
+		# clip_text (and the text) costs several microseconds of engine
+		# work, so the full measure is kept in `uxml_clip_full` for the
+		# full text and the clipped minimum size (which follows the font
+		# height, the stylebox and custom_minimum_size); apply() and new
+		# insets drop it. The native measurer reads and writes the same meta.
 		var shown = c.get(&"text")
 		var swap: bool = c.has_meta(&"uxml_full_text") and shown == c.get_meta(&"uxml_elided")
-		c.set(&"clip_text", false)
-		if swap:
-			c.set(&"text", c.get_meta(&"uxml_full_text"))
-		ms = c.get_combined_minimum_size()
-		if swap:
-			c.set(&"text", shown)
-		c.set(&"clip_text", true)
+		var full = c.get_meta(&"uxml_full_text") if swap else shown
+		var clipped := c.get_combined_minimum_size()
+		var memo = c.get_meta(&"uxml_clip_full") if c.has_meta(&"uxml_clip_full") else null
+		if memo != null and memo[0] == full and memo[1] == clipped:
+			ms = memo[2]
+		else:
+			c.set(&"clip_text", false)
+			if swap:
+				c.set(&"text", full)
+			ms = c.get_combined_minimum_size()
+			if swap:
+				c.set(&"text", shown)
+			c.set(&"clip_text", true)
+			c.set_meta(&"uxml_clip_full", [full, clipped, ms])
 	else:
 		ms = c.get_combined_minimum_size()
 	if c is Label:
