@@ -320,6 +320,154 @@ func test_clipped_text_measure_follows_changes() -> void:
 		_unload(doc)
 
 
+## Boxes for test_restyled_boxes_match_fresh: [tag, style].
+const _BOX_STATES := {
+	"rb": ["Button", "border-radius: 6px; background-color: rgb(40, 40, 40); padding: 2px 6px;"],
+	"fb": ["Button", "border-width: 1px; border-color: rgb(90, 90, 90); padding: 2px;"],
+	"rv": ["VisualElement", "width: 60px; height: 30px; border-radius: 8px; border-width: 2px; border-color: rgb(200, 0, 0); background-color: rgb(10, 10, 60);"],
+	"fv": ["VisualElement", "width: 60px; height: 30px; background-color: rgb(30, 90, 30);"],
+	"uv": ["VisualElement", "width: 60px; height: 30px; border-radius: 10px; border-width: 3px 0 3px 3px; border-color: rgba(0, 0, 200, 0.5);"],
+	"tv": ["VisualElement", "width: 60px; height: 30px; border-radius: 6px; background-color: rgb(0, 0, 0); transition: background-color 1s linear;"],
+}
+
+
+func _box_uxml(state: Dictionary) -> String:
+	var o := '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:VisualElement name="row" style="flex-direction: row; align-items: flex-start;">'
+	for n in _BOX_STATES:
+		o += '<ui:%s name="%s" style="%s" text="b" />' % [_BOX_STATES[n][0], n, state[n]]
+	return o + "</ui:VisualElement></ui:UXML>"
+
+
+func _box_doc(state: Dictionary, native: bool) -> UxmlDocument:
+	UssCascade.use_native = native
+	var doc := UxmlDocument.new()
+	h.root.add_child(doc)
+	doc.size = Vector2(800, 200)
+	doc.load_source(_box_uxml(state))
+	UssCascade.use_native = true
+	return doc
+
+
+## The box an element draws: a Button's normal stylebox, a box's style.
+static func _drawn_box(doc: UxmlDocument, n: String) -> StyleBox:
+	var c: Control = doc.get_native(n)
+	if c is UxmlBox:
+		return (c as UxmlBox).box_style
+	return c.get_theme_stylebox(&"normal") if c.has_theme_stylebox_override(&"normal") else null
+
+
+## What a box draws, as values (the geometry by identity: boxes with the
+## same geometry inputs share it).
+static func _box_values(sb: StyleBox) -> Array:
+	if sb == null:
+		return ["none"]
+	var m := [sb.content_margin_left, sb.content_margin_top, sb.content_margin_right,
+		sb.content_margin_bottom, sb.get_meta("uxml_margins", null)]
+	if sb is UxmlBoxStyle:
+		var ub := sb as UxmlBoxStyle
+		return ["box", ub.bg_color, ub.colors, ub.widths, ub.radii, ub._geo, ub._uniform, m]
+	if sb is StyleBoxFlat:
+		var f := sb as StyleBoxFlat
+		return ["flat", f.bg_color, f.border_color, f.draw_center, f.border_width_left,
+			f.border_width_top, f.border_width_right, f.border_width_bottom, m]
+	return [sb.get_class(), m]
+
+
+func _box_same(doc: UxmlDocument, state: Dictionary, native: bool, what: String) -> void:
+	await h.process_frame
+	await h.process_frame
+	var ref := _box_doc(state, native)
+	await h.process_frame
+	await h.process_frame
+	var bad := ""
+	for n in _BOX_STATES:
+		var a := _box_values(_drawn_box(doc, n))
+		var b := _box_values(_drawn_box(ref, n))
+		if a != b:
+			bad = "%s: %s, fresh %s" % [n, a, b]
+			break
+	h.check(bad.is_empty(), "%s (%s): boxes as a fresh load %s" % [what, "native" if native else "GDScript", bad])
+	_unload(ref)
+
+
+# A restyle recolours an installed box in place when only its colours
+# change (UxmlStyleApplier._recolor) and builds a new one otherwise; either
+# way every box draws what a fresh load of the same styles draws.
+func test_restyled_boxes_match_fresh() -> void:
+	for native in [true, false]:
+		var state := {}
+		for n in _BOX_STATES:
+			state[n] = _BOX_STATES[n][1]
+		var doc := _box_doc(state, native)
+		await _box_same(doc, state, native, "load")
+		var before := {}
+		for n in _BOX_STATES:
+			before[n] = _drawn_box(doc, n)
+		var restyle := func(changes: Dictionary) -> void:
+			for n in changes:
+				state[n] = state[n] + " " + changes[n]
+				doc.get_element_model(n).set_attribute("style", state[n])
+		# Colours only: the same box objects take the new colours.
+		restyle.call({
+			"rb": "background-color: rgb(80, 80, 80);",
+			"fb": "border-color: rgb(250, 250, 0);",
+			"rv": "border-color: rgb(0, 200, 0); background-color: rgb(60, 10, 10);",
+			"fv": "background-color: rgb(90, 30, 30);",
+		})
+		await _box_same(doc, state, native, "colours")
+		var kept := []
+		for n in ["rb", "fb", "rv", "fv"]:
+			if _drawn_box(doc, n) == before[n]:
+				kept.append(n)
+		h.eq(kept, ["rb", "fb", "rv", "fv"], "colour-only restyles keep their boxes (%s)" % ("native" if native else "GDScript"))
+		# Colours that change the geometry: a translucent border (the
+		# background reaches under it), one transparent side of one-colour
+		# sides, a transparent background.
+		restyle.call({
+			"rv": "border-color: rgba(0, 200, 0, 0.5);",
+			"uv": "border-left-color: rgba(0, 0, 200, 0);",
+			"fv": "background-color: rgba(0, 0, 0, 0);",
+		})
+		await _box_same(doc, state, native, "geometry colours")
+		restyle.call({"rv": "border-color: rgb(0, 0, 200);", "uv": "border-left-color: rgba(0, 0, 200, 0.5);"})
+		await _box_same(doc, state, native, "opaque again")
+		# Not colours: new margins, widths, radii, kind of box.
+		restyle.call({
+			"rb": "padding: 4px;",
+			"fb": "border-width: 2px;",
+			"rv": "border-radius: 3px;",
+			"fv": "border-width: 1px; border-color: rgb(255, 255, 255); background-color: rgb(9, 9, 9);",
+		})
+		await _box_same(doc, state, native, "shape")
+		# A background-colour transition, stepped to its end.
+		doc.transitions_manual = true
+		restyle.call({"tv": "background-color: rgb(200, 100, 0);"})
+		doc._restyle_now()
+		var tb := _drawn_box(doc, "tv")
+		for k in 4:
+			doc.advance_transitions(0.3)
+		h.check(_drawn_box(doc, "tv") == tb, "a colour transition keeps the box (%s)" % ("native" if native else "GDScript"))
+		doc.advance_transitions(0.5)
+		var tstate := state.duplicate()
+		tstate["tv"] = String(tstate["tv"]).replace("transition: background-color 1s linear;", "")
+		await _box_same(doc, tstate, native, "transition end")
+		_unload(doc)
+	# One mesh draws one-colour sides and leaves the transparent ones out:
+	# boxes that differ in a transparent side have different geometry.
+	var ci := RenderingServer.canvas_item_create()
+	var geo := []
+	for left in [Color(0, 0, 1, 0.5), Color(0, 0, 1, 0)]:
+		var ub := UxmlBoxStyle.new()
+		ub.widths = PackedFloat64Array([3.0, 0.0, 3.0, 3.0])
+		ub.radii = PackedFloat64Array([10.0, 10.0, 10.0, 10.0])
+		ub.colors = [Color(0, 0, 1, 0.5), Color(0, 0, 1, 0.5), Color(0, 0, 1, 0.5), left]
+		ub.draw(ci, Rect2(0, 0, 61, 31))
+		geo.append(ub._geo)
+	RenderingServer.free_rid(ci)
+	h.check(geo[0] != null and geo[1] != null and not is_same(geo[0], geo[1]),
+		"a transparent side gives other one-colour geometry")
+
+
 func test_white_space() -> void:
 	var doc := _load()
 	await h.process_frame
