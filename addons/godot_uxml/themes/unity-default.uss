@@ -434,7 +434,7 @@ UXML {
   width: 10px;
   height: 10px;
   align-self: center;
-  background-image: url("arrow-down.svg");
+  background-image: url("dropdown-arrow.svg");
   -unity-background-image-tint-color: rgb(50, 50, 50);
 }
 
