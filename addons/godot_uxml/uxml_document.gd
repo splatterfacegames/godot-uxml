@@ -184,6 +184,8 @@ var _pooled: Dictionary = {}          # UxmlElement -> true (inside a pooled row
 ## Behaviors with after_layout(): Unity's post-layout control updates
 ## (Scrollers, row positions, column widths).
 var _post_layout: Array = []
+## Text fields with a placeholder (TextBehavior.elide_placeholder).
+var _placeholder_fields: Array = []
 var _behaviors: Dictionary = {}       # control UxmlElement -> UxmlBehaviors.Behavior
 # Callables run after every layout pass (both layout paths): controls whose
 # parts Unity places from the layout (a slider's dragger). Empty for a
@@ -425,6 +427,11 @@ func load_source(uxml: String, virtual_path: String = "res://__uxml_source__.uxm
 # Partial reload (editors)
 # ---------------------------------------------------------------------------
 
+## Emitted at the end of a drag of a TwoPaneSplitView that changed the size
+## of its fixed pane (not for set_split_dimension or a layout).
+signal split_changed(view_name, dimension)
+
+
 ## Emitted after replace_source(): `in_place` is true when the elements,
 ## controls and their state were kept, false after a full load (then
 ## `loaded` was emitted too).
@@ -435,12 +442,12 @@ signal source_replaced(in_place)
 ## and restyle. `origin` is the sheet path as the load resolved it (the
 ## `file` of a cascade origin; a path that spells the same file works).
 ## The controls, their state (focus, scroll offsets, values) and the
-## element tree stay; the cascade is rebuilt, so running transitions stop
-## at their end values. New `@import`s are loaded. The diagnostics of the
-## sheet and the style diagnostics of the controls are made again. Returns
-## OK, ERR_UNCONFIGURED before a load, or ERR_DOES_NOT_EXIST when no
-## author sheet of the document has that origin (theme sheets cannot be
-## reloaded).
+## element tree stay; running transitions stop at their end values. New
+## `@import`s are loaded. The diagnostics of the sheet and the style
+## diagnostics of the controls are made again. The work follows the edit
+## (get_last_reload_mode()); the result equals a full rebuild. Returns OK,
+## ERR_UNCONFIGURED before a load, or ERR_DOES_NOT_EXIST when no author
+## sheet of the document has that origin (theme sheets cannot be reloaded).
 func reload_stylesheet(origin: String, text: String) -> int:
 	if _doc == null:
 		return ERR_UNCONFIGURED
@@ -457,12 +464,92 @@ func reload_stylesheet(origin: String, text: String) -> int:
 	if hits.is_empty():
 		return ERR_DOES_NOT_EXIST
 	_doc.warnings = _doc.warnings.filter(func(w): return not origins.has(String(w.get("file", ""))))
+	var old_items := {}
 	for si in hits:
+		old_items[si] = _doc.sheets[si]["items"]
 		UxmlLoader.reparse_sheet(_doc, si, text, _resolver)
-	if _applier != null:
-		_applier.forget_warnings()
-	_rebuild_cascade()
+	if not _partial_reload or _cascade == null or _applier == null:
+		if _applier != null:
+			_applier.forget_warnings()
+		_last_reload = "full"
+		_rebuild_cascade()
+		return OK
+	# Each applied element reports again; elements with a diagnostic apply
+	# too, so a diagnostic of a style they no longer have goes.
+	var warned: Array = _applier.warned_elements()
+	_applier.forget_warnings()
+	# Running transitions end at their end values, on either path below.
+	var running = _transitions
+	_transitions = null
+	var patches := {}
+	for si in hits:
+		var patch = UssCascade.sheet_patch(old_items[si], _doc.sheets[si]["items"])
+		if patch == null:
+			_last_reload = "cascade"
+			_reapply.append_array(warned)
+			_layout_records = {}
+			_layout_xcache = {}
+			_swap_cascade()
+			return OK
+		patches[si] = patch
+	if running != null:
+		for ti in running._written:
+			_cascade.set_override(ti, {})
+	for si in patches:
+		_cascade.patch_rules(si, patches[si])
+		_move_rule_warnings(si, old_items[si])
+	_reload_rev += 1
+	_last_reload = "restyle"
+	_reapply.append_array(warned)
+	_reload_pass = true
+	_restyle_now(not _restyle_queued and _attr_dirty.is_empty())
 	return OK
+
+
+## "restyle", "cascade" or "full": what the last reload_stylesheet() ran
+## ("" before). "restyle": only declarations changed, and only the elements
+## of the changed rules and the subtrees they pass values to were computed.
+## "cascade": selectors, rules or imports changed, so the rules were compiled
+## and every element computed, but only the controls with another computed
+## style were applied.
+func get_last_reload_mode() -> String:
+	return _last_reload
+
+
+var _last_reload := ""
+## False: every reload_stylesheet() rebuilds and applies everything (the
+## reference of the tests and of bench/equiv_runtime.gd).
+var _partial_reload := true
+## The restyle of a reload: a style change in only `transition-*` properties
+## applies nothing (the controls do not read them).
+var _reload_pass := false
+
+
+func _move_rule_warnings(si: int, old_items: Array) -> void:
+	var sheet: Dictionary = _doc.sheets[si]
+	var items: Array = sheet["items"]
+	var moved := {}
+	for i in items.size():
+		if items[i]["kind"] == "rule":
+			moved[int(old_items[i]["rule"]["selector_span"]["start"])] = int(items[i]["rule"]["selector_span"]["start"])
+	_cascade.move_rule_warnings(String(sheet["origin"]), String(sheet["source"]), moved)
+
+
+## True when two computed styles differ in `transition-*` properties only.
+static func _transition_only(old, new: Dictionary) -> bool:
+	if old == null:
+		return false
+	var o: Dictionary = old
+	for prop in new:
+		if String(prop).begins_with("transition-"):
+			continue
+		var oe = o.get(prop)
+		if oe == null or oe != new[prop]:
+			return false
+	for prop in o:
+		if not new.has(prop) and not String(prop).begins_with("transition-"):
+			return false
+	return true
 
 
 ## The comparison form of a path: canonical, and lower case where file
@@ -681,13 +768,26 @@ func _swap_cascade() -> void:
 		for ti in _transitions._written:
 			nc.set_override(ti, _transitions._written[ti])
 	nc.update(_restyle_options())
+	# The flags of a new cascade start at 0: compare them with the applied ones,
+	# or an element shown or enabled through an ancestor keeps its old look.
+	var ef: Array = nc.effective_flags()
+	var new_dis: PackedByteArray = ef[1]
+	var new_gone: PackedByteArray = ef[2]
+	var old_index: Dictionary = {} if _cascade == null else _cascade.index
 	var changed: Array = []
-	for el in nc.els:
+	for i in nc.els.size():
+		var el: UxmlElement = nc.els[i]
 		var ns: Dictionary = nc.styles[el]
 		var os = old_styles.get(el)
+		var same_flags := true
+		var oi = old_index.get(el)
+		if oi != null and int(oi) < _dis.size():
+			same_flags = _dis[oi] == new_dis[i] and _gone[oi] == new_gone[i]
 		if os != null and os == ns and (os as Dictionary).keys() == ns.keys():
 			nc.styles[el] = os
-		elif _controls.has(el):
+			if same_flags:
+				continue
+		if _controls.has(el):
 			changed.append(el)
 	_cascade = nc
 	_attr_dirty.clear()
@@ -844,6 +944,8 @@ func _clear() -> void:
 	_applier = null
 	_layout_warned = {}
 	_cascade = null
+	_preview_cascade = null
+	_preview_of = null
 	_full_apply = true
 	_force_layout = true
 	_rects = {}
@@ -866,6 +968,7 @@ func _clear() -> void:
 	_lists = {}
 	_pooled = {}
 	_post_layout = []
+	_placeholder_fields = []
 	_transitions = null
 	set_process(false)
 	_binding.clear()
@@ -1056,6 +1159,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		_full_apply = true
 		_force_layout = true
 	if _native_bound != _cascade:
+		var prev_bound = _native_bound
 		_native_bound = _cascade
 		if _cascade._native != null and use_native_layout:
 			# Native flex pass: hand it the controls per preorder index.
@@ -1068,6 +1172,10 @@ func _restyle_now(only_transitions: bool = false) -> void:
 				kinds.append((1 if cc is UxmlBox else 0) | (2 if cc is UxmlField else 0))
 				nats.append(_natives.get(cel))
 			_cascade._native.call("set_controls", ctl, kinds, nats)
+			if prev_bound != null and prev_bound._native != null and prev_bound.doc == _doc:
+				# A new cascade over the same elements (reload_stylesheet,
+				# replace_source): the fits of the controls stay.
+				_cascade._native.call("adopt_placement", prev_bound._native)
 	var dirty = null
 	if not _scan_all:
 		var dl := PackedInt32Array()
@@ -1136,6 +1244,8 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		var seen := {}
 		for k in changed.size():
 			var el: UxmlElement = els[changed[k]]
+			if _reload_pass and _transition_only(olds[k], _styles[el]):
+				continue
 			seen[el] = true
 			if not _paint_only(olds[k], _styles[el]):
 				need_layout = true
@@ -1175,6 +1285,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 					seen[del] = true
 					applied.append(del)
 	_reapply = applied.slice(0, fresh) if not load_pass else []
+	_reload_pass = false
 	var cindex: Dictionary = _cascade.index
 	var pt := Time.get_ticks_usec() if profile != null else 0
 	for el in applied:
@@ -1238,6 +1349,9 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			for el in placed:
 				cs.append(_controls[el])
 			_applier.update_elision(cs)
+		if not placed.is_empty():
+			for b in _placeholder_fields:
+				b.elide_placeholder()
 	# Runtime warnings accumulate during apply/layout — surface last so they
 	# are all included.
 	diagnostics = _doc.warnings + _cascade.collect_warnings() + _rt_warnings
@@ -1414,6 +1528,96 @@ func get_transitions() -> Array:
 		t["element"] = _cascade.els[t["index"]]
 		t.erase("index")
 	return out
+
+
+## End every running transition now, at its end value, and restyle. The clock
+## stays and no event is emitted. The ended transitions are not completed
+## transitions: a later change to the same value starts a new one.
+func finish_transitions() -> void:
+	if _doc == null:
+		return
+	if _restyle_queued:
+		_restyle_now()
+	if _transitions != null and _transitions.finish():
+		_restyle_now(_attr_dirty.is_empty())
+
+
+## Forget the completed transitions. Unity keeps a completed transition until
+## a later style change with a positive combined duration replaces it, so a
+## change to its end value starts nothing, also after an instant change away
+## from that value (StylePropertyAnimationSystem.StartTransition; this document
+## does the same). A tool that plays one state change as if it were the first
+## (a timeline) calls this before the run.
+func clear_completed_transitions() -> void:
+	if _transitions != null:
+		_transitions.clear_completed()
+
+
+## What get_transitions() would list after a change of `element` from
+## `from_states` to `to_states`, as if the document had just loaded: no running
+## and no completed transition counts, and the document does not change. The
+## other elements keep their states. Each entry has the keys of
+## get_transitions(), `elapsed` and `progress` 0. The list has every element
+## that the change affects: descendants through inheritance and `.a:hover .b`
+## too. States: hover, active, focus, checked, selected, disabled, enabled.
+func preview_transitions(element: UxmlElement, from_states: PackedStringArray, to_states: PackedStringArray) -> Array:
+	if _doc == null or element == null or not _is_current(element):
+		return []
+	if _restyle_queued:
+		_restyle_now()
+	if _cascade == null or not _cascade.index.has(element):
+		return []
+	if _preview_cascade == null or _preview_of != _cascade or _preview_rev != _reload_rev:
+		_preview_cascade = UssCascade.new(_doc)
+		_preview_of = _cascade
+		_preview_rev = _reload_rev
+	var c: UssCascade = _preview_cascade
+	var t := UssTransitions.new(c)
+	t.size_of = _percent_base
+	t.filter_defaults = _filter_defaults
+	c.update(_preview_options(element, from_states))
+	var to := _preview_options(element, to_states)
+	var changed := c.update(to, false, PackedInt32Array())
+	t.after_update(changed, c.last_old, to)
+	var out: Array = t.snapshot()
+	for e in out:
+		e["element"] = c.els[e["index"]]
+		e.erase("index")
+	for ti in t._written:
+		c.set_override(ti, {})
+	c.effective_flags()
+	return out
+
+
+var _preview_cascade: UssCascade = null
+var _preview_of: UssCascade = null
+var _preview_rev := -1
+## Counts the rule patches of the current cascade (reload_stylesheet).
+var _reload_rev := 0
+
+
+## _restyle_options with `states` as the only states of `element`.
+func _preview_options(element: UxmlElement, states: PackedStringArray) -> Dictionary:
+	var o := _restyle_options()
+	var es: Dictionary = o["element_states"]
+	var dis: Dictionary = o["disabled_elements"]
+	var en: Dictionary = o["enabled_elements"]
+	es.erase(element)
+	dis.erase(element)
+	en.erase(element)
+	var list: Array = []
+	for s in states:
+		if s == "disabled":
+			dis[element] = true
+		elif s == "enabled":
+			en[element] = true
+		else:
+			list.append(s)
+	if not list.is_empty():
+		es[element] = list
+	if dis.has(element):
+		en.erase(element)
+	return o
 
 
 ## The transition clock in seconds (advance_transitions() and the frame
@@ -1772,6 +1976,8 @@ func _run_layout_hooks() -> void:
 func _update_elision() -> void:
 	if _applier != null and not _applier.elide.is_empty():
 		_applier.update_elision()
+	for b in _placeholder_fields:
+		b.elide_placeholder()
 
 
 ## Position/size one element's control from the last layout and inset its
@@ -2661,8 +2867,9 @@ static func _sv(st: Dictionary, prop: String, default: String) -> String:
 	return default if e == null else String(e["value"]).strip_edges()
 
 
+## A length in px; USS also takes a zero without a unit.
 static func _is_px(v: String) -> bool:
-	return v.ends_with("px") and v.substr(0, v.length() - 2).is_valid_float()
+	return v == "0" or (v.ends_with("px") and v.substr(0, v.length() - 2).is_valid_float())
 
 
 static func _is_pct(v: String) -> bool:
@@ -2726,7 +2933,9 @@ func _definite(el: UxmlElement, horizontal: bool, depth: int) -> bool:
 	var row := _sv(pst, "flex-direction", "column").begins_with("row")
 	if row == horizontal:
 		var basis := _sv(st, "flex-basis", "auto")
-		return _is_px(basis) or _is_pct(basis)
+		if _is_px(basis) or _is_pct(basis):
+			return true
+		return horizontal and _vertical_viewport(el, st) and _definite(parent, true, depth + 1)
 	var align := _sv(st, "align-self", "auto")
 	if align == "auto":
 		align = _sv(pst, "align-items", "stretch")
@@ -2736,6 +2945,89 @@ func _definite(el: UxmlElement, horizontal: bool, depth: int) -> bool:
 		if _sv(st, "margin-" + side, "0px") == "auto":
 			return false
 	return _definite(parent, horizontal, depth + 1)
+
+
+## True for the viewport of a ScrollView without horizontal scrolling that
+## grows and shrinks: it fills the row of the ScrollView beside the vertical
+## scroller, whatever its content measures.
+func _vertical_viewport(el: UxmlElement, st: Dictionary) -> bool:
+	var sv: UxmlElement = el.part_of
+	if sv == null or sv.local != "ScrollView" or UxmlContainerParts.scroll_mode(sv) != "vertical":
+		return false
+	if UxmlContainerParts.get_part(sv, "viewport") != el:
+		return false
+	return (UssValues.parse_number(_sv(st, "flex-grow", "0")) > 0.0
+		and UssValues.parse_number(_sv(st, "flex-shrink", "1")) > 0.0)
+
+
+## The value of a field (TextField, Toggle, DropdownField, ColorField, Slider,
+## ...), as a two-way binding reads it: null for an element without a field
+## value.
+func get_field_value(element_name: String) -> Variant:
+	var b = _behaviors.get(_by_name.get(element_name))
+	if b == null:
+		return null
+	var r: Array = b.bind_read("value")
+	return r[1] if r[0] else null
+
+
+## Set the value of a field (TextField, Toggle, DropdownField, ColorField,
+## Slider, ...) as a two-way binding writes it. No restyle runs for the value
+## itself: the cascade does not read `value`. A value that changes a state
+## or a class of the field (`:checked`) restyles those elements, as any state
+## change does; a shown text that can move an element lays out as set_text
+## does. `value_changed` is emitted only with `notify` and a new value
+## (Unity's SetValueWithoutNotify and `value`). Returns false for an element
+## without a field value.
+func set_field_value(element_name: String, value: Variant, notify: bool = false) -> bool:
+	var el: UxmlElement = _by_name.get(element_name)
+	var b = null if el == null else _behaviors.get(el)
+	if b == null or not (b.bind_read("value") as Array)[0]:
+		return false
+	var before = b.bind_read("value")[1]
+	var blocked := is_blocking_signals()
+	set_block_signals(true)
+	_quiet_field = el
+	var code: int = b.bind_write("value", value)
+	_quiet_field = null
+	set_block_signals(blocked)
+	if code < 0 or code == UxmlBehaviors.Behavior.UNHANDLED:
+		return false
+	if code == 2:
+		relayout()
+	if notify:
+		var after = b.bind_read("value")[1]
+		if typeof(after) != typeof(before) or after != before:
+			value_changed.emit(element_name, after)
+	return true
+
+
+var _quiet_field: UxmlElement = null
+
+
+## True for an element of the current load.
+func _is_current(element: UxmlElement) -> bool:
+	return _parents.has(element) or (_doc != null and element == _doc.root)
+
+
+## The author classes of `element` at runtime; the classes that the control
+## added stay. Takes any element, with or without a name.
+func set_author_classes(element: UxmlElement, classes: PackedStringArray) -> void:
+	if element == null or not _is_current(element):
+		return
+	element.set_attribute("class", UxmlParts.merged_class(element, " ".join(classes)))
+
+
+## The classes of `element` without those the control added.
+func get_author_classes(element: UxmlElement) -> PackedStringArray:
+	var out := PackedStringArray()
+	if element == null or not _is_current(element):
+		return out
+	var own := UxmlParts.control_classes(element)
+	for c in element.class_list():
+		if not own.has(c):
+			out.append(c)
+	return out
 
 
 ## Replace the element's `class` attribute and re-resolve. Runtime class
@@ -2751,6 +3043,11 @@ func set_class(element_name: String, class_string: String) -> void:
 
 
 func _on_model_changed(el: UxmlElement) -> void:
+	if el == _quiet_field and el.changed_attribute == "value":
+		# set_field_value: `value` is not a cascade input. A class or a state
+		# that the behavior changes queues its own restyle.
+		_behaviors[el].on_model_changed()
+		return
 	_attr_dirty[el] = true
 	_queue_restyle()
 	var b = _behaviors.get(el)

@@ -18,6 +18,9 @@ extends SceneTree
 ## UxmlBox/UxmlField chrome, image offsets, ScrollView offsets — and the
 ## diagnostics arrays are compared.
 ##
+## _run_reload checks reload_stylesheet with random stylesheet edits: a partial
+## reload equals a full rebuild, on both paths, and native equals GDScript.
+##
 ## Change history: until the Unity part trees (unity/controls-foundation)
 ## `a` was bench/ref/ref_uxml_document.gd, the pre-optimization runtime.
 ## That runtime has no default theme, no control parts and maps Toggle to a
@@ -29,7 +32,10 @@ extends SceneTree
 ##
 ##   Godot --headless --path <project> -s res://bench/equiv_runtime.gd [-- --gdscript]
 ##
-## `--gdscript` runs every document on the GDScript path.
+## `--gdscript` runs every document on the GDScript path. `--seed=<n>` changes
+## the random sequence, `--reload-only` runs the stylesheet edits only, and
+## `--only=<text>` the fixtures with that text in the path. The env variable
+## RELOAD_TRACE prints each stylesheet edit.
 
 const SLOTS := ["normal", "hover", "pressed", "disabled", "focus", "read_only", "slider"]
 const COLORS := ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color",
@@ -46,6 +52,9 @@ func _initialize() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 777
 	_frng.seed = 4242
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--seed="):
+			rng.seed = int(arg.substr(7))
 	for pair in [
 		["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml", 120],
 		["res://tests/fixtures/runtime", "Assets/UI/review.uxml", 120],
@@ -62,7 +71,17 @@ func _initialize() -> void:
 				only = arg.substr(7)
 		if not only.is_empty() and String(pair[1]).find(only) < 0:
 			continue
-		await _run(pair[0], pair[1], pair[2], rng)
+		if not OS.get_cmdline_user_args().has("--reload-only"):
+			await _run(pair[0], pair[1], pair[2], rng)
+		await _run_reload(pair[0], pair[1], 10 if String(pair[1]).ends_with("big.uxml") else 40, rng)
+	# Sheets of a template (a scope) and a template used twice.
+	var only_arg := ""
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--only="):
+			only_arg = arg.substr(7)
+	if only_arg.is_empty() or "templates Main.uxml".find(only_arg) >= 0:
+		await _run_reload("res://tests/fixtures/templates", "Assets/UI/Main.uxml", 30, rng)
+	print("EQUIV_RELOAD modes: %s" % [_reload_modes])
 	print("EQUIV_RUNTIME %s: %d checks, %d failures, %d settled-earlier load transients" % [
 		"OK" if _fails == 0 else "FAIL", _checks, _fails, _transients])
 	quit(0 if _fails == 0 else 1)
@@ -218,6 +237,203 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 		d.free()
 
 
+# ---------------------------------------------------------------------------
+# reload_stylesheet: a partial reload equals a full rebuild (R25)
+# ---------------------------------------------------------------------------
+
+## Declarations an edit can add: inherited and not, layout and paint, custom
+## properties and var(), keywords, transitions, and values that report.
+const RELOAD_DECLS := [
+	"color: rgb(1, 2, 3)", "color: var(--rl-c)", "--rl-c: rgb(9, 8, 7)", "--rl-c: rgb(7, 8, 9)",
+	"color: var(--rl-missing)", "width: 123px", "width: 40%", "height: 31px", "min-width: 11px",
+	"font-size: 19px", "font-size: 150%", "margin: 3px", "padding: 2px 5px", "display: none",
+	"display: flex", "visibility: hidden", "opacity: 0.5", "flex-direction: row", "flex-grow: 2",
+	"background-color: rgb(40, 50, 60)", "border-width: 2px", "border-color: rgb(1, 1, 1)",
+	"border-radius: 4px", "transition: min-width 1s", "transition-duration: 0.5s", "transition-delay: 0.1s",
+	"transition-property: all", "all: initial", "color: unset", "font-size: initial", "nonsense-prop: 1",
+	"width: bogus", "display: bogus", "background-image: url(\"nope.png\")", "-unity-font-style: bold",
+	"-unity-font-style: bogus", "overflow: hidden", "translate: 5px 5px", "rotate: 10deg",
+	"-unity-text-align: middle-center", "text-overflow: ellipsis", "white-space: nowrap",
+	"filter: blur(2px)", "letter-spacing: 1px", "position: absolute", "left: 7px",
+]
+const RELOAD_RULES := [
+	".rl-none { color: rgb(1, 2, 3); }", "Label { color: rgb(3, 4, 5); }", "Button:hover { width: 50px; }",
+	"VisualElement > Label { font-size: 15px; }", "* { --rl-c: rgb(5, 5, 5); }", ":root { font-size: 14px; }",
+	"Label + Button { color: red; }", "VisualElement Label:hover { color: rgb(0, 9, 0); }",
+]
+
+var _reload_modes := {}
+
+
+## The sheet `text` after one random edit.
+func _edit_sheet(text: String, origin: String, rng: RandomNumberGenerator) -> String:
+	var items: Array = UssParser.new().parse(text, origin)["items"]
+	var rules: Array = []
+	for it in items:
+		if it["kind"] == "rule":
+			rules.append(it["rule"])
+	var op := rng.randi() % 12
+	if rules.is_empty() or op == 0:
+		return text + "\n" + RELOAD_RULES[rng.randi() % RELOAD_RULES.size()]
+	var rule: Dictionary = rules[rng.randi() % rules.size()]
+	var decls: Array = rule["declarations"]
+	var new_decl: String = RELOAD_DECLS[rng.randi() % RELOAD_DECLS.size()]
+	match op:
+		1, 2, 3, 4:
+			# One declaration: a new value (the most common edit), or a new one.
+			if decls.is_empty():
+				return text.insert(int(rule["span"]["end"]) - 1, new_decl + ";")
+			var d: Dictionary = decls[rng.randi() % decls.size()]
+			var v: String = d["value"]
+			if v.ends_with("px") and v.substr(0, v.length() - 2).is_valid_float():
+				new_decl = "%s: %dpx" % [d["property"], rng.randi() % 40]
+			elif v.begins_with("#") or v.begins_with("rgb"):
+				new_decl = "%s: rgb(%d, %d, %d)" % [d["property"], rng.randi() % 255, rng.randi() % 255, rng.randi() % 255]
+			return text.substr(0, int(d["span"]["start"])) + new_decl + text.substr(int(d["span"]["end"]))
+		5, 6:
+			return text.insert(int(rule["span"]["end"]) - 1, ";" + new_decl + ";")
+		7:
+			if decls.is_empty():
+				return text
+			var d2: Dictionary = decls[rng.randi() % decls.size()]
+			return text.substr(0, int(d2["span"]["start"])) + text.substr(int(d2["span"]["end"]))
+		8:
+			var suffix: String = [", .rl-none", ":hover", " Label", ", Label"][rng.randi() % 4]
+			return text.insert(int(rule["selector_span"]["end"]), suffix)
+		9:
+			return text.substr(0, int(rule["span"]["start"])) + text.substr(int(rule["span"]["end"]))
+		10:
+			return "/* moved */\n" + text
+	return text
+
+
+## The part of `b` that differs from `a` (a trace of an edit).
+static func _diff_text(a: String, b: String) -> String:
+	var i := 0
+	while i < a.length() and i < b.length() and a[i] == b[i]:
+		i += 1
+	var ea := a.length()
+	var eb := b.length()
+	while ea > i and eb > i and a[ea - 1] == b[eb - 1]:
+		ea -= 1
+		eb -= 1
+	return "at %d: %s -> %s" % [i, a.substr(i, ea - i), b.substr(i, eb - i)]
+
+
+func _sorted_diags(d) -> Array:
+	var out := _diags(d)
+	out.sort_custom(func(x, y): return str(x) < str(y))
+	return out
+
+
+func _cmp_reload(what: String, a, b) -> void:
+	_checks += 1
+	var sa := _snap(a)
+	var sb := _snap(b)
+	var why := ""
+	if sa.size() != sb.size():
+		why = "control count %d vs %d" % [sa.size(), sb.size()]
+	else:
+		for i in sa.size():
+			if sa[i] != sb[i]:
+				why = "element %d (%s) %s" % [i, sa[i].get("tag"), _leaf(sa[i], sb[i], "")]
+				break
+	if why.is_empty() and _sorted_diags(a) != _sorted_diags(b):
+		var da := _sorted_diags(a)
+		var db := _sorted_diags(b)
+		var only_a: Array = da.filter(func(x): return not db.has(x))
+		var only_b: Array = db.filter(func(x): return not da.has(x))
+		why = "diagnostics differ:\n  first only %s\n  second only %s" % [only_a, only_b]
+	if not why.is_empty():
+		_fails += 1
+		if _fails <= 12:
+			print("FAIL %s: %s" % [what, why])
+
+
+## Random stylesheet edits, state changes and running transitions on three
+## documents: a and g rebuild everything at each reload, on the current
+## path and on GDScript; b and c reload partially on the same paths.
+func _run_reload(project: String, path: String, steps: int, rng: RandomNumberGenerator) -> void:
+	var a := UxmlDocument.new()
+	var b := UxmlDocument.new()
+	var c := UxmlDocument.new()
+	var g := UxmlDocument.new()
+	var all := [a, b, c, g]
+	a._partial_reload = false
+	g._partial_reload = false
+	for d in all:
+		d.transitions_manual = true
+		root.add_child(d)
+		d.size = Vector2(640, 480)
+		d.position = Vector2(20000, 20000)
+		var was := UssCascade.use_native
+		if d == c or d == g:
+			UssCascade.use_native = false
+		d.load_document(path, project)
+		UssCascade.use_native = was
+	await process_frame
+	for d in all:
+		d.refresh()
+		d._restyle_now()
+	await process_frame
+	var texts := {}
+	var origins: Array = []
+	for sh in a._doc.sheets:
+		if not bool(sh.get("theme", false)) and not String(sh["origin"]).is_empty() and not texts.has(sh["origin"]):
+			texts[sh["origin"]] = String(sh["source"])
+			origins.append(sh["origin"])
+	var names: Array = a._by_name.keys()
+	if origins.is_empty():
+		for d in all:
+			root.remove_child(d)
+			d.free()
+		return
+	var pristine := texts.duplicate()
+	for step in steps:
+		# Input between edits: states, and running transitions to end.
+		if not names.is_empty():
+			var nm: String = names[rng.randi() % names.size()]
+			var st: String = ["hover", "focus", "active", "checked"][rng.randi() % 4]
+			var on := rng.randi() % 2 == 0
+			for d in all:
+				d.set_element_state(nm, st, on)
+			if rng.randi() % 3 == 0:
+				for d in all:
+					d._restyle_now()
+					d.advance_transitions(0.1)
+		var origin: String = origins[rng.randi() % origins.size()]
+		var text: String = texts[origin]
+		var prev_text := text
+		if text.length() > 20000 or rng.randi() % 16 == 0:
+			text = pristine[origin]  # back to the first text (edits accumulate)
+		text = _edit_sheet(text, origin, rng)
+		texts[origin] = text
+		var was := UssCascade.use_native
+		for d in all:
+			if d == c or d == g:
+				UssCascade.use_native = false
+			d.reload_stylesheet(origin, text)
+			UssCascade.use_native = was
+		var mode: String = b.get_last_reload_mode()
+		_reload_modes[mode] = int(_reload_modes.get(mode, 0)) + 1
+		if mode != c.get_last_reload_mode():
+			_fails += 1
+			print("FAIL %s step %d: reload mode %s vs %s" % [path, step, mode, c.get_last_reload_mode()])
+		await process_frame
+		for d in all:
+			d._restyle_now()
+		await process_frame
+		if OS.has_environment("RELOAD_TRACE"):
+			print("STEP %s %d %s origin=%s\n%s\n---" % [path, step, mode, origin, _diff_text(prev_text, text)])
+		_cmp_reload("%s reload step %d (%s)" % [path, step, mode], a, b)
+		_cmp_reload("%s reload step %d (%s, GDScript)" % [path, step, mode], g, c)
+		_cmp_reload("%s reload step %d (%s, full native vs full GDScript)" % [path, step, mode], a, g)
+		_cmp_reload("%s reload step %d (%s, native vs GDScript)" % [path, step, mode], b, c)
+	for d in all:
+		root.remove_child(d)
+		d.free()
+
+
 var _frng := RandomNumberGenerator.new()
 
 
@@ -273,7 +489,7 @@ func _leaf(a, b, path: String) -> String:
 		for k in a:
 			if not b.has(k):
 				return "%s.%s missing in new" % [path, k]
-			if a[k] != b[k]:
+			if typeof(a[k]) != typeof(b[k]) or a[k] != b[k]:
 				return _leaf(a[k], b[k], "%s.%s" % [path, k])
 		for k in b:
 			if not a.has(k):

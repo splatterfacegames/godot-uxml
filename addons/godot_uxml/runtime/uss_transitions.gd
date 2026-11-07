@@ -547,6 +547,33 @@ func tick() -> bool:
 	return _flush_overrides()
 
 
+## End every running transition at its end value (UxmlDocument.finish_transitions):
+## no event, and not a completed transition. Returns true when an override
+## changed (the document then restyles).
+func finish() -> bool:
+	_ended.clear()
+	var dirty := {}
+	for i in _running:
+		var en := {}
+		var run: Dictionary = _running[i]
+		for prop in run:
+			var an: Dictionary = run[prop]
+			# The before-change value of the restyle below, as for a transition
+			# that ended in a tick: nothing starts from the last eased value.
+			en[prop] = [an["b"], an["b_entry"]]
+		_ended[i] = en
+		dirty[i] = true
+	_running.clear()
+	for i in dirty:
+		_write(i)
+	return _flush_overrides()
+
+
+## Forget the completed transitions (UxmlDocument.clear_completed_transitions).
+func clear_completed() -> void:
+	_completed.clear()
+
+
 ## Every running transition (in its delay or interpolating): Array of
 ## {index, property, from, to, value, start_time, delay, duration, easing,
 ## elapsed, progress}. Times in seconds on this clock: `start_time` is the

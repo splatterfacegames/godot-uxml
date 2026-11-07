@@ -16,6 +16,13 @@ UXML {
   color: rgb(196, 196, 196);
 }
 
+/* The selection of a view without focus: Unity's highlight background
+   inactive colour of the dark skin. unity-default-containers.uss comes after
+   this sheet, and its focused rule has a higher specificity than this rule. */
+.unity-collection-view .unity-collection-view__item--selected {
+  background-color: rgb(77, 77, 77);
+}
+
 .unity-base-field:focus:enabled > .unity-base-field__label {
   color: rgb(129, 180, 255);
 }

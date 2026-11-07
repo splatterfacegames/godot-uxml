@@ -2045,8 +2045,11 @@ class TwoPaneBehavior extends UxmlBehaviors.Behavior:
 		var a := 1 if _vertical() else 0
 		var mb := ev as InputEventMouseButton
 		if mb != null and mb.button_index == MOUSE_BUTTON_LEFT:
+			var ended: bool = _dragging and not mb.pressed and _dim != _start_dim
 			_dragging = mb.pressed
 			_start = mb.global_position[a]
+			if ended:
+				doc.split_changed.emit(element_name(), _dim)
 			_start_dim = _dim
 			set_state(UxmlContainerParts.get_part(el, "dragline"), "active", mb.pressed)
 			return
