@@ -23,6 +23,19 @@ const STRUCTURE := "res://addons/godot_uxml/themes/unity-structure.uss"
 
 static var _cache := {}  # path -> [source, items, warnings]
 
+## Unity's default font: Unity's runtime theme draws NotInter-Regular and
+## the editor Inter-Regular, both Inter 3.009 (same advances and vertical
+## metrics). godot-uxml ships Inter 3.009 (SIL OFL 1.1, licenses/Inter.LICENSE).
+const DEFAULT_FONT := "res://addons/godot_uxml/themes/fonts/Inter-Regular.woff2"
+static var _default_font: Font = null
+
+
+## The default theme's font (loaded once).
+static func default_font() -> Font:
+	if _default_font == null:
+		_default_font = load(DEFAULT_FONT)
+	return _default_font
+
 
 ## The look of the container controls in the default theme
 ## (unity-default-containers.uss).

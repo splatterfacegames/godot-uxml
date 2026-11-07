@@ -1005,7 +1005,9 @@ func _line_font(c: Control, font: Font, style: Dictionary, el: UxmlElement) -> F
 		var bottom := roundi(want_h - base.get_height(fs)) - top
 		hit = base if top == 0 and bottom == 0 else with_spacing(base, top, bottom)
 		per[fs] = hit
-	return hit if hit != base or font != null else font
+	if hit == base and font == null and not c.has_meta(&"uxml_base_font_forced"):
+		return font
+	return hit
 
 
 ## A cache key for a font by content: _font() makes a new FontVariation
@@ -1239,7 +1241,14 @@ func _capture_base_font(c: Control) -> void:
 	if c == null or c.has_meta("uxml_base_font_set"):
 		return
 	c.set_meta("uxml_base_font_set", true)
-	c.set_meta("uxml_base_font", c.get_theme_font(_font_name(c)))
+	var f := c.get_theme_font(_font_name(c))
+	if unity_line_metrics and f == ThemeDB.fallback_font:
+		# The default theme draws Unity's default font (Inter, which
+		# NotInter clones) where Godot would draw its own default font. A
+		# Godot theme or project font is kept.
+		f = UxmlTheme.default_font()
+		c.set_meta(&"uxml_base_font_forced", true)
+	c.set_meta("uxml_base_font", f)
 
 
 func _font(c: Control, style: Dictionary, el: UxmlElement) -> Font:
