@@ -426,6 +426,11 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 	if unity_line_metrics and (c is Label or c is Button or c is LineEdit or c is TextEdit
 			or c is RichTextLabel) and not _has_url_font(style):
 		font = _line_font(c, font, style, el)
+	if unity_line_metrics and (c is Label or c is TextEdit) and not c.has_theme_constant_override(&"line_spacing"):
+		# Unity's lines follow each other at the line height; Godot adds
+		# line_spacing (Label 3px, TextEdit 4px): a three-line TextField
+		# was 85px high, Unity's 73px (ctl-textfield-multiline).
+		c.add_theme_constant_override(&"line_spacing", 0)
 	var keep_fit := false
 	fit_seen.erase(c)
 	if fitted.has(c):
