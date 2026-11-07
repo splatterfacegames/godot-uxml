@@ -37,13 +37,14 @@ style value. godot-uxml matches Unity exactly in 176 of 177 cases. Over
 all cases, 4,329 of 4,329 elements, 302,242 of 302,243 style values,
 14,519 of 14,520 geometry values and 86 of 86 import diagnostics match.
 Unity also renders every case, and `bench/pixels.py` compares the pixels:
-99.1% of the box pixels match exactly, 99.3% within one pixel.
+99.8% of the box pixels match exactly, 99.9% within one pixel. The
+default theme draws Inter, the font that Unity's default font copies.
 See [Fidelity](#fidelity).
 
 **Optimizations verified.** The optimizations do not change behaviour.
 Equivalence checks compare each optimized path with the original
 implementation, value by value, and find 0 differences in 5,929 checks on
-the native core and 5,694 on the GDScript path. The test suite has 2,202
+the native core and 5,694 on the GDScript path. The test suite has 2,204
 checks.
 
 **Diagnostics, not silent failure.** Each unsupported feature, selector,
@@ -238,6 +239,15 @@ sampled at fixed times. The case that differs is a 1px text width that
 Unity does not lay out the same way in every run.
 [docs/parity.md](docs/parity.md) gives the cases, the differences found
 and the cause of the remaining one.
+
+`bench/pixels.py` compares what Unity and godot-uxml draw for every
+case. In 98 of 177 cases every box pixel matches Unity's render, and in
+13 more every box pixel matches within one pixel. Over all cases, 99.8%
+of the box pixels match exactly and 99.9% within one pixel. Text is
+compared by placement and amount (the rasterisers differ): the text
+masks overlap 0.88 on average (IoU), and godot-uxml draws 1.02 times
+Unity's text pixels. docs/parity.md, "Pixels", lists the remaining
+differences and their sizes.
 
 ## Tests and benchmarks
 

@@ -33,6 +33,17 @@ they come from godot-uxml's own measurements of Unity (see below).
 
 The Apache-2.0 license text is in `licenses/uxml-preview.LICENSE`.
 
+## Inter (SIL Open Font License 1.1)
+
+`themes/fonts/Inter-Regular.woff2` is Inter 3.009 (Version 3.009;
+git-2c0637eac), the web build of the upstream release
+[rsms/inter v3.9](https://github.com/rsms/inter/releases/tag/v3.9)
+(`Inter (web)/Inter-Regular.woff2` in `Inter-3.9.zip`), unmodified.
+Copyright (c) 2016-2019 The Inter Project Authors. The license text is
+in `licenses/Inter.LICENSE`. The default theme draws it because Unity's
+default fonts (NotInter-Regular, Inter-Regular SDF) have Inter 3.009's
+metrics; no Unity font file is included.
+
 ## Unity measurements (no Unity files)
 
 `themes/unity-default.uss`, the part trees in `runtime/controls/uxml_parts.gd`
