@@ -148,6 +148,17 @@ var _full_apply := true                # next restyle re-applies every control
 var _force_layout := true              # next restyle lays out even if paint-only
 var _rects: Dictionary = {}            # last layout results, reused when a
 var _insets: Dictionary = {}           # paint-only restyle skips the layout
+var _raw_rects: Dictionary = {}        # GDScript layout: unrounded rects and the
+var _cbs: Dictionary = {}              # containing-block widths (_do_local_layout)
+## Elements whose subtree can be laid out alone when their border box cannot
+## follow their content (the pooled rows of the collection views; see
+## _local_root). Root -> true.
+var _layout_roots: Dictionary = {}
+## Layout roots that the next restyle lays out (a row bound to another item).
+var _sub_req: Dictionary = {}
+## Layout roots whose last layout applied a measure change: the next restyle
+## lays them out again, as an unsettled document (see _reapply).
+var _local_unsettled: Dictionary = {}
 # Settling. Theme overrides reach a control's minimum size through a
 # deferred engine update, so the layout right after an apply (and anything
 # an apply derives from control sizes, like UxmlField.natural_size) can see
@@ -950,6 +961,11 @@ func _clear() -> void:
 	_force_layout = true
 	_rects = {}
 	_insets = {}
+	_raw_rects = {}
+	_cbs = {}
+	_layout_roots = {}
+	_sub_req = {}
+	_local_unsettled = {}
 	_reapply = []
 	_settle_ms = []
 	_settle_skip = false
@@ -1234,6 +1250,20 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	# paint-only changes (colors, radii, ...) never move a minimum size, so
 	# a stream of hovers right after a load must not relayout forever.
 	var measure_fresh := _full_apply
+	# Layout roots that this pass can lay out alone (_local_root): root ->
+	# true, or "fresh" when a measure of its subtree changed.
+	var local := {}
+	if not _sub_req.is_empty() or not _local_unsettled.is_empty():
+		for r in _sub_req:
+			if not _add_local(local, r, r, false):
+				need_layout = true
+				settle_layout_only = []
+		for r in _local_unsettled:
+			if not _add_local(local, r, r, false):
+				need_layout = true
+				settle_layout_only = []
+		_sub_req = {}
+		_local_unsettled = {}
 	var load_pass := _first_pass
 	_first_pass = false
 	if _full_apply:
@@ -1247,18 +1277,22 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			if _reload_pass and _transition_only(olds[k], _styles[el]):
 				continue
 			seen[el] = true
-			if not _paint_only(olds[k], _styles[el]):
-				need_layout = true
-				settle_layout_only = []
+			if not _paint_only(olds[k], _styles[el], _controls.get(el) is UxmlBox):
 				measure_fresh = true
+				if need_layout and settle_layout_only.is_empty():
+					continue
+				if not _add_local(local, el, null, true):
+					need_layout = true
+					settle_layout_only = []
 		# Effective disabled / display:none flips (ancestors included).
 		# Disabled flips relayout too: native disabled styling may change
 		# a control's minimum size.
 		for el in flipped:
 			seen[el] = true
-			need_layout = true
-			settle_layout_only = []
 			measure_fresh = true
+			if not (need_layout and settle_layout_only.is_empty()) and not _add_local(local, el, null, true):
+				need_layout = true
+				settle_layout_only = []
 		if not _inject.is_empty():
 			# Controls whose style changed under a new cascade (_swap_cascade).
 			for el in _inject:
@@ -1307,6 +1341,8 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		if not need_layout or not settle_layout_only.is_empty():
 			for tel in td:
 				if not _text_stable(tel, td[tel]):
+					if _add_local(local, tel, null, false):
+						continue
 					need_layout = true
 					settle_layout_only = []
 					text_placed = []
@@ -1330,6 +1366,22 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		if profile != null:
 			pt = _profile_add("layout", pt)
 	else:
+		if not local.is_empty():
+			# Changes inside layout roots of a fixed size only: those subtrees
+			# are laid out alone, and the controls inside them placed.
+			_do_local_layout(local, applied)
+			var outside: Array = []
+			for el in applied:
+				if not _under_local(el, local):
+					outside.append(el)
+			applied = outside
+			var rest: Array = []
+			for el in text_placed:
+				if not _under_local(el, local):
+					rest.append(el)
+			text_placed = rest
+			if profile != null:
+				pt = _profile_add("layout", pt)
 		# Re-applied themed controls got fresh styleboxes: hand them the
 		# resolved insets of the (unchanged) last layout.
 		# Text leaves of a stable size are placed again too (their fit and
@@ -1349,9 +1401,21 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			for el in placed:
 				cs.append(_controls[el])
 			_applier.update_elision(cs)
-		if not placed.is_empty():
+		if not placed.is_empty() and not _placeholder_fields.is_empty():
+			# Only a field whose own elements were placed can elide otherwise:
+			# the memo of elide_placeholder reads their style and size.
+			var pset := {}
+			for el in placed:
+				pset[el] = true
 			for b in _placeholder_fields:
-				b.elide_placeholder()
+				if pset.has(b.el) or pset.has(b.part("editor")) or pset.has(b.part("input")):
+					b.elide_placeholder()
+		if not placed.is_empty() or not local.is_empty():
+			# A placement without a layout puts a row back at its slot.
+			for lel in _lists:
+				var lb = _behaviors.get(lel)
+				if lb != null and lb.has_method("place_rows"):
+					lb.place_rows()
 	# Runtime warnings accumulate during apply/layout — surface last so they
 	# are all included.
 	diagnostics = _doc.warnings + _cascade.collect_warnings() + _rt_warnings
@@ -1707,7 +1771,10 @@ static func _scroll_overflow(prop: String, oe, ne) -> bool:
 
 
 ## True when two computed styles differ only in PAINT_ONLY properties.
-static func _paint_only(old, new: Dictionary) -> bool:
+## `box`: the element's control is a UxmlBox, which draws its background
+## image and measures nothing from it (a themed control turns the image into
+## a stylebox, whose margins can change its minimum size).
+static func _paint_only(old, new: Dictionary, box: bool = false) -> bool:
 	if old == null:
 		return false
 	var o: Dictionary = old
@@ -1716,16 +1783,29 @@ static func _paint_only(old, new: Dictionary) -> bool:
 		var oe = o.get(prop)
 		if oe != null and oe["value"] == ne["value"]:
 			continue
-		if (PAINT_ONLY.has(prop) or prop.begins_with("--")) and not _scroll_overflow(prop, oe, ne):
+		if (PAINT_ONLY.has(prop) or prop.begins_with("--") or (box and BOX_PAINT_ONLY.has(prop))) \
+				and not _scroll_overflow(prop, oe, ne):
 			continue
 		return false
 	for prop in o:
 		if new.has(prop):
 			continue
-		if (PAINT_ONLY.has(prop) or prop.begins_with("--")) and not _scroll_overflow(prop, o[prop], null):
+		if (PAINT_ONLY.has(prop) or prop.begins_with("--") or (box and BOX_PAINT_ONLY.has(prop))) \
+				and not _scroll_overflow(prop, o[prop], null):
 			continue
 		return false
 	return true
+
+
+## Paint-only on a UxmlBox: the background image and its slicing. Unity
+## does not measure a background image either (an Image measures
+## --unity-image, which the applier reads into natural_size; the settle
+## check compares natural sizes).
+const BOX_PAINT_ONLY := {
+	"background-image": true,
+	"-unity-slice-left": true, "-unity-slice-right": true,
+	"-unity-slice-top": true, "-unity-slice-bottom": true,
+}
 
 
 func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vector2:
@@ -1870,10 +1950,12 @@ func _compute_layout(host: Vector2) -> Dictionary:
 		var r: Array = _cascade._native.call(
 			"layout", host, 0.0, _layout_warned, _rt_warnings)
 		return {"rects": r[0], "content_sizes": r[1], "insets": r[2]}
-	return UxmlFlexLayout.compute(
-		_doc.root, _styles, host,
-		_measure_leaf, _rt_warnings,
-		{"source": _doc.source, "file": _doc.path,
+	return UxmlFlexLayout.compute(_doc.root, _styles, host, _measure_leaf, _rt_warnings, _layout_options())
+
+
+## The options of a GDScript layout pass (UxmlFlexLayout.compute).
+func _layout_options() -> Dictionary:
+	return {"source": _doc.source, "file": _doc.path,
 		 "warned": _layout_warned,
 		 "volatile": _volatile_measures(),
 		 "volatile_width": _volatile_width,
@@ -1885,7 +1967,6 @@ func _compute_layout(host: Vector2) -> Dictionary:
 		 "hint_free": true,
 		 "text_controls": _text_controls(),
 		 "pixel_grid": pixel_grid}
-	)
 
 
 ## Elements with children whose control draws text (Label, RichTextLabel,
@@ -1921,6 +2002,9 @@ func _do_layout() -> void:
 	if _doc == null:
 		return
 	layout_count += 1
+	# A layout of the document covers every layout root.
+	_sub_req = {}
+	_local_unsettled = {}
 	if _native_layout():
 		# Native layout + placement; results stay native.
 		_cascade._native.call("set_pixel_grid", pixel_grid)
@@ -1947,6 +2031,8 @@ func _do_layout() -> void:
 	var res := _compute_layout(size)
 	_rects = res["rects"]
 	_insets = res["insets"]
+	_raw_rects = res["raw"]
+	_cbs = res["cbs"]
 	for el in _controls:
 		if el == _doc.root:
 			continue
@@ -1962,6 +2048,151 @@ func _do_layout() -> void:
 		_settle_snapshot()
 	else:
 		_settle_skip = false
+
+
+## The subtree layouts since the load (_do_local_layout): a change inside a
+## layout root of a fixed size (a row of a collection view) lays out only that
+## subtree. For tools and tests, beside layout_count.
+var local_layout_count := 0
+
+
+## Request a layout of the subtrees of `roots` (registered in _layout_roots)
+## in the next restyle: alone when each root's border box cannot follow its
+## content, else a layout of the document (the collection rows after a
+## rebind).
+func _layout_rows(roots: Array) -> void:
+	for r in roots:
+		_sub_req[r] = true
+	_queue_restyle()
+
+
+## Puts the layout root of `x` in `local` (root -> a measure of the subtree
+## changed): `root` itself, or else the nearest layout root strictly above
+## `x`. False when there is none or its size can follow its content: the
+## change then needs a layout of the document.
+func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
+	var r = root
+	if r == null:
+		if _layout_roots.is_empty():
+			return false
+		r = _parents.get(x)
+		while r != null and not _layout_roots.has(r):
+			r = _parents.get(r)
+		if r == null:
+			return false
+	if not local.has(r):
+		if not _fixed_root(r):
+			return false
+		local[r] = fresh
+	elif fresh:
+		local[r] = true
+	return true
+
+
+## A layout root that the last layout laid out, shown, whose border box
+## cannot follow its content on either axis (the rule of _text_stable): a
+## change inside it cannot move anything outside it. Its own style does not
+## change in the pass (a change of the root itself is not `inside`).
+func _fixed_root(r: UxmlElement) -> bool:
+	var ci = _cascade.index.get(r)
+	if ci == null or _gone.size() <= ci or _gone[ci] == 1 or not _controls.has(r):
+		return false
+	if _native_layout():
+		if (_cascade._native.call("insets_of", ci) as Array).is_empty():
+			return false
+	elif not _raw_rects.has(r):
+		return false
+	var st: Dictionary = _styles.get(r, {})
+	return _fixed_axis(r, st, true) and _fixed_axis(r, st, false)
+
+
+## True when `el` is strictly inside one of the roots of `local`.
+func _under_local(el: UxmlElement, local: Dictionary) -> bool:
+	var p = _parents.get(el)
+	while p != null:
+		if local.has(p):
+			return true
+		p = _parents.get(p)
+	return false
+
+
+## Lay out the subtrees of the roots of `local` alone (see _fixed_root), from
+## the rects and containing-block widths of the last layout, and place the
+## controls inside them (the roots keep their rect and placement). `applied`:
+## the controls applied in this pass (their inset hooks run). The behaviors
+## and hooks that a layout runs follow. A subtree whose rects changed or whose
+## measures changed is laid out again by the next restyle, as an unsettled
+## document is.
+func _do_local_layout(local: Dictionary, applied: Array) -> void:
+	if _doc == null:
+		return
+	local_layout_count += 1
+	var roots: Array = local.keys()
+	var changed: Array = []
+	var cidx: Dictionary = _cascade.index
+	var placed: Array = []
+	if _native_layout():
+		_cascade._native.call("set_pixel_grid", pixel_grid)
+		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
+		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
+		var idx := PackedInt32Array()
+		for r in roots:
+			idx.append(cidx[r])
+		var force := PackedInt32Array()
+		for el in applied:
+			force.append(cidx[el])
+		changed = _cascade._native.call("layout_subtrees", idx, _layout_warned, _rt_warnings, _applier, force)
+		for r in roots:
+			for x in (r as UxmlElement).walk():
+				if x != r and _controls.has(x):
+					placed.append(_controls[x])
+	else:
+		var opts := _layout_options()
+		for r in roots:
+			var origin := Vector2.ZERO
+			var p = _parents.get(r)
+			while p != null:
+				var pr = _raw_rects.get(p)
+				if pr != null:
+					origin += (pr as Rect2).position
+				p = _parents.get(p)
+			var res := UxmlFlexLayout.compute_subtree(r, _raw_rects[r], _cbs[r], origin,
+				_styles, _measure_leaf, _rt_warnings, opts)
+			var rects: Dictionary = res["rects"]
+			var raw: Dictionary = res["raw"]
+			var ins: Dictionary = res["insets"]
+			var cbs: Dictionary = res["cbs"]
+			var moved := false
+			for x in (r as UxmlElement).walk():
+				var nr = rects.get(x)
+				if nr != _rects.get(x):
+					moved = true
+				if nr == null:
+					_rects.erase(x)
+					_raw_rects.erase(x)
+					_insets.erase(x)
+					_cbs.erase(x)
+				else:
+					_rects[x] = nr
+					_raw_rects[x] = raw[x]
+					_insets[x] = ins[x]
+					_cbs[x] = cbs[x]
+			changed.append(moved)
+			for x in (r as UxmlElement).walk():
+				if x != r and _controls.has(x):
+					_place_control(x)
+					placed.append(_controls[x])
+	for k in roots.size():
+		if bool(changed[k]) or bool(local[roots[k]]):
+			_local_unsettled[roots[k]] = true
+	for b in _post_layout:
+		if _under_local(b.el, local):
+			b.after_layout()
+	if _applier != null and not _applier.elide.is_empty() and not placed.is_empty():
+		_applier.update_elision(placed)
+	for b in _placeholder_fields:
+		b.elide_placeholder()
+	_run_layout_hooks()
 
 
 ## Controls that place parts from the layout (UxmlInputBehaviors) update
@@ -3003,6 +3234,43 @@ func set_field_value(element_name: String, value: Variant, notify: bool = false)
 
 
 var _quiet_field: UxmlElement = null
+var _quiet_attr := "value"
+
+
+## Set the placeholder of a text field (TextField, the numeric fields, a
+## search field): the `placeholder-text` attribute, as a binding writes it.
+## No restyle runs: the cascade does not read the attribute. The placeholder
+## class of the input changes only when the placeholder starts or stops
+## showing (a restyle of that part), the elision of `text-overflow: ellipsis`
+## follows the new text (R18), and a layout runs only when the minimum size of
+## the editor changes (an empty field shapes its placeholder). Returns false
+## for an element without a placeholder.
+func set_field_placeholder(element_name: String, text: String) -> bool:
+	var el: UxmlElement = _by_name.get(element_name)
+	var b = null if el == null else _behaviors.get(el)
+	if b == null or not b.has_method("native") or not b.has_method("bind_write_common"):
+		return false
+	var ed = b.native()
+	var before: Vector2 = ed.get_combined_minimum_size() if ed is Control else Vector2.ZERO
+	_quiet_field = el
+	_quiet_attr = "placeholder-text"
+	var code: int = b.bind_write("placeholder-text", text)
+	_quiet_field = null
+	_quiet_attr = "value"
+	if code < 0 or code == UxmlBehaviors.Behavior.UNHANDLED:
+		return false
+	if ed is Control and (ed as Control).get_combined_minimum_size() != before:
+		relayout()
+	return true
+
+
+## The placeholder of a text field ("" for none or another element).
+func get_field_placeholder(element_name: String) -> String:
+	var el: UxmlElement = _by_name.get(element_name)
+	var b = null if el == null else _behaviors.get(el)
+	if b == null or not b.has_method("bind_write_common"):
+		return ""
+	return UxmlParts._attr(el, "placeholder-text")
 
 
 ## True for an element of the current load.
@@ -3043,10 +3311,11 @@ func set_class(element_name: String, class_string: String) -> void:
 
 
 func _on_model_changed(el: UxmlElement) -> void:
-	if el == _quiet_field and el.changed_attribute == "value":
-		# set_field_value: `value` is not a cascade input. A class or a state
-		# that the behavior changes queues its own restyle.
-		_behaviors[el].on_model_changed()
+	if el == _quiet_field and el.changed_attribute == _quiet_attr:
+		# set_field_value, set_field_placeholder: `value` and
+		# `placeholder-text` are not cascade inputs. A class or a state that
+		# the behavior changes queues its own restyle.
+		_behaviors[el].on_quiet_change(_quiet_attr)
 		return
 	_attr_dirty[el] = true
 	_queue_restyle()

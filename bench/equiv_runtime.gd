@@ -18,6 +18,10 @@ extends SceneTree
 ## UxmlBox/UxmlField chrome, image offsets, ScrollView offsets — and the
 ## diagnostics arrays are compared.
 ##
+## Documents with collection views get item sources, and a separate random
+## stream scrolls them, selects and expands items (R29: rows lay out alone),
+## and writes field values and placeholders (R17, R28).
+##
 ## _run_reload checks reload_stylesheet with random stylesheet edits: a partial
 ## reload equals a full rebuild, on both paths, and native equals GDScript.
 ##
@@ -52,6 +56,7 @@ func _initialize() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 777
 	_frng.seed = 4242
+	_crng.seed = 2929
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--seed="):
 			rng.seed = int(arg.substr(7))
@@ -64,6 +69,7 @@ func _initialize() -> void:
 		["user://godot_uxml_bench", "Assets/UI/big.uxml", 12],
 		["res://tests/fixtures/controls", "Assets/UI/controls.uxml", 120],
 		["res://tests/fixtures/editor", "Assets/UI/editor.uxml", 120],
+		["res://tests/fixtures/runtime", "Assets/UI/collections.uxml", 120],
 	]:
 		var only := ""
 		for arg in OS.get_cmdline_user_args():
@@ -105,6 +111,19 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 		d.load_document(path, project)
 		UssCascade.use_native = was
 	await process_frame
+	var lists: Array = []
+	for el in a._doc.root.walk():
+		if el.part_of == null and UxmlContainerParts.is_collection(el.local) and el.has_attribute("name"):
+			lists.append([String(el.get_attribute("name")), el.local])
+	if not lists.is_empty():
+		for d in all:
+			_sources(d, lists)
+		for d in all:
+			d.refresh()
+			d._restyle_now()
+		await process_frame
+		for d in all:
+			d._restyle_now()
 	if not _same(a, b) or not _same(a, c):
 		for d in all:
 			d.refresh()
@@ -126,6 +145,8 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 	for step in steps:
 		var nm: String = names[rng.randi() % names.size()]
 		var op := rng.randi() % 13
+		if not lists.is_empty() and step % 2 == 0:
+			op = -1  # a step of the collection stream only
 		var args: Array = []
 		match op:
 			0, 1, 2:
@@ -213,6 +234,8 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 					d.set_element_state(nm, "hover", true)
 					d.set_element_state(nm2, "focus", true)
 					d.set_element_state(nm, "hover", false)
+		if not lists.is_empty():
+			args.append(_collection_op(all, lists, names))
 		if step % 5 == 4:
 			# Forced pseudo-states (UxmlDocument.set_forced_states), from
 			# their own random stream so the ops above keep their sequence.
@@ -232,6 +255,8 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 		await process_frame
 		_cmp("%s step %d op %d %s" % [path, step, op, args], a, b)
 		_cmp("%s step %d op %d %s (GDScript)" % [path, step, op, args], b, c)
+	if b.local_layout_count > 0:
+		print("NOTE %s: %d row layouts, %d document layouts" % [path, b.local_layout_count, b.layout_count])
 	for d in all:
 		root.remove_child(d)
 		d.free()
@@ -266,6 +291,72 @@ var _reload_modes := {}
 
 
 ## The sheet `text` after one random edit.
+var _crng := RandomNumberGenerator.new()
+
+
+static func _tree(n: int, depth: int, tag: String) -> Array:
+	var out: Array = []
+	for i in n:
+		var kids: Array = _tree(3, depth - 1, "%s.%d" % [tag, i]) if depth > 0 and i % 3 == 0 else []
+		out.append({"id": "%s.%d" % [tag, i], "data": "Item %d %s" % [i, "wide ".repeat(i % 4)], "children": kids})
+	return out
+
+
+func _sources(d: UxmlDocument, lists: Array) -> void:
+	var items: Array = []
+	for i in 120:
+		items.append("Row %d %s" % [i, "long ".repeat(i % 5)])
+	for l in lists:
+		if String(l[1]).contains("Tree"):
+			d.set_tree_source(l[0], _tree(30, 2, "r"))
+		else:
+			d.set_items_source(l[0], items)
+
+
+## One step of the collection and field stream (its own random sequence).
+func _collection_op(all: Array, lists: Array, names: Array) -> Array:
+	var l: Array = lists[_crng.randi() % lists.size()]
+	var nm: String = names[_crng.randi() % names.size()]
+	var op := _crng.randi() % 7
+	var out: Array = ["collection", op, l[0]]
+	match op:
+		0, 1:
+			var y := float(_crng.randi() % 1800)
+			out.append(y)
+			for d in all:
+				d.set_scroll_offset(l[0], Vector2(0, y))
+		2:
+			var i := _crng.randi() % 100
+			out.append(i)
+			for d in all:
+				d.scroll_to_item(l[0], i)
+		3:
+			var i2 := _crng.randi() % 60
+			out.append(i2)
+			for d in all:
+				d.set_selection(l[0], [i2])
+		4:
+			if String(l[1]).contains("Tree"):
+				var id := "r.%d" % (3 * (_crng.randi() % 10))
+				var on := _crng.randi() % 2 == 0
+				out.append([id, on])
+				for d in all:
+					d.set_tree_item_expanded(l[0], id, on)
+		5:
+			var v = "v%d" % (_crng.randi() % 1000)
+			if _crng.randi() % 2 == 0:
+				v = _crng.randi() % 2 == 0
+			out.append([nm, v])
+			for d in all:
+				d.set_field_value(nm, v)
+		6:
+			var t := "" if _crng.randi() % 4 == 0 else "computed %s from .rule" % "x".repeat(_crng.randi() % 30)
+			out.append([nm, t])
+			for d in all:
+				d.set_field_placeholder(nm, t)
+	return out
+
+
 func _edit_sheet(text: String, origin: String, rng: RandomNumberGenerator) -> String:
 	var items: Array = UssParser.new().parse(text, origin)["items"]
 	var rules: Array = []

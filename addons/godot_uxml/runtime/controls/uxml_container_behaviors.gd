@@ -581,7 +581,7 @@ class ScrollerBehavior extends UxmlBehaviors.Behavior:
 class CollectionBehavior extends UxmlBehaviors.Behavior:
 	var _rows: Array = []          # UxmlListRow per pool slot
 	var _row_ctl: Array = []       # row Control per pool slot
-	var _shift := PackedInt32Array()  # rows each slot's Control is moved by
+	var _base := PackedFloat64Array()  # y of each slot's Control at the last layout
 	var _sv: UxmlElement
 	var _content: UxmlElement
 	var _info: Dictionary          # doc._lists[el]: {rows, h, count, bind, first}
@@ -628,7 +628,9 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 			# Rows are parts: the factory already lets them pass the mouse.
 			var c := control_of(row)
 			_row_ctl.append(c)
-			_shift.append(0)
+			_base.append(0.0)
+			# A row of a fixed height lays out alone (UxmlDocument._local_root).
+			doc._layout_roots[row] = true
 			if c != null:
 				c.gui_input.connect(_on_row_input.bind(r))
 			if not tree:
@@ -864,7 +866,7 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 			first = clampi(int(floor(off.y / h)), 0, maxi(0, n - pool))
 		_info["first"] = first
 		var bind: Callable = _info["bind"]
-		var rebound := false
+		var rebound: Array = []
 		if _dynamic:
 			# Rows lay out in item order below a padding as tall as the items
 			# above the first row (Unity's contentPadding); the content is
@@ -878,7 +880,7 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 				if row.index != -1:
 					row.index = -1
 					UxmlContainerParts.bind_row(el, row.element, -1, false)
-					rebound = true
+					rebound.append(row.element)
 				continue
 			var idx := (first + k) if _dynamic else (first + posmod(k - first, pool))
 			if idx >= n:
@@ -892,9 +894,11 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 					_flat[idx] if idx < _flat.size() else {})
 				_set_row_states(row)
 				_bind_row(row, idx, bind)
-				rebound = true
-		if rebound:
-			doc.relayout()
+				rebound.append(row.element)
+		if not rebound.is_empty():
+			# Unity binds a row without a layout of the panel: a row of a fixed
+			# height lays out alone, else the document lays out.
+			doc._layout_rows(rebound)
 		_place()
 
 	func _bind_row(row: UxmlListRow, idx: int, bind: Callable) -> void:
@@ -959,13 +963,21 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 				continue
 			var idx: int = (_rows[k] as UxmlListRow).index
 			var want := 0 if idx < 0 else idx - k
-			if want != _shift[k]:
-				c.position.y += (want - _shift[k]) * h
-				_shift[k] = want
+			var y: float = _base[k] + want * h
+			if c.position.y != y:
+				c.position.y = y
+
+	## A placement without a layout (a paint-only restyle, a layout of rows
+	## alone) put the placed rows back at their slots.
+	func place_rows() -> void:
+		_place()
 
 	func after_layout() -> void:
 		# A layout put every row back at its slot.
-		_shift.fill(0)
+		for k in _rows.size():
+			var c: Control = _row_ctl[k]
+			if c != null:
+				_base[k] = c.position.y
 		_place()
 		if _dynamic and (_measure_rows() or _follow_target()):
 			return

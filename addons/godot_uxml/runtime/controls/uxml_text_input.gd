@@ -89,11 +89,19 @@ static func configure(c: Control, field: UxmlElement) -> void:
 		var ml := int(UxmlInputParts.num(field, "max-length", -1.0))
 		if UxmlNumeric.KIND.has(field.local) and not field.has_attribute("max-length"):
 			ml = 1000  # Unity's numeric fields default to 1000 characters
-		le.max_length = maxi(0, ml)
+		# Only a new value is written: LineEdit.set_max_length sets the text
+		# again, which puts the caret at 0 (request R27: each value change of
+		# a field that is not is-delayed runs this).
+		ml = maxi(0, ml)
+		if le.max_length != ml:
+			le.max_length = ml
 		var password := UxmlParts._bool(field, "password", false)
-		le.secret = password
+		if le.secret != password:
+			le.secret = password
 		var mask := UxmlParts._attr(field, "mask-character", UxmlParts._attr(field, "mask-char", "*"))
-		le.secret_character = "*" if mask.is_empty() else mask.substr(0, 1)
+		mask = "*" if mask.is_empty() else mask.substr(0, 1)
+		if le.secret_character != mask:
+			le.secret_character = mask
 		le.select_all_on_focus = UxmlParts._bool(field, "select-all-on-focus", true)
 		le.virtual_keyboard_enabled = not UxmlParts._bool(field, "hide-mobile-input", false)
 		le.virtual_keyboard_type = KEYBOARD.get(UxmlParts._attr(field, "keyboard-type", "Default"), LineEdit.KEYBOARD_TYPE_DEFAULT)

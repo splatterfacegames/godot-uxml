@@ -118,6 +118,17 @@ var _warn: Array = []                  # per element warnings
 var _arefs: Array = []                 # per element attribute refs (see _attr_refs)
 var _sig_en: Array = []                # per element `enabled` attribute value (or null)
 var _last_changed := PackedInt32Array()
+# The state inputs of the last update (index -> bits, index -> override,
+# the global bits, the key bits): an update that changes only some of them
+# visits the subtrees of those elements (see update).
+var _prev_es := {}
+var _prev_dis := {}
+var _prev_global := 0
+var _prev_kb := PackedInt32Array()
+# The subtrees that the updates since the last effective_flags() visited
+# ([lo, hi) pairs), or every element.
+var _flag_all := true
+var _flag_ranges := PackedInt32Array()
 var _own_none := PackedByteArray()
 var _eff_dis := PackedByteArray()
 var _eff_gone := PackedByteArray()
@@ -1074,6 +1085,43 @@ func update(options: Dictionary = {}, force: bool = false, dirty = null, only_fo
 					continue  # inside the previous subtree
 				ranges.append(fi)
 				ranges.append(_end[fi])
+	if not full and not scan_all and not use_ranges and global == _prev_global and key_bits == _prev_kb:
+		# Only the inputs of some elements changed (attributes, states,
+		# disabled overrides, computed overrides): nothing outside their
+		# subtrees can change (USS has no sibling combinators), so only those
+		# subtrees are visited.
+		var touch := PackedInt32Array(dirty)
+		for i2 in es_bits:
+			if int(_prev_es.get(i2, 0)) != int(es_bits[i2]):
+				touch.append(i2)
+		for i2 in _prev_es:
+			if not es_bits.has(i2):
+				touch.append(i2)
+		for i2 in dis_ov:
+			if int(_prev_dis.get(i2, 0)) != int(dis_ov[i2]):
+				touch.append(i2)
+		for i2 in _prev_dis:
+			if not dis_ov.has(i2):
+				touch.append(i2)
+		if has_forced:
+			for fi in range(n):
+				if forced[fi] == 1:
+					touch.append(fi)
+		touch.sort()
+		use_ranges = true
+		for fi in touch:
+			if fi < 0 or fi >= n or (not ranges.is_empty() and fi < ranges[ranges.size() - 1]):
+				continue
+			ranges.append(fi)
+			ranges.append(_end[fi])
+	_prev_es = es_bits
+	_prev_dis = dis_ov
+	_prev_global = global
+	_prev_kb = key_bits
+	if use_ranges:
+		_flag_ranges.append_array(ranges)
+	else:
+		_flag_all = true
 	var nr := ranges.size() / 2
 	var ri := 0
 	var changed := PackedInt32Array()
@@ -1240,14 +1288,34 @@ func effective_flags() -> Array:
 		_own_none[ci] = 1 if disp != null and String(disp["value"]) == "none" else 0
 	_last_changed = PackedInt32Array()
 	var flipped := PackedInt32Array()
-	for i in n:
-		var d := 1 if (_sig_bits[i] & BIT_DISABLED) != 0 else 0
-		var p := _parent[i]
-		var g := 1 if _own_none[i] == 1 or (p >= 0 and _eff_gone[p] == 1) else 0
-		if d != _eff_dis[i] or g != _eff_gone[i]:
-			_eff_dis[i] = d
-			_eff_gone[i] = g
-			flipped.append(i)
+	# Only the visited subtrees can flip: the bits and the display of the
+	# other elements and of their ancestors did not change.
+	var rs := PackedInt32Array([0, n])
+	if not _flag_all:
+		# Ranges of several updates: in preorder (subtrees nest or are apart).
+		var pairs: Array = []
+		for r in _flag_ranges.size() / 2:
+			pairs.append(Vector2i(_flag_ranges[r * 2], _flag_ranges[r * 2 + 1]))
+		pairs.sort()
+		rs = PackedInt32Array()
+		for v in pairs:
+			rs.append(v.x)
+			rs.append(v.y)
+	_flag_all = false
+	_flag_ranges = PackedInt32Array()
+	var done := -1
+	for r in rs.size() / 2:
+		var lo: int = maxi(rs[r * 2], done)
+		var hi: int = rs[r * 2 + 1]
+		for i in range(lo, hi):
+			var d := 1 if (_sig_bits[i] & BIT_DISABLED) != 0 else 0
+			var p := _parent[i]
+			var g := 1 if _own_none[i] == 1 or (p >= 0 and _eff_gone[p] == 1) else 0
+			if d != _eff_dis[i] or g != _eff_gone[i]:
+				_eff_dis[i] = d
+				_eff_gone[i] = g
+				flipped.append(i)
+		done = maxi(done, hi)
 	return [flipped, _eff_dis, _eff_gone]
 
 

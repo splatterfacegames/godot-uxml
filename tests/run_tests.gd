@@ -25,8 +25,10 @@ func _initialize() -> void:
 	var si := ua.find("--suite")
 	if si >= 0 and si + 1 < ua.size():
 		only = ua[si + 1]
-	if not only.is_empty():
-		await process_frame  # the root enters the tree (timers, input)
+	# The root enters the tree (timers, input, focus) before the first test:
+	# a test that runs first (`--suite`, `--only`) must not depend on an
+	# earlier test that awaited a frame.
+	await process_frame
 	var suites: Array = [] if not only.is_empty() and only != "core" else [[self, "core"]]
 	for entry in [
 		["res://tests/test_layout.gd", "layout"],

@@ -1281,6 +1281,16 @@ class TextFieldBehavior extends TextBehavior:
 			if not _focused:
 				set_text_quiet(t)
 
+	## set_field_value wrote the text, the value and the placeholder state;
+	## set_field_placeholder changes only the placeholder.
+	func on_quiet_change(n: String) -> void:
+		if n == "value":
+			return
+		if n == "placeholder-text":
+			_placeholder()
+			return
+		on_model_changed()
+
 	func bind_write(prop: String, v: Variant) -> int:
 		match prop:
 			"value", "text":

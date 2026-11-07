@@ -1,0 +1,12 @@
+.side { width: 260px; flex-direction: column; }
+.tree { height: 120px; }
+.items { height: 96px; }
+.row { flex-direction: row; flex-grow: 1; }
+.title { flex-grow: 1; }
+.value { width: 60px; }
+.unity-collection-view__item--alternative-background { background-color: #222; }
+.unity-collection-view__item--selected { padding-left: 2px; }
+.insp { width: 240px; height: 140px; }
+.insp .unity-text-field { text-overflow: ellipsis; }
+.clip:checked { padding-left: 3px; }
+.unity-toggle:checked > .unity-toggle__input { background-color: #335; }

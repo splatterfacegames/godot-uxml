@@ -294,6 +294,11 @@ pub struct Cascade {
     lay_vals: Vec<Vec<Option<GString>>>,
     lay_ver: Vec<u64>,
     computed_once: bool,
+    /// The state inputs of the last update (see update).
+    prev_es: HashMap<usize, i32>,
+    prev_dis: HashMap<usize, u8>,
+    prev_global: i32,
+    prev_kb: Vec<i32>,
     next_cid: i64,
     // computed overrides (USS transitions): index -> {prop: entry}; the
     // pre-override result per overridden index; indices to recompute
@@ -615,6 +620,10 @@ impl Cascade {
             lay_vals: vec![],
             lay_ver: vec![],
             computed_once: false,
+            prev_es: HashMap::new(),
+            prev_dis: HashMap::new(),
+            prev_global: 0,
+            prev_kb: vec![],
             next_cid: 1,
             ov: HashMap::new(),
             tgt: HashMap::new(),
@@ -1060,11 +1069,45 @@ impl Cascade {
         }
         let has_forced = !self.ov_force.is_empty();
         // Only overrides changed (UssCascade.update `only_forced`): visit
-        // just the subtrees of the elements whose overrides changed.
-        let use_order = only_forced && self.computed_once && !force;
+        // just the subtrees of the elements whose overrides changed. Only the
+        // inputs of some elements changed (attributes, states, disabled
+        // overrides): visit their subtrees (UssCascade.update).
+        let mut use_order = only_forced && self.computed_once && !force;
         let mut order: Vec<usize> = vec![];
+        let mut touch: Vec<usize> = vec![];
+        if !use_order && !full && !scan_all && global == self.prev_global && kb == self.prev_kb.as_slice() {
+            use_order = true;
+            for &d in dirty.as_slice() {
+                if d >= 0 {
+                    touch.push(d as usize);
+                }
+            }
+            for (&i, &b) in &es_bits {
+                if self.prev_es.get(&i).copied().unwrap_or(0) != b {
+                    touch.push(i);
+                }
+            }
+            for &i in self.prev_es.keys() {
+                if !es_bits.contains_key(&i) {
+                    touch.push(i);
+                }
+            }
+            for (&i, &b) in &dis_ov {
+                if self.prev_dis.get(&i).copied().unwrap_or(0) != b {
+                    touch.push(i);
+                }
+            }
+            for &i in self.prev_dis.keys() {
+                if !dis_ov.contains_key(&i) {
+                    touch.push(i);
+                }
+            }
+        }
+        self.prev_global = global;
+        self.prev_kb = kb.to_vec();
         if use_order {
             let mut fs = self.ov_force.clone();
+            fs.extend(touch);
             fs.sort_unstable();
             fs.dedup();
             let mut hi = 0usize;
@@ -1225,6 +1268,8 @@ impl Cascade {
             }
         }
         self.computed_once = true;
+        self.prev_es = es_bits;
+        self.prev_dis = dis_ov;
         changed
     }
 
@@ -1750,6 +1795,16 @@ impl Cascade {
         }
     }
 
+    /// One past the last preorder index of the subtree of element i.
+    pub fn subtree_end(&self, i: usize) -> usize {
+        self.end[i] as usize
+    }
+
+    /// The parent of element i (-1 for the root).
+    pub fn parent_of(&self, i: usize) -> i32 {
+        self.parent[i]
+    }
+
     /// Direct children (preorder indices) of element i.
     pub fn children(&self, i: usize) -> Vec<usize> {
         let mut out = vec![];
@@ -2005,6 +2060,99 @@ impl UxmlNativeCascade {
             self.placement.place(io, i, &applier, forced[i]);
         }
         args(&[changed.to_variant()])
+    }
+
+    /// Lays out the subtrees of `roots` alone, from their rects and
+    /// containing-block widths of the last layout_place (each root's border
+    /// box cannot follow its content: UxmlDocument._local_root), and places
+    /// the controls inside them; the roots keep their placement. `force`:
+    /// indices re-applied since the last placement. Returns one bool per
+    /// root: a rect of its subtree changed.
+    #[func]
+    fn layout_subtrees(
+        &mut self,
+        roots: PackedInt32Array,
+        warned: VarDictionary,
+        warnings: VarArray,
+        applier: Variant,
+        force: PackedInt32Array,
+    ) -> VarArray {
+        let (Some(c), Some(io)) = (self.inner.as_ref(), self.layout_in.as_ref()) else {
+            return VarArray::new();
+        };
+        let Some(prev) = self.placement.last.as_ref() else {
+            return VarArray::new();
+        };
+        self.recs.refresh(c);
+        let n = c.len();
+        let mut forced = vec![false; n];
+        for &k in force.as_slice() {
+            if k >= 0 && (k as usize) < n {
+                forced[k as usize] = true;
+            }
+        }
+        {
+            let mut mc = io.maxc.borrow_mut();
+            let mut uf = io.unfit.borrow_mut();
+            let mut mg = io.margins.borrow_mut();
+            let mut ct = io.cliptext.borrow_mut();
+            for k in 0..n {
+                if forced[k] {
+                    mc[k] = None;
+                    uf[k] = None;
+                    mg[k] = None;
+                    ct[k] = None;
+                }
+            }
+        }
+        let mut subs: Vec<(usize, Rect2, f64, f64, f64)> = vec![];
+        for &r in roots.as_slice() {
+            if r <= 0 || (r as usize) >= n {
+                continue;
+            }
+            let r = r as usize;
+            let Some(rect) = prev.raw.get(r).copied().flatten() else { continue };
+            let (mut al, mut at) = (0.0f64, 0.0f64);
+            let mut p = c.parent_of(r);
+            while p >= 0 {
+                if let Some(pr) = prev.raw[p as usize] {
+                    al += pr.position.x as f64;
+                    at += pr.position.y as f64;
+                }
+                p = c.parent_of(p as usize);
+            }
+            subs.push((r, rect, prev.cbs.get(r).copied().unwrap_or(0.0), al, at));
+        }
+        io.maxc_on.set(true);
+        let out = crate::layout::Pass::new(c, io, &self.recs.recs, 0.0, warned, warnings).run_subtrees(&subs);
+        io.maxc_on.set(false);
+        let mut result = VarArray::new();
+        let last = self.placement.last.as_mut().unwrap();
+        let mut placed: Vec<usize> = vec![];
+        for &(r, _, _, _, _) in &subs {
+            let mut changed = false;
+            for j in r..c.subtree_end(r) {
+                if last.rects[j] != out.rects[j] {
+                    changed = true;
+                }
+                last.rects[j] = out.rects[j];
+                last.raw[j] = out.raw[j];
+                last.content[j] = out.content[j];
+                last.insets[j] = out.insets[j];
+                if out.rects[j].is_some() {
+                    last.cbs[j] = out.cbs[j];
+                }
+                if j != r {
+                    placed.push(j);
+                }
+            }
+            result.push(&changed.to_variant());
+        }
+        let applier = applier.try_to::<Gd<Object>>().ok();
+        for j in placed {
+            self.placement.place(io, j, &applier, forced[j]);
+        }
+        result
     }
 
     /// Re-place (with inset hooks) the given elements from the last layout —
