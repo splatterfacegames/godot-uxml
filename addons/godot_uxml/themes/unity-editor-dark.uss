@@ -227,7 +227,7 @@ UXML {
 }
 
 .unity-help-box__icon--info {
-  background-image: url("info.svg");
+  background-image: url("info-dark.svg");
 }
 
 .unity-help-box__icon--warning {
