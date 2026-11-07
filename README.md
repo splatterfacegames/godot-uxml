@@ -43,7 +43,7 @@ See [Fidelity](#fidelity).
 **Optimizations verified.** The optimizations do not change behaviour.
 Equivalence checks compare each optimized path with the original
 implementation, value by value, and find 0 differences in 5,929 checks on
-the native core and 5,694 on the GDScript path. The test suite has 2,184
+the native core and 5,694 on the GDScript path. The test suite has 2,202
 checks.
 
 **Diagnostics, not silent failure.** Each unsupported feature, selector,
