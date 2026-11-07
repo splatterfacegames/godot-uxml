@@ -2304,6 +2304,7 @@ func _load_template(el: UxmlElement, src: String) -> Array:
 		d["offset"] = el.open_tag_start
 		d["line"] = lc.x
 		d["column"] = lc.y
+		d["end_offset"] = el.open_tag_end
 		_rt_warnings.append(d)
 		return []
 	var parsed := UxmlParser.new().parse(res["text"], res["path"])

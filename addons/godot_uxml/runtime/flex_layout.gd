@@ -590,7 +590,7 @@ func _warn_once(el: UxmlElement, prop: String, message: String) -> void:
 		return
 	_warned[key] = true
 	_warnings.append(UxmlDiagnostic.make(
-		"unsupported-value", message, _source, el.open_tag_start, _file
+		"unsupported-value", message, _source, el.open_tag_start, _file, el.open_tag_end
 	))
 
 

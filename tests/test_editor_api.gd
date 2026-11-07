@@ -805,3 +805,43 @@ func test_background_image_none_is_no_file() -> void:
 			bad.append(UxmlDiagnostic.format(d))
 	h.eq(bad, [], "background-image: none (ToolbarToggle checkmark, editor skin) reports no missing file")
 	_unload(doc)
+
+
+# ---------------------------------------------------------------------------
+# R11: end offsets
+# ---------------------------------------------------------------------------
+
+func test_diagnostics_have_end_offsets() -> void:
+	var body := func():
+		var doc := _mk("r11", '<ui:Label name="a" class="u" bogus-attr="1" text="x" />'
+			+ '<ui:VisualElement name="b" style="width: abc; height: var(--nope);" />',
+			".u { bogus-prop: 1; color: nonsense; }\n.v { @media x; }")
+		var out: Array = []
+		var src := doc.get_document_model().source
+		var missing: Array = []
+		for d in doc.diagnostics:
+			if not d.has("end_offset") or int(d["end_offset"]) < int(d["offset"]):
+				missing.append(UxmlDiagnostic.format(d))
+			out.append([d["kind"], d["offset"], d.get("end_offset")])
+		h.eq(missing, [], "every diagnostic has an end_offset at or after its offset")
+		var a := _el(doc, "a")
+		var b := _el(doc, "b")
+		var seen := {}
+		for d in doc.diagnostics:
+			if d["file"] != doc.get_document_model().path:
+				continue
+			if d["kind"] == "unsupported-attribute":
+				h.eq(src.substr(d["offset"], d["end_offset"] - d["offset"]), 'bogus-attr="1"', "an attribute diagnostic spans the attribute")
+				seen["attr"] = true
+			elif d["offset"] == a.open_tag_start or d["offset"] == b.open_tag_start:
+				var el := a if d["offset"] == a.open_tag_start else b
+				h.eq(d["end_offset"], el.open_tag_end, "%s on an element spans its open tag" % d["kind"])
+				seen[d["kind"]] = true
+		h.check(seen.has("attr") and seen.has("unsupported-property") and seen.has("unresolved-var"),
+			"attribute, cascade and var diagnostics were seen: %s" % [seen.keys()])
+		_unload(doc)
+		return out
+	await _both(body, "end offsets")
+	h.eq(UxmlDiagnostic.end_of(".a { color: red; }", 5), 15, "a USS declaration ends before `;`")
+	h.eq(UxmlDiagnostic.end_of('<ui:Label text="a>b" />x', 0), 23, "an open tag ends past `>` outside quotes")
+	h.eq(UxmlDiagnostic.end_of("", 0), 0, "no source")

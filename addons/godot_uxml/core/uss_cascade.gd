@@ -1363,7 +1363,7 @@ func _compute(i: int) -> void:
 			warns.append(UxmlDiagnostic.make(
 				"malformed",
 				'style attribute of <%s>: %s' % [node.tag(), problem["message"]],
-				doc.source, node.open_tag_start, doc.path
+				doc.source, node.open_tag_start, doc.path, node.open_tag_end
 			))
 
 	var ncand := c_prop.size()
@@ -1439,7 +1439,7 @@ func _compute(i: int) -> void:
 			warns.append(UxmlDiagnostic.make(
 				"invalid-shorthand",
 				"%s: %s -- wrong number of values; declaration dropped" % [prop, raw],
-				doc.source, node.open_tag_start, doc.path
+				doc.source, node.open_tag_start, doc.path, node.open_tag_end
 			))
 			continue
 		var sp := ALL_SPEC if (c_flag[j] & F_ALL) else c_spec[j]
@@ -1470,7 +1470,7 @@ func _compute(i: int) -> void:
 			warns.append(UxmlDiagnostic.make(
 				"unresolved-var",
 				"%s: var() reference could not be resolved; declaration dropped" % prop,
-				doc.source, node.open_tag_start, doc.path
+				doc.source, node.open_tag_start, doc.path, node.open_tag_end
 			))
 			continue
 		var ent = b_ent[slot]
@@ -1478,7 +1478,7 @@ func _compute(i: int) -> void:
 			warns.append(UxmlDiagnostic.make(
 				"unsupported-property",
 				'"%s" is not a supported USS property; the value is kept but has no effect' % prop,
-				doc.source, node.open_tag_start, doc.path
+				doc.source, node.open_tag_start, doc.path, node.open_tag_end
 			))
 		# `initial` (also what `all: initial` expands to): the property takes
 		# its initial value, which the runtime reads as "not declared" — so

@@ -383,6 +383,7 @@ static func _rebase(diag: Dictionary, file: String, source: String = "", offset:
 		out["offset"] = offset
 		out["line"] = lc.x
 		out["column"] = lc.y
+		out["end_offset"] = UxmlDiagnostic.end_of(source, offset)
 	return out
 
 

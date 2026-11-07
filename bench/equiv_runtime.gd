@@ -45,6 +45,7 @@ func _initialize() -> void:
 		UssCascade.use_native = false  # exercise the GDScript reference path
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 777
+	_frng.seed = 4242
 	for pair in [
 		["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml", 120],
 		["res://tests/fixtures/runtime", "Assets/UI/review.uxml", 120],
@@ -193,6 +194,19 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 					d.set_element_state(nm, "hover", true)
 					d.set_element_state(nm2, "focus", true)
 					d.set_element_state(nm, "hover", false)
+		if step % 5 == 4:
+			# Forced pseudo-states (UxmlDocument.set_forced_states), from
+			# their own random stream so the ops above keep their sequence.
+			var fel = a.get_element_model(names[_frng.randi() % names.size()])
+			var fs := PackedStringArray()
+			for st in ["hover", "focus", "active", "checked", "disabled"]:
+				if _frng.randi() % 4 == 0:
+					fs.append(st)
+			args.append(["forced", fs])
+			if fel != null:
+				var path_i: Array = _path_of(a, fel)
+				for d in all:
+					d.set_forced_states(_at_path(d, path_i), fs)
 		a.refresh()
 		for d in all:
 			d._restyle_now()
@@ -202,6 +216,30 @@ func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator)
 	for d in all:
 		root.remove_child(d)
 		d.free()
+
+
+var _frng := RandomNumberGenerator.new()
+
+
+## Child indices from the root to `el`, to find the same element in the
+## other documents.
+static func _path_of(d, el) -> Array:
+	var out: Array = []
+	var cur = el
+	while cur != d._doc.root:
+		var p = d._parents.get(cur)
+		if p == null:
+			return []
+		out.push_front((p.children as Array).find(cur))
+		cur = p
+	return out
+
+
+static func _at_path(d, path: Array):
+	var cur = d._doc.root
+	for i in path:
+		cur = cur.children[i]
+	return cur
 
 
 func _same(a, b) -> bool:
@@ -246,7 +284,7 @@ func _leaf(a, b, path: String) -> String:
 func _diags(d) -> Array:
 	var out: Array = []
 	for w in d.diagnostics:
-		out.append([w["kind"], w["message"], w["file"], w["line"], w["column"]])
+		out.append([w["kind"], w["message"], w["file"], w["line"], w["column"], w.get("end_offset")])
 	return out
 
 

@@ -9,6 +9,11 @@ extends RefCounted
 ##   line    - 1-based line in that file's source text
 ##   column  - 1-based column
 ##   offset  - character offset the line/column were computed from
+##   end_offset - character offset past the end of the range the diagnostic
+##             is about: past the `>` of an element's open tag, past the
+##             closing quote of an attribute value, the end of a USS
+##             declaration or rule head (before `;`, `{`, `}` or the line
+##             end). Equal to `offset` when there is no source text.
 ##
 ## Kinds emitted by milestone 1:
 ##   malformed             - broken UXML/USS syntax that was recovered from
@@ -40,7 +45,8 @@ static func make(
 	message: String,
 	source: String = "",
 	offset: int = 0,
-	file: String = ""
+	file: String = "",
+	end_offset: int = -1
 ) -> Dictionary:
 	var lc := line_col(source, offset)
 	return {
@@ -50,7 +56,46 @@ static func make(
 		"offset": offset,
 		"line": lc.x,
 		"column": lc.y,
+		"end_offset": end_offset if end_offset >= 0 else end_of(source, offset),
 	}
+
+
+## The end of the range that starts at `offset` in `source` (see
+## `end_offset`): an open tag, an attribute `name="value"`, or the USS text
+## up to `;`, `{`, `}` or the line end.
+static func end_of(source: String, offset: int) -> int:
+	var n := source.length()
+	if offset < 0 or offset >= n:
+		return clampi(offset, 0, n)
+	var c := source.unicode_at(offset)
+	if c == 60:  # "<": the open tag, quotes skipped
+		var i := offset + 1
+		var q := 0
+		while i < n:
+			var d := source.unicode_at(i)
+			if q != 0:
+				if d == q:
+					q = 0
+			elif d == 34 or d == 39:
+				q = d
+			elif d == 62:
+				return i + 1
+			i += 1
+		return n
+	var j := offset
+	while j < n:
+		var d2 := source.unicode_at(j)
+		if d2 == 61:  # "=": an attribute; past its quoted value
+			if j + 1 < n and (source.unicode_at(j + 1) == 34 or source.unicode_at(j + 1) == 39):
+				var close := source.find(source[j + 1], j + 2)
+				return n if close < 0 else close + 1
+			return j
+		if d2 == 59 or d2 == 123 or d2 == 125 or d2 == 10 or d2 == 13 or d2 == 60 or d2 == 62:
+			break
+		j += 1
+	while j > offset + 1 and (source.unicode_at(j - 1) == 32 or source.unicode_at(j - 1) == 9):
+		j -= 1
+	return maxi(j, offset + 1)
 
 
 ## 1-based (line, column) of `offset` inside `source`.

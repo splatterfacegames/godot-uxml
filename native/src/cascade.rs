@@ -206,6 +206,7 @@ struct Elem {
     line: i64,
     column: i64,
     offset: i64,
+    end: i64,
 }
 
 #[derive(Clone, Default)]
@@ -536,6 +537,7 @@ impl Cascade {
         d.set("offset", e.offset);
         d.set("line", e.line);
         d.set("column", e.column);
+        d.set("end_offset", e.end);
         d.to_variant()
     }
 
@@ -702,6 +704,7 @@ impl Cascade {
         let sn_prefix = StringName::from("prefix");
         let sn_children = StringName::from("children");
         let sn_offset = StringName::from("open_tag_start");
+        let sn_end = StringName::from("open_tag_end");
         for i in 0..n {
             let var = els.at(i);
             let obj = var.try_to::<Gd<Object>>().ok()?;
@@ -709,6 +712,7 @@ impl Cascade {
             let prefix = gs(&obj.get(&sn_prefix)).to_string();
             let leaf = obj.get(&sn_children).to::<VarArray>().is_empty();
             let offset = obj.get(&sn_offset).try_to::<i64>().unwrap_or(0);
+            let end = obj.get(&sn_end).try_to::<i64>().unwrap_or(offset);
             // UxmlDiagnostic.line_col
             let limit = (offset.max(0) as usize).min(chars.len());
             let (line, column) = if offset <= 0 || limit == 0 {
@@ -725,7 +729,7 @@ impl Cascade {
             let tag = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
             let lid = c.intern(&local);
             c.index.insert(obj.instance_id().to_i64(), i);
-            c.els.push(Elem { obj, var, local: lid, local_var: local.to_variant(), local_name: local.clone(), leaf, tag, line, column, offset });
+            c.els.push(Elem { obj, var, local: lid, local_var: local.to_variant(), local_name: local.clone(), leaf, tag, line, column, offset, end });
         }
         c.parent = parent.as_slice().to_vec();
         c.sel_parent = sel_parent.as_slice().to_vec();
@@ -1712,6 +1716,11 @@ impl Cascade {
     pub fn location(&self, i: usize) -> (i64, i64, i64) {
         let e = &self.els[i];
         (e.offset, e.line, e.column)
+    }
+
+    /// The end of the open tag of element `i` (diagnostic `end_offset`).
+    pub fn end_offset(&self, i: usize) -> i64 {
+        self.els[i].end
     }
 
     pub fn layout_values(&self, i: usize) -> &[Option<GString>] {

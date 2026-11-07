@@ -1996,7 +1996,7 @@ func _report_resolver(res: Dictionary, el: UxmlElement, what: String) -> void:
 func _warn_diag(kind: String, key: String, el: UxmlElement, message: String) -> void:
 	if _warned.has(key):
 		return
-	var d := UxmlDiagnostic.make(kind, message, _source, el.open_tag_start, _uxml_path)
+	var d := UxmlDiagnostic.make(kind, message, _source, el.open_tag_start, _uxml_path, el.open_tag_end)
 	_warned[key] = d
 	_warnings.append(d)
 
