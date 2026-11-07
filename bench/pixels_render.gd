@@ -136,6 +136,14 @@ enum DumpEnum { First, SecondValue, Third }
 @export var gradientValue: Gradient = Gradient.new()
 @export var textureValue: Texture2D
 @export_flags_3d_physics var layerMaskValue: int = 1
+
+
+# DumpTarget.cs: AnimationCurve.Linear(0, 0, 1, 1) and new Gradient()
+# (white to white).
+func _init() -> void:
+	curveValue.add_point(Vector2(0, 0), 0.0, 1.0)
+	curveValue.add_point(Vector2(1, 1), 1.0, 0.0)
+	gradientValue.colors = PackedColorArray([Color.WHITE, Color.WHITE])
 """,
 	"DumpSmallTarget": """extends Resource
 @export var count: int = 3
