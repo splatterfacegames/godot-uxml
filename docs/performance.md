@@ -1828,3 +1828,86 @@ machine (main 296 ms, the change 314 ms).
   a load cost what they did.
 - The switch tab: find the measure that changes in the re-apply, so that
   the check can confirm that settling pass too.
+
+## Stylesheet reload and field values (`feat/editor-apis-4`)
+
+Requests R25 and R17 of the uxml-editor: the cost of `reload_stylesheet` and
+of a field value. Document: `bench/reload_cost.gd`, the 507-element document
+of `bench/load_cost.gd` with a named TextField and Toggle.
+
+### Method
+
+Interleaved rounds, the order rotated per round, three arms: `main`
+(`dc2c081`), the same `main` worktree run again (the noise floor) and the
+branch. Five rounds of `bench/reload_cost.gd` (native and GDScript),
+`bench/load_cost.gd` (native and GDScript), `bench/bench.gd --quick` and
+`bench/workloads.gd --quick`; values are the median of the rounds. Each
+reload measure is the median of 10 (native) or 6 (GDScript) edits in a run.
+"next" is the first state change after the reload with its
+`get_transitions()`, as an editor arms a transition run after a render.
+
+### Reload (ms)
+
+| Edit | Native main | Native branch | ratio (A/A) | GDScript main | GDScript branch | ratio (A/A) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| one colour of `.panel` (12 elements) | 154.5 | 2.1 | 0.014 (1.00) | 672 | 8.8 | 0.013 (1.01) |
+| next state change | 108.7 | 1.2 | 0.011 (1.00) | 168 | 4.1 | 0.025 (1.01) |
+| one inherited value of `.panel` (`font-size`, the subtrees) | 155.4 | 29.4 | 0.19 (1.00) | 671 | 244 | 0.36 (1.02) |
+| next state change | 110.0 | 14.1 | 0.13 (1.01) | 185 | 98 | 0.53 (1.02) |
+| one length of `.row` (96 elements, a layout) | 157.8 | 17.5 | 0.11 (1.00) | 677 | 333 | 0.49 (1.02) |
+| next state change | 109.4 | 10.6 | 0.10 (1.00) | 168 | 78 | 0.46 (1.01) |
+| one `transition-delay` of `.cell` (384 elements) | 154.0 | 19.9 | 0.13 (1.00) | 673 | 62 | 0.09 (1.00) |
+| next state change | 108.8 | 1.8 | 0.017 (1.00) | 169 | 5.1 | 0.030 (1.01) |
+| the same text | 153.9 | 0.57 | 0.004 (1.00) | 672 | 1.7 | 0.003 (1.00) |
+| one selector (`cascade` path) | 154.2 | 64.3 | 0.42 (1.00) | 671 | 591 | 0.88 (1.00) |
+| next state change | 108.4 | 1.1 | 0.010 (1.00) | 168 | 4.1 | 0.024 (1.00) |
+| one rule added (`cascade` path) | 154.2 | 64.1 | 0.42 (0.99) | 672 | 589 | 0.88 (1.00) |
+
+- The target of R25, under 100 ms native for a one-declaration edit, holds for
+  every kind: 2 to 29 ms, and 3 to 44 ms with the next state change (`main`:
+  263 to 267 ms).
+- On `main` the next state change cost 109 ms because the full apply of the
+  reload left the document unsettled, so the next restyle applied every
+  control again. A partial reload leaves the document settled.
+- The inherited and the layout edits cost what their restyle costs: the
+  recompute of the subtrees and one layout. On GDScript a layout of this
+  document is about 60 ms.
+- A selector or rule edit compiles the rules and computes every element. The
+  apply and the second pass are gone; the cascade of the whole document is
+  the rest (on GDScript, most of the cost).
+
+### Field values (ms)
+
+| Write | Native main | Native branch | GDScript main | GDScript branch |
+| --- | ---: | ---: | ---: | ---: |
+| TextField `value` through the model, with the flush | 0.54 | 0.55 | 3.1 | 3.2 |
+| `set_field_value` of the TextField | — | 0.27 | — | 0.22 |
+| Toggle `value` through the model, with the flush | 6.7 | (see below) | 70 | (see below) |
+| `set_field_value` of the Toggle | — | 7.8 | — | 70 |
+
+A text value no longer costs a restyle: 0.27 ms instead of 0.54 ms native, and
+0.22 ms instead of 3.1 ms on GDScript. A Toggle value changes `:checked`, and
+that state change restyles and lays out as before: R17 does not make it
+cheaper. (On the branch the bench writes the model Toggle after
+`set_field_value` has set the same value, so the branch's "model toggle" row,
+0.34 ms native and 2.8 ms GDScript, measures a write without a change. Compare
+the `set_field_value` row with `main`.)
+
+### Other benchmarks (geomean of the medians, branch / main, A/A in brackets)
+
+| Suite | Native | GDScript |
+| --- | ---: | ---: |
+| `load_cost.gd` (14 ops) | 1.006 (1.015) | 1.005 (0.999) |
+| `bench.gd --quick` (25 ops) | 1.012 (0.997) | — |
+| `workloads.gd --quick` (17 ops) | 1.002 (1.014) | — |
+
+No op of these suites changed beyond the noise of its A/A ratio, except two
+that measure under 1 ms: `idle restyle` 1.07 (A/A 1.01, +0.06 ms) and
+`transition frame (bg color)` 1.08 (A/A 1.05). The added per-restyle work is
+two flag checks (`_reload_pass`, the placeholder list).
+
+### What remains
+
+- The `cascade` path computes every element: a selector edit could patch the
+  buckets and mark the elements that the old or the new selector matches.
+- A Toggle value costs its `:checked` restyle and layout (R17).

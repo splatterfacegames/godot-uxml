@@ -5,7 +5,10 @@ extends RefCounted
 ## and seek, the hit test, the element catalog, template instances, end
 ## offsets and severities on diagnostics, drag and drop of collection items,
 ## element rectangles in another element's space, text and display updates
-## without a needless layout, and context menus. Scenarios that read cascade, layout or
+## without a needless layout, context menus, stylesheet reloads that follow
+## the edit, field values without a restyle, runtime classes, the end and the
+## preview of transitions, the public helpers, placeholder elision and the
+## split view signal. Scenarios that read cascade, layout or
 ## runtime state run on the native and the GDScript paths, and the two
 ## traces must be equal.
 
@@ -1460,3 +1463,631 @@ func test_context_menu() -> void:
 		_unload(doc)
 		return out
 	await _both(body, "context menu")
+
+
+# ---------------------------------------------------------------------------
+# R25: a stylesheet reload restyles what the edit can change
+# ---------------------------------------------------------------------------
+
+const R25_BODY := '<ui:VisualElement name="panel" class="panel"><ui:Label name="in" class="cell" text="a" />'\
+	+ '<ui:VisualElement name="deep"><ui:Label name="in2" text="b" /></ui:VisualElement></ui:VisualElement>'\
+	+ '<ui:VisualElement name="other" class="other"><ui:Label name="out" class="cell" text="c" /></ui:VisualElement>'\
+	+ '<ui:Button name="btn" class="btn" text="go" />'
+const R25_USS := ':root { --c: rgb(1, 1, 1); }\n.panel { width: 200px; background-color: rgb(10, 10, 10); font-size: 12px; }\n'\
+	+ '.other { width: 150px; background-color: rgb(20, 20, 20); }\n.cell { height: 20px; color: var(--c); }\n'\
+	+ '.btn { min-width: 40px; transition-property: min-width; transition-duration: 1s; }\n'\
+	+ '.btn:hover { min-width: 80px; color: rgb(2, 2, 2); }\n'
+
+
+## A second document of the same text that rebuilds everything at each reload.
+func _r25_pair() -> Array:
+	var a := _mk("r25", R25_BODY, R25_USS, Vector2(500, 400))
+	var b := _mk("r25", R25_BODY, R25_USS, Vector2(500, 400))
+	b._partial_reload = false
+	return [a, b]
+
+
+## `a` and `b` after the same reload: the same styles, diagnostics and controls.
+func _r25_same(a: UxmlDocument, b: UxmlDocument, what: String) -> void:
+	var names := ["panel", "in", "deep", "in2", "other", "out", "btn"]
+	for n in names:
+		var sa = a.get_computed_style(n)
+		var sb = b.get_computed_style(n)
+		h.eq(_no_sheet(_txt(_sorted(sa))), _no_sheet(_txt(_sorted(sb))), "%s: the style of %s equals a full rebuild" % [what, n])
+	h.eq(_diag_set(a), _diag_set(b), "%s: the diagnostics equal a full rebuild" % what)
+	var tp = load("res://tests/test_parking.gd")
+	_same(tp.snapshot(a, true), tp.snapshot(b, true), "%s: the controls equal a full rebuild" % what)
+
+
+static func _sorted(d: Dictionary) -> Dictionary:
+	var keys := d.keys()
+	keys.sort()
+	var out := {}
+	for k in keys:
+		out[k] = d[k]
+	return out
+
+
+func test_reload_restyles_only_the_edit() -> void:
+	var body := func():
+		var pair := await _r25_pair()
+		var a: UxmlDocument = pair[0]
+		var b: UxmlDocument = pair[1]
+		var out: Array = []
+		var origin := String(a.get_computed_style("panel")["width"]["origin"]["file"])
+		var apply_all := func(text: String):
+			h.eq(a.reload_stylesheet(origin, text), OK, "reload")
+			b.reload_stylesheet(origin, text)
+			out.append(a.get_last_reload_mode())
+		var other_style: Dictionary = a.get_computed_style("other")
+		var other_ctl := a.get_element("other")
+		var n := a.layout_count
+		# A paint declaration: its elements only, no layout.
+		var t1 := R25_USS.replace("rgb(10, 10, 10)", "rgb(11, 11, 11)")
+		apply_all.call(t1)
+		h.eq(a.get_last_reload_mode(), "restyle", "one value: a restyle")
+		h.eq(a.layout_count, n, "a colour lays out nothing")
+		h.check(is_same(a.get_computed_style("other"), other_style), "an element outside the rule keeps its style object")
+		h.eq(a.get_element("other"), other_ctl, "the controls stay")
+		h.eq(String(a.get_computed_style("panel")["background-color"]["value"]), "rgb(11, 11, 11)", "the new value")
+		_r25_same(a, b, "paint")
+		# An inherited property reaches the subtree of the rule only.
+		var t2 := t1.replace("font-size: 12px", "font-size: 17px")
+		apply_all.call(t2)
+		h.eq(a.get_last_reload_mode(), "restyle", "an inherited value: a restyle")
+		h.eq(String(a.get_computed_style("in2")["font-size"]["value"]), "17px", "the value reaches a descendant")
+		_r25_same(a, b, "inherited")
+		# A length lays out.
+		n = a.layout_count
+		var t3 := t2.replace("width: 200px", "width: 222px")
+		apply_all.call(t3)
+		h.eq(a.layout_count, n + 1, "a length lays out once")
+		h.eq(a.get_element("panel").size.x, 222.0, "the new width")
+		_r25_same(a, b, "layout")
+		# A custom property reaches every var() below it.
+		var t4 := t3.replace("--c: rgb(1, 1, 1)", "--c: rgb(3, 3, 3)")
+		apply_all.call(t4)
+		h.eq(String(a.get_computed_style("in")["color"]["value"]), "rgb(3, 3, 3)", "a custom property reaches var()")
+		_r25_same(a, b, "custom property")
+		# Only transition properties: no apply and no layout.
+		n = a.layout_count
+		var t5 := t4.replace("transition-duration: 1s", "transition-duration: 2s; transition-delay: 0.5s")
+		apply_all.call(t5)
+		h.eq(a.layout_count, n, "transition properties lay out nothing")
+		h.eq(a._reapply.size(), 0, "transition properties apply nothing")
+		h.eq(String(a.get_computed_style("btn")["transition-delay"]["value"]), "0.5s", "the computed style has the new value")
+		_r25_same(a, b, "transition")
+		# A rule that matches nothing now reads the new text when it matches.
+		var t6 := t5.replace("color: rgb(2, 2, 2)", "color: rgb(5, 5, 5)")
+		n = a.layout_count
+		apply_all.call(t6)
+		h.eq(a.layout_count, n, "a rule of a state that is not on lays out nothing")
+		for d in [a, b]:
+			d.set_element_state("btn", "hover", true)
+			d._restyle_now()
+		h.eq(String(a.get_computed_style("btn")["color"]["value"]), "rgb(5, 5, 5)", "the state reads the new rule")
+		h.eq(a.get_transitions().size(), b.get_transitions().size(), "the new delay and duration start the same transition")
+		h.eq(a.explain_style(_el(a, "btn"), "color")[0]["value"], "rgb(5, 5, 5)", "provenance reads the new rule")
+		# Running transitions end at their end values; a reload starts none.
+		var t7 := t6.replace("min-width: 80px", "min-width: 90px")
+		apply_all.call(t7)
+		h.eq(a.has_running_transitions(), false, "a reload ends running transitions")
+		h.eq(String(a.get_computed_style("btn")["min-width"]["value"]), "90px", "the new end value")
+		_r25_same(a, b, "running transition")
+		# A selector, a new rule, a removed rule.
+		var t8 := t7.replace(".other {", ".other, .cell {")
+		apply_all.call(t8)
+		h.eq(a.get_last_reload_mode(), "cascade", "a selector change compiles the rules")
+		_r25_same(a, b, "selector")
+		var t9 := t8 + "#in { color: rgb(9, 9, 9); }\n"
+		apply_all.call(t9)
+		h.eq(a.get_last_reload_mode(), "cascade", "a new rule compiles the rules")
+		h.eq(String(a.get_computed_style("in")["color"]["value"]), "rgb(9, 9, 9)", "the new rule applies")
+		_r25_same(a, b, "added rule")
+		apply_all.call(t8)
+		_r25_same(a, b, "removed rule")
+		# Comments and white space only: nothing changes, offsets move.
+		var t10 := "/* moved\n*/ a + b { color: red; }\n" + t8
+		apply_all.call(t10)
+		_r25_same(a, b, "unsupported selector")
+		var off := int(_find_diag(a, "unsupported-selector").get("offset", -1))
+		apply_all.call("/* more */ " + t10)
+		h.eq(a.get_last_reload_mode(), "restyle", "a comment: no rule changes")
+		h.eq(int(_find_diag(a, "unsupported-selector").get("offset", -1)), off + 11, "the rule diagnostic moves with the text")
+		_r25_same(a, b, "comment")
+		# A diagnostic of a value goes with the value, also on a state that is off.
+		var bad := 'background-image: url("nope.png")'
+		var t11 := t10.replace("height: 20px", "height: 20px; " + bad)
+		apply_all.call(t11)
+		h.check(_applier_reports(a), "the applier reports a missing image")
+		_r25_same(a, b, "bad value")
+		apply_all.call(t10)
+		h.check(not _applier_reports(a), "the report of the old text goes")
+		_r25_same(a, b, "fixed value")
+		var stale := t10 + ".other:hover { %s; }\n" % bad.replace("nope", "nope2")
+		for d in [a, b]:
+			d.set_element_state("other", "hover", true)
+			d._restyle_now()
+		apply_all.call(stale)
+		h.check(_applier_reports(a), "a missing image of a state that is on")
+		for d in [a, b]:
+			d.set_element_state("other", "hover", false)
+			d._restyle_now()
+		apply_all.call(stale + "/* c */")
+		h.check(not _applier_reports(a), "the report of a state that went off goes at a reload")
+		_r25_same(a, b, "state that went off")
+		_unload(a)
+		_unload(b)
+		return out
+	await _both(body, "reload restyle")
+
+
+## A patched sheet under a scope and an imported sheet: the rules of the sheet
+## change in every place the sheet is compiled.
+func test_reload_patches_imported_sheets() -> void:
+	var body := func():
+		var dir := ROOT + "/r25i"
+		_write(dir + "/Assets/UI/base.uss", ".x { color: rgb(1, 1, 1); }")
+		var a := _mk("r25i", '<ui:Label name="l" class="x" text="t" />', '@import "base.uss"; .x { width: 50px; }')
+		var origin := ""
+		for sh in a.get_document_model().sheets:
+			if String(sh["origin"]).ends_with("base.uss"):
+				origin = sh["origin"]
+		h.check(not origin.is_empty(), "the imported sheet is a sheet of the document")
+		h.eq(a.reload_stylesheet(origin, ".x { color: rgb(7, 7, 7); }"), OK, "reload the imported sheet")
+		h.eq(a.get_last_reload_mode(), "restyle", "one value of an imported sheet: a restyle")
+		h.eq(String(a.get_computed_style("l")["color"]["value"]), "rgb(7, 7, 7)", "the new value")
+		h.eq(String(a.get_computed_style("l")["width"]["value"]), "50px", "the importing sheet stays")
+		var out := [_no_sheet(_txt(a.get_computed_style("l")))]
+		_unload(a)
+		return out
+	await _both(body, "reload of an import")
+
+
+## True when the style applier has reported something.
+func _applier_reports(doc: UxmlDocument) -> bool:
+	return not doc._applier._warned.is_empty()
+
+
+func _find_diag(doc: UxmlDocument, kind: String) -> Dictionary:
+	for d in doc.diagnostics:
+		if d.get("kind") == kind:
+			return d
+	return {}
+
+
+# ---------------------------------------------------------------------------
+# R17: field values without a restyle
+# ---------------------------------------------------------------------------
+
+func test_set_field_value() -> void:
+	var fields := '<ui:TextField name="text" value="a" /><ui:Toggle name="tog" label="x" />'\
+		+ '<ui:DropdownField name="drop" choices="one,two,three" index="0" />'\
+		+ '<ui:Slider name="sl" low-value="0" high-value="10" value="1" />'\
+		+ '<ui:VisualElement name="box" /><uie:ColorField name="col" />'
+	var uss := "#tog:checked { width: 50px; } .unity-toggle:checked { color: rgb(9, 9, 9); }"
+	var body := func():
+		var doc := _mk("r17", fields, uss)
+		var ref := _mk("r17", fields, uss)
+		await h.process_frame
+		doc._restyle_now()
+		ref._restyle_now()
+		var out: Array = []
+		var sent: Array = []
+		doc.value_changed.connect(func(n, v): sent.append([n, v]))
+		h.eq(doc.set_field_value("box", 1), false, "an element without a value")
+		h.eq(doc.set_field_value("missing", 1), false, "an unknown name")
+		# A text value: no restyle, no event.
+		h.eq(doc.set_field_value("text", "new text"), true, "a text field")
+		h.eq(doc._restyle_queued, false, "a text value queues no restyle")
+		h.eq(doc._attr_dirty.size(), 0, "and marks nothing for the cascade")
+		h.eq(doc.get_native("text").text, "new text", "the LineEdit shows the value")
+		h.eq(doc.get_field_value("text"), "new text", "get_field_value")
+		h.eq(sent, [], "no value_changed without notify")
+		# The same write with a restyle reaches the same end state.
+		ref._behaviors[ref.get_element_model("text")].bind_write("value", "new text")
+		# A Toggle: :checked restyles the states, without an event.
+		h.eq(doc.set_field_value("tog", true), true, "a toggle")
+		h.eq(sent, [], "a toggle emits nothing without notify")
+		ref._behaviors[ref.get_element_model("tog")].bind_write("value", true)
+		h.eq(doc.set_field_value("drop", "two"), true, "a dropdown")
+		ref._behaviors[ref.get_element_model("drop")].bind_write("value", "two")
+		h.eq(doc.set_field_value("sl", 4.0), true, "a slider")
+		ref._behaviors[ref.get_element_model("sl")].bind_write("value", 4.0)
+		h.eq(doc.set_field_value("col", Color(1, 0, 0)), true, "a colour field")
+		out.append(str(doc.get_field_value("col")))
+		ref._behaviors[ref.get_element_model("col")].bind_write("value", Color(1, 0, 0))
+		h.eq(sent, [], "no field emits without notify")
+		doc._restyle_now()
+		ref._restyle_now()
+		await h.process_frame
+		doc._restyle_now()
+		ref._restyle_now()
+		h.eq(String(doc.get_computed_style("tog")["width"]["value"]), "50px", ":checked applies")
+		var tp = load("res://tests/test_parking.gd")
+		_same(tp.snapshot(doc, true), tp.snapshot(ref, true), "the controls equal a write with a restyle")
+		# With notify: once, and only for a new value.
+		doc.set_field_value("text", "n2", true)
+		h.eq(sent, [["text", "n2"]], "notify emits the new value")
+		doc.set_field_value("text", "n2", true)
+		h.eq(sent.size(), 1, "the same value emits nothing")
+		doc.set_field_value("tog", false, true)
+		h.eq(sent[-1], ["tog", false], "a toggle emits once with notify")
+		h.eq(sent.size(), 2, "and only once")
+		h.eq(doc.is_blocking_signals(), false, "the signals of the document are on again")
+		out.append(sent)
+		_unload(doc)
+		_unload(ref)
+		return out
+	await _both(body, "field value")
+
+
+# ---------------------------------------------------------------------------
+# R19, R23: runtime classes, finish_transitions, completed transitions
+# ---------------------------------------------------------------------------
+
+const R23_USS := '.a { width: 10px; height: 10px; min-width: 100px; transition: min-width 1s linear; }\n'\
+	+ '.a:hover { min-width: 200px; }\n.a:checked { min-width: 300px; transition-duration: 0s; }\n'\
+	+ '.big { min-width: 150px; } .b { height: 20px; }\n'
+
+
+func test_author_classes() -> void:
+	var body := func():
+		var doc := _mk("r19", '<ui:ScrollView name="t" class="a" /><ui:VisualElement class="a" />', R23_USS)
+		var t := _el(doc, "t")
+		var own := UxmlParts.control_classes(t)
+		h.check(not own.is_empty(), "a ScrollView has control classes")
+		h.eq(Array(doc.get_author_classes(t)), ["a"], "the author classes")
+		doc.set_author_classes(t, PackedStringArray(["b", "big"]))
+		h.eq(Array(doc.get_author_classes(t)), ["b", "big"], "the new author classes")
+		for c in own:
+			h.check(t.class_list().has(c), "the control class %s stays" % c)
+		doc._restyle_now()
+		h.eq(String(doc.get_computed_style_for(t)["height"]["value"]), "20px", "the rules of the new class apply")
+		var unnamed: UxmlElement = doc.get_document_model().root.children[1]
+		doc.set_author_classes(unnamed, PackedStringArray())
+		doc._restyle_now()
+		h.eq(Array(doc.get_author_classes(unnamed)), [], "an element without a name")
+		h.check(not doc.get_computed_style_for(unnamed).has("height"), "the rule of the old class goes")
+		doc.set_author_classes(UxmlElement.new(), PackedStringArray(["x"]))
+		h.eq(Array(doc.get_author_classes(UxmlElement.new())), [], "an element of no load")
+		var out := [Array(doc.get_author_classes(t))]
+		_unload(doc)
+		return out
+	await _both(body, "author classes")
+
+
+func test_finish_transitions() -> void:
+	var body := func():
+		var doc := _mk("r19f", '<ui:VisualElement name="v" class="a" />', R23_USS)
+		var events: Array = []
+		doc.transition_end.connect(func(n, p, _t): events.append(["end", n, p]))
+		doc.transition_cancel.connect(func(n, p, _t): events.append(["cancel", n, p]))
+		doc.finish_transitions()
+		h.eq(doc.get_transition_clock(), 0.0, "no transition: nothing happens")
+		doc.set_element_state("v", "hover", true)
+		doc._restyle_now()
+		doc.advance_transitions(0.25)
+		h.eq(doc.has_running_transitions(), true, "a transition runs")
+		var clock := doc.get_transition_clock()
+		doc.finish_transitions()
+		h.eq(doc.has_running_transitions(), false, "finish ends it")
+		h.eq(String(doc.get_computed_style("v")["min-width"]["value"]), "200px", "at the end value")
+		h.eq(doc.get_element("v").size.x, 200.0, "the layout has the end value")
+		h.eq(doc.get_transition_clock(), clock, "the clock stays")
+		doc._restyle_now()
+		h.eq(doc.get_transitions(), [], "the restyle starts nothing")
+		h.eq(events, [], "no event")
+		# Not a completed transition: the same end value runs again.
+		doc.set_element_state("v", "hover", false)
+		doc._restyle_now()
+		doc.finish_transitions()
+		doc.set_element_state("v", "hover", true)
+		doc._restyle_now()
+		h.eq(doc.get_transitions().size(), 1, "a later change to the same value starts a transition")
+		var out := [events, doc.get_transitions().size()]
+		_unload(doc)
+		return out
+	await _both(body, "finish_transitions")
+
+
+## Unity's StartTransition keeps a completed transition through an instant
+## change (a combined duration of 0 returns before the removal), and the
+## computed transitions cancel only with a running animation
+## (VisualTreeStyleUpdater). A later change to its end value starts nothing.
+func test_completed_transition_after_an_instant_change() -> void:
+	var body := func():
+		var doc := _mk("r23", '<ui:Toggle name="v" class="a" />', R23_USS)
+		var set_on := func(state: String, on: bool):
+			doc.set_element_state("v", state, on)
+			doc._restyle_now()
+		set_on.call("hover", true)
+		doc.advance_transitions(2.0)
+		set_on.call("hover", false)
+		doc.advance_transitions(2.0)
+		h.eq(doc.has_running_transitions(), false, "completed at 100px")
+		set_on.call("checked", true)
+		h.eq(doc.get_transitions(), [], "an instant change to 300px")
+		h.eq(String(doc.get_computed_style("v")["min-width"]["value"]), "300px", "at once")
+		set_on.call("checked", false)
+		h.eq(doc.get_transitions(), [], "as Unity: the completed transition stops a change back to 100px")
+		h.eq(String(doc.get_computed_style("v")["min-width"]["value"]), "100px", "at once")
+		# A tool can start clean.
+		set_on.call("checked", true)
+		doc.clear_completed_transitions()
+		set_on.call("checked", false)
+		var tr := doc.get_transitions()
+		h.eq(tr.size(), 1, "clear_completed_transitions: the change runs")
+		var out := [tr[0]["from"], tr[0]["to"]] if tr.size() == 1 else []
+		_unload(doc)
+		return out
+	await _both(body, "completed transition")
+
+
+# ---------------------------------------------------------------------------
+# R26: the transitions of a state change, without the change
+# ---------------------------------------------------------------------------
+
+const R26_BODY := '<ui:VisualElement name="v" class="v"><ui:Label name="kid" class="kid" text="k" /></ui:VisualElement>'\
+	+ '<ui:VisualElement name="w" class="w" />'
+const R26_USS := '.v { width: 100px; height: 20px; color: rgb(0, 0, 0); transition: width 1s ease-in 0.25s, color 0.5s linear; }\n'\
+	+ '.v:hover { width: 200px; color: rgb(255, 0, 0); }\n.v:hover .kid { font-size: 20px; }\n'\
+	+ '.kid { font-size: 10px; color: rgb(0, 0, 0); transition: font-size 2s; }\n'\
+	+ '.v:checked { width: 300px; transition-duration: 0s; }\n.v:disabled { height: 40px; transition: height 1s; }\n'\
+	+ '.w { height: 5px; transition: height 1s; }\n.w:hover { height: 6px; }\n'
+
+
+static func _tracks(list: Array) -> Array:
+	var out: Array = []
+	for t in list:
+		out.append([t["element"].get_attribute("name"), t["property"], t["from"], t["to"], t["delay"], t["duration"], t["easing"], t["start_time"] - float(t.get("_clock", 0.0))])
+	out.sort_custom(func(a, b): return str(a) < str(b))
+	return out
+
+
+func test_preview_transitions() -> void:
+	var body := func():
+		var doc := _mk("r26", R26_BODY, R26_USS)
+		var v := _el(doc, "v")
+		var out: Array = []
+		var edges := [[[], ["hover"]], [["hover"], []], [[], ["checked"]], [["checked"], []],
+			[[], ["disabled"]], [["hover"], ["checked"]], [[], []]]
+		for edge in edges:
+			var from := PackedStringArray(edge[0])
+			var to := PackedStringArray(edge[1])
+			var before := _no_sheet(_txt(doc.get_computed_style("v")))
+			var layouts := doc.layout_count
+			var prev := doc.preview_transitions(v, from, to)
+			h.eq(_no_sheet(_txt(doc.get_computed_style("v"))), before, "the document keeps its style")
+			h.eq(doc.layout_count, layouts, "and lays out nothing")
+			h.eq(doc.has_running_transitions(), false, "and starts nothing")
+			# The kinds equal a real run on a new document.
+			var real := _mk("r26", R26_BODY, R26_USS)
+			real.transitions_manual = true
+			real.set_forced_states(_el(real, "v"), from)
+			real._restyle_now()
+			real.advance_transitions(10.0)
+			real.set_forced_states(_el(real, "v"), to)
+			real._restyle_now()
+			var run := real.get_transitions()
+			# The run starts after the first clock move.
+			var clock := real.get_transition_clock()
+			for t in run:
+				t["_clock"] = clock
+			_same(_tracks(prev), _tracks(run), "%s -> %s: the same tracks as a real run" % [from, to])
+			out.append(_tracks(prev))
+			_unload(real)
+		# Descendants are in the list; another element's state stays.
+		var hover := doc.preview_transitions(v, PackedStringArray(), PackedStringArray(["hover"]))
+		var kid := false
+		for t in hover:
+			if t["element"] == _el(doc, "kid") and t["property"] == "font-size":
+				kid = true
+		h.check(kid, "a descendant selector gives a track of the descendant")
+		doc.set_element_state("w", "hover", true)
+		doc._restyle_now()
+		h.eq(doc.preview_transitions(v, PackedStringArray(), PackedStringArray()).size(), 0, "no change, no track")
+		# A declaration edit reaches the preview.
+		var origin := String(doc.get_computed_style("v")["width"]["origin"]["file"])
+		doc.reload_stylesheet(origin, R26_USS.replace("width 1s", "width 3s"))
+		var after := doc.preview_transitions(v, PackedStringArray(), PackedStringArray(["hover"]))
+		var dur := 0.0
+		for t in after:
+			if t["property"] == "width":
+				dur = t["duration"]
+		h.eq(dur, 3.0, "the preview reads a reloaded sheet")
+		h.eq(doc.preview_transitions(UxmlElement.new(), PackedStringArray(), PackedStringArray(["hover"])), [], "an element of no load")
+		_unload(doc)
+		return out
+	await _both(body, "preview transitions")
+
+
+# ---------------------------------------------------------------------------
+# R20: the public helpers
+# ---------------------------------------------------------------------------
+
+func test_public_helpers() -> void:
+	h.eq(UssTransitions.easing(UssProperties.EASING_MODES.find("linear"), 0.25), 0.25, "easing(mode, t)")
+	h.check(UssProperties.EASING_MODES.has("ease-in-out"), "EASING_MODES")
+	h.check((UssTransitions.SHORTHANDS["margin"] as Array).has("margin-top"), "SHORTHANDS")
+	var f: Font = ThemeDB.fallback_font
+	var shown := UxmlStyleApplier.elide_text("a long text that does not fit", 30.0, "end", f, 14)
+	h.check(shown.ends_with("...") and shown.length() < 29, "elide_text(text, width, position, font, size)")
+	var el := UxmlElement.new()
+	el.attributes = [{"name": "class", "value": "a", "offset": 0}]
+	h.eq(UxmlParts.merged_class(el, "b c"), "b c", "merged_class(element, author)")
+	UxmlParts._add_control_classes(el, ["own"])
+	h.eq(UxmlParts.merged_class(el, "b"), "b own", "merged_class keeps the control classes")
+
+
+# ---------------------------------------------------------------------------
+# R18: the placeholder of a text field elides
+# ---------------------------------------------------------------------------
+
+func test_placeholder_elides() -> void:
+	const LONG := "a placeholder text that is much longer than the field"
+	var body := func():
+		var doc := _mk("r18", '<ui:TextField name="f" class="f" placeholder-text="%s" />' % LONG
+			+ '<ui:TextField name="g" placeholder-text="%s" style="width: 80px;" />' % LONG,
+			'.f { width: 120px; text-overflow: ellipsis; }')
+		await h.process_frame
+		doc._restyle_now()
+		var le := doc.get_native("f") as LineEdit
+		var out: Array = []
+		h.check(le != null, "the native is a LineEdit")
+		h.check(le.placeholder_text.ends_with("...") and le.placeholder_text.length() < LONG.length(), "the placeholder elides")
+		h.eq(le.tooltip_text, LONG, "the tooltip has the whole text")
+		var width := le.size.x
+		var font: Font = le.get_theme_font("font")
+		var fs: int = le.get_theme_font_size("font_size")
+		h.check(font.get_string_size(le.placeholder_text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x <= width, "the shown text fits")
+		out.append(le.placeholder_text)
+		h.eq((doc.get_native("g") as LineEdit).placeholder_text, LONG, "without text-overflow nothing elides")
+		# A new width.
+		doc.get_element_model("f").set_attribute("style", "width: 220px;")
+		doc._restyle_now()
+		await h.process_frame
+		h.check(le.placeholder_text.length() > String(out[0]).length(), "a wider field shows more")
+		out.append(le.placeholder_text)
+		doc.get_element_model("f").set_attribute("style", "width: 900px;")
+		doc._restyle_now()
+		await h.process_frame
+		h.eq(le.placeholder_text, LONG, "a field wide enough shows all of it")
+		h.eq(le.tooltip_text, "", "and no tooltip")
+		doc.get_element_model("f").set_attribute("style", "")
+		doc._restyle_now()
+		h.check(le.placeholder_text.ends_with("..."), "narrow again")
+		# A new placeholder; the value hides the tooltip.
+		doc.get_element_model("f").set_attribute("placeholder-text", "another text which also does not fit in here")
+		doc._restyle_now()
+		h.check(le.placeholder_text.begins_with("another"), "a new placeholder elides")
+		h.eq(le.tooltip_text, "another text which also does not fit in here", "the tooltip follows")
+		doc.set_field_value("f", "value")
+		h.eq(le.tooltip_text, "", "a value: the placeholder and its tooltip do not show")
+		doc.set_field_value("f", "")
+		h.eq(le.tooltip_text, "another text which also does not fit in here", "empty again")
+		# The style: a reload with no layout turns it off and on.
+		var origin := String(doc.get_computed_style("f")["width"]["origin"]["file"])
+		doc.reload_stylesheet(origin, '.f { width: 120px; }')
+		h.eq(le.placeholder_text, "another text which also does not fit in here", "no ellipsis: the whole text")
+		h.eq(le.tooltip_text, "", "and no tooltip")
+		doc.reload_stylesheet(origin, '.f { width: 120px; text-overflow: ellipsis; -unity-text-overflow-position: start; }')
+		h.check(le.placeholder_text.begins_with("..."), "the overflow position applies")
+		out.append(le.placeholder_text)
+		_unload(doc)
+		return out
+	await _both(body, "placeholder")
+
+
+# ---------------------------------------------------------------------------
+# R21: a signal when a split view changes size
+# ---------------------------------------------------------------------------
+
+func test_split_changed() -> void:
+	var body := func():
+		var doc := _mk("r21", '<ui:TwoPaneSplitView name="s" fixed-pane-initial-dimension="100" style="width: 400px; height: 200px;">'
+			+ '<ui:VisualElement /><ui:VisualElement /></ui:TwoPaneSplitView>', '')
+		await h.process_frame
+		doc._restyle_now()
+		var sent: Array = []
+		doc.split_changed.connect(func(n, d): sent.append([n, d]))
+		var dl := doc.get_control_for(UxmlContainerParts.get_part(_el(doc, "s"), "dragline"))
+		var press := func(on: bool, x: float):
+			var ev := InputEventMouseButton.new()
+			ev.button_index = MOUSE_BUTTON_LEFT
+			ev.pressed = on
+			ev.global_position = Vector2(x, 10)
+			dl.gui_input.emit(ev)
+		var move := func(x: float):
+			var ev := InputEventMouseMotion.new()
+			ev.global_position = Vector2(x, 10)
+			dl.gui_input.emit(ev)
+		doc.set_split_dimension("s", 120.0)
+		h.eq(sent, [], "set_split_dimension emits nothing")
+		press.call(true, 50.0)
+		press.call(false, 50.0)
+		h.eq(sent, [], "a click without a move emits nothing")
+		press.call(true, 50.0)
+		move.call(60.0)
+		move.call(80.0)
+		h.eq(sent, [], "nothing during the drag")
+		press.call(false, 80.0)
+		h.eq(sent, [["s", 150.0]], "the end of the drag gives the name and the size")
+		h.eq(doc.get_split_dimension("s"), 150.0, "get_split_dimension agrees")
+		press.call(true, 80.0)
+		move.call(90.0)
+		move.call(80.0)
+		press.call(false, 80.0)
+		h.eq(sent.size(), 1, "a drag back to the start emits nothing")
+		var out := [sent]
+		_unload(doc)
+		return out
+	await _both(body, "split_changed")
+
+
+# ---------------------------------------------------------------------------
+# R22: text inside a ScrollView, a unitless flex-basis
+# ---------------------------------------------------------------------------
+
+func test_text_stable_in_scroll_view() -> void:
+	var body := func():
+		var doc := _mk("r22", '<ui:VisualElement name="col" style="width: 300px; height: 200px;">'
+			+ '<ui:ScrollView name="sv" style="height: 150px;"><ui:Label name="in" text="short" />'
+			+ '<ui:VisualElement name="line" style="flex-direction: row;">'
+			+ '<ui:Label name="zero" text="a" style="flex-grow: 1; flex-basis: 0;" />'
+			+ '<ui:Label name="zero2" text="a" style="flex-grow: 1; flex-basis: 0px;" /></ui:VisualElement>'
+			+ '<ui:VisualElement style="height: 400px;" /></ui:ScrollView>'
+			+ '<ui:ScrollView name="both" mode="VerticalAndHorizontal" style="height: 40px;"><ui:Label name="wide" text="w" /></ui:ScrollView>'
+			+ '</ui:VisualElement>', '')
+		await h.process_frame
+		doc._restyle_now()
+		await h.process_frame
+		var out: Array = []
+		var rect_of := func(names: Array) -> Array:
+			var r: Array = []
+			for n in names:
+				r.append(doc.get_element_rect(_el(doc, n)))
+			return r
+		var names := ["sv", "in", "line", "zero", "zero2", "both", "wide"]
+		for step in [["in", "a much longer text than the scroll view is wide, so that it would overflow the column at any font"],
+				["zero", "a much longer text than the other cell of the row is wide"], ["in", "x"], ["zero", "y"]]:
+			var n := doc.layout_count
+			doc.set_text(step[0], step[1])
+			doc._restyle_now()
+			h.eq(doc.layout_count, n, "%s: a text change lays out nothing" % step[0])
+			var kept: Array = rect_of.call(names)
+			# A full layout gives the same rectangles: the skip loses nothing.
+			doc.refresh()
+			doc._restyle_now()
+			doc._restyle_now()
+			_same(kept, rect_of.call(names), "%s: the same rects as a full layout" % step[0])
+			out.append(kept)
+		var n2 := doc.layout_count
+		doc.set_text("wide", "a much longer text than the horizontal scroll view is wide, so the content grows")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n2 + 1, "with horizontal scrolling the content follows the text")
+		out.append(rect_of.call(names))
+		_unload(doc)
+		return out
+	await _both(body, "text in a ScrollView")
+
+
+# ---------------------------------------------------------------------------
+# R24: the selected row of a list without focus in the editor skins
+# ---------------------------------------------------------------------------
+
+func test_selected_row_in_the_editor_skins() -> void:
+	var expected := {"dark": "rgb(77, 77, 77)", "light": "rgb(174, 174, 174)"}
+	for skin in expected:
+		var doc := UxmlDocument.new()
+		doc.editor_theme = "always"
+		doc.editor_skin = skin
+		h.root.add_child(doc)
+		doc.size = Vector2(200, 100)
+		doc.load_source(UXML_HEAD + '<ui:ListView /><ui:VisualElement name="v" class="unity-collection-view">'
+			+ '<ui:Label name="r" class="unity-collection-view__item--selected" text="t" /></ui:VisualElement></ui:UXML>')
+		h.eq(String(doc.get_computed_style("r")["background-color"]["value"]), expected[skin], "%s: a view without focus" % skin)
+		doc.set_element_state("v", "focus", true)
+		doc._restyle_now()
+		h.eq(String(doc.get_computed_style("r")["background-color"]["value"]), "rgb(58, 114, 176)", "%s: a focused view" % skin)
+		_unload(doc)

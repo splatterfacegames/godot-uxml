@@ -46,6 +46,7 @@ var _warnings: Array
 ## element_paths). An inline style resolves its url()s against it.
 var element_paths: Dictionary = {}
 var _warned: Dictionary = {}
+var _warned_els: Dictionary = {}
 # resolved path -> Resource or null (attempted and failed): repeated
 # restyles must not re-hit the filesystem for the same reference, missing
 # or not.
@@ -1998,6 +1999,7 @@ func _warn_diag(kind: String, key: String, el: UxmlElement, message: String) -> 
 		return
 	var d := UxmlDiagnostic.make(kind, message, _source, el.open_tag_start, _uxml_path, el.open_tag_end)
 	_warned[key] = d
+	_warned_els[el] = true
 	_warnings.append(d)
 
 
@@ -2019,6 +2021,14 @@ func forget_warnings() -> void:
 	_warnings.clear()
 	_warnings.append_array(kept)
 	_warned.clear()
+	_warned_els.clear()
+
+
+## The elements with a diagnostic of this applier. After forget_warnings(),
+## applying these elements reports what a full apply would: an element without
+## a diagnostic reports nothing for a style it keeps.
+func warned_elements() -> Array:
+	return _warned_els.keys()
 
 
 ## The UXML text the applier's diagnostics point into (after

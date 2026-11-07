@@ -1023,6 +1023,64 @@ class TextBehavior extends InputBehavior:
 			UxmlParts.toggle_control_class(input, "unity-base-text-field__input--placeholder", show)
 		if _ed != null:
 			_ed.set("placeholder_text", "" if hide_now else ph)
+			_ph_shown = ""
+			if not _ph_listed and not ph.is_empty() and _ed is LineEdit:
+				_ph_listed = true
+				doc._placeholder_fields.append(self)
+			if _ph_listed:
+				elide_placeholder()
+
+	var _ph_listed := false
+	## The elided placeholder on the LineEdit ("": the whole text).
+	var _ph_shown := ""
+	var _ph_memo: Array = []
+
+	## `text-overflow: ellipsis` on the field, its input or its editor part
+	## elides the placeholder to the width of the LineEdit, at the
+	## `-unity-text-overflow-position` of that element, and the whole text is
+	## the tooltip while it shows (TextElement.ElideText of a Label). Runs after
+	## every placement and placeholder change (UxmlDocument._update_elision).
+	func elide_placeholder() -> void:
+		var le := _ed as LineEdit
+		if le == null or doc._applier == null:
+			return
+		var ph := attr("placeholder-text")
+		var pos := _ph_position()
+		if pos.is_empty() or le.placeholder_text.is_empty():
+			if not _ph_shown.is_empty():
+				_ph_shown = ""
+				_ph_memo = []
+				if not le.placeholder_text.is_empty():
+					le.placeholder_text = ph
+				doc._applier._elided_tooltip(le, false, ph)
+			return
+		var fs := le.get_theme_font_size(&"font_size")
+		var font := le.get_theme_font(&"font")
+		var sb := le.get_theme_stylebox(&"normal")
+		var memo := [ph, le.size.x, pos, fs, font, sb, text().is_empty()]
+		if memo == _ph_memo:
+			return
+		_ph_memo = memo
+		var width: float = le.size.x - (0.0 if sb == null else sb.get_minimum_size().x)
+		var shown := ph if font == null else UxmlStyleApplier.elide_text(ph, width, pos, font, fs)
+		_ph_shown = "" if shown == ph else shown
+		if le.placeholder_text != shown:
+			le.placeholder_text = shown
+		doc._applier._elided_tooltip(le, not _ph_shown.is_empty() and text().is_empty(), ph)
+
+	## The overflow position of the first of the field, its input and its
+	## editor with `text-overflow: ellipsis`, else "".
+	func _ph_position() -> String:
+		for x in [el, part("input"), part("editor")]:
+			if x == null:
+				continue
+			var st: Dictionary = doc._styles.get(x, {})
+			var e = st.get("text-overflow")
+			if e != null and String(e["value"]) == "ellipsis":
+				var p = st.get("-unity-text-overflow-position")
+				var v := "end" if p == null else String(p["value"])
+				return v if v == "start" or v == "middle" else "end"
+		return ""
 
 	func _on_focus(on: bool) -> void:
 		_focused = on

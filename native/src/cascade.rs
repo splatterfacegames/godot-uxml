@@ -1701,6 +1701,55 @@ impl Cascade {
         self.tgt.get(&i).cloned()
     }
 
+    /// New declarations for rule `r` (UssCascade.patch_rules).
+    pub fn patch_rule(&mut self, r: usize, dp: &PackedStringArray, dv: &PackedStringArray, df: &PackedInt32Array, de: &VarArray) {
+        if r >= self.rules.len() {
+            return;
+        }
+        let mut decls = Vec::with_capacity(dp.len());
+        for d in 0..dp.len() {
+            decls.push(self.make_decl(dp.as_slice()[d].clone(), dv.as_slice()[d].clone(), df.as_slice()[d], &de.at(d)));
+        }
+        self.rules[r].decls = Rc::new(decls);
+        for s in self.sels.iter_mut() {
+            if s.rule == r {
+                s.origins = None;
+                s.entries = None;
+            }
+        }
+    }
+
+    /// Marks for recompute the elements that the rules `rs` match now, or
+    /// every element above `limit` rules (UssCascade.patch_rules).
+    pub fn force_rules(&mut self, rs: &[i32], limit: usize) {
+        let n = self.els.len();
+        if rs.len() > limit {
+            self.ov_force.extend(0..n);
+            return;
+        }
+        let sels: Vec<usize> = (0..self.sels.len()).filter(|&s| rs.contains(&(self.sels[s].rule as i32))).collect();
+        for i in 0..n {
+            let mut hit = false;
+            for &s in &sels {
+                let sel = &self.sels[s];
+                let rule = &self.rules[sel.rule];
+                if rule.scope_lo != -2 && ((i as i32) < rule.scope_lo || (i as i32) >= rule.scope_hi) {
+                    continue;
+                }
+                if sel.need != 0 && (self.bloom[i] & sel.need) != sel.need {
+                    continue;
+                }
+                if self.match_from(&sel.parts, sel.parts.len() - 1, i, rule.scope_idx) {
+                    hit = true;
+                    break;
+                }
+            }
+            if hit {
+                self.ov_force.push(i);
+            }
+        }
+    }
+
     /// Direct children (preorder indices) of element i.
     pub fn children(&self, i: usize) -> Vec<usize> {
         let mut out = vec![];
@@ -2016,6 +2065,31 @@ impl UxmlNativeCascade {
             if i >= 0 {
                 c.set_override(i as usize, entries);
             }
+        }
+    }
+
+    /// Takes the placement state of `other`, a cascade over the same element
+    /// tree (preorder indices are the same). The fits of Labels and Buttons
+    /// and the last rects belong to the controls, not to a cascade: the
+    /// GDScript path keeps them on the applier, the controls and `_rects`.
+    #[func]
+    fn adopt_placement(&mut self, mut other: Gd<UxmlNativeCascade>) {
+        self.placement = std::mem::take(&mut other.bind_mut().placement);
+    }
+
+    #[func]
+    fn patch_rule(&mut self, r: i64,dp: PackedStringArray, dv: PackedStringArray, df: PackedInt32Array, de: VarArray) {
+        if let Some(c) = self.inner.as_mut() {
+            if r >= 0 {
+                c.patch_rule(r as usize, &dp, &dv, &df, &de);
+            }
+        }
+    }
+
+    #[func]
+    fn force_rules(&mut self, rs: PackedInt32Array, limit: i64) {
+        if let Some(c) = self.inner.as_mut() {
+            c.force_rules(rs.as_slice(), limit.max(0) as usize);
         }
     }
 

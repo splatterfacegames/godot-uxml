@@ -103,6 +103,9 @@ Editor-style document (507 elements, `bench/load_cost.gd`):
 | Text change, Label of text width | 71 ms | 10.9 ms |
 | `display` change | 70 ms | 7.7 ms |
 | `display` change, next frame | 4.0 ms | 1.2 ms |
+| Stylesheet reload, one colour changed | 8.8 ms | 2.1 ms |
+| Stylesheet reload, one inherited value changed | 244 ms | 29 ms |
+| Stylesheet reload, one selector changed | 591 ms | 64 ms |
 
 Frame cost with a real renderer (Vulkan, RTX 5060 Ti, measured before the
 Unity theme):

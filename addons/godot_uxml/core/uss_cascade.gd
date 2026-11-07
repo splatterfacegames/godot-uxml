@@ -537,26 +537,11 @@ const CC := "_uxml_compiled"
 ## 2 type, 3 any), key], ancestor classes, ancestor names, ancestor state
 ## mask, ancestor state requirements]. Read-only once built.
 static func _compile_rule(rule: Dictionary, layer: int) -> Array:
-	var dp := PackedStringArray()
-	var dv := PackedStringArray()
-	var df := PackedInt32Array()
-	var de: Array = []
-	for decl in rule["declarations"]:
-		var prop: String = decl["property"]
-		var val: String = decl["value"]
-		dp.append(prop)
-		dv.append(val)
-		var fl := 0
-		if prop.begins_with("--"):
-			fl |= F_CUSTOM
-		elif prop == "all":
-			fl |= F_ALL
-		if val.find("var(") >= 0:
-			fl |= F_VAR
-			de.append(null)
-		else:
-			de.append(_expand(prop, val))
-		df.append(fl)
+	var dc := _compile_decls(rule)
+	var dp: PackedStringArray = dc[0]
+	var dv: PackedStringArray = dc[1]
+	var df: PackedInt32Array = dc[2]
+	var de: Array = dc[3]
 	var sels: Array = []
 	for sel in rule["selectors"]:
 		var parts: Array = []
@@ -628,6 +613,31 @@ static func _compile_rule(rule: Dictionary, layer: int) -> Array:
 		sels.append([parts, need, (names << 40) | (classes << 20) | types | layer,
 			UssSelector.states_required_by(sel), bucket, anc_c, anc_n, anc_s, anc_r])
 	return [dp, dv, df, de, sels]
+
+
+## The declarations of `rule`: [properties, values, flags, expansions].
+static func _compile_decls(rule: Dictionary) -> Array:
+	var dp := PackedStringArray()
+	var dv := PackedStringArray()
+	var df := PackedInt32Array()
+	var de: Array = []
+	for decl in rule["declarations"]:
+		var prop: String = decl["property"]
+		var val: String = decl["value"]
+		dp.append(prop)
+		dv.append(val)
+		var fl := 0
+		if prop.begins_with("--"):
+			fl |= F_CUSTOM
+		elif prop == "all":
+			fl |= F_ALL
+		if val.find("var(") >= 0:
+			fl |= F_VAR
+			de.append(null)
+		else:
+			de.append(_expand(prop, val))
+		df.append(fl)
+	return [dp, dv, df, de]
 
 
 ## Two bloom-filter bits for a feature key ("<Type", "#name", ".class").
@@ -779,6 +789,126 @@ static func _inline(text: String) -> Array:
 		_inline_cache.clear()
 	_inline_cache[text] = out
 	return out
+
+
+# ---------------------------------------------------------------------------
+# Rule patches (UxmlDocument.reload_stylesheet): the declarations of a rule
+# change, the selectors and the rule order stay. The buckets, ancestor
+# features and bloom bits depend only on selectors, so they stay valid.
+# ---------------------------------------------------------------------------
+
+## More patched rules than this recompute every element: the match test of
+## each selector against each element would cost more than the recompute.
+const PATCH_MATCH_LIMIT := 32
+
+
+## The edit from sheet items `old` to `new` when only declarations differ:
+## {item index: new rule} (empty: nothing can change a computed style). null
+## when the edit changes selectors, rules, imports or the item order: the
+## compiled rule tables are then out of date.
+static func sheet_patch(old: Array, new: Array):
+	if old.size() != new.size():
+		return null
+	var out := {}
+	for i in new.size():
+		var a: Dictionary = old[i]
+		var b: Dictionary = new[i]
+		var kind: String = b["kind"]
+		if a["kind"] != kind:
+			return null
+		if kind == "import":
+			if a["url"] != b["url"] or a.get("resolved_sheet", -1) != b.get("resolved_sheet", -1):
+				return null
+		elif kind == "rule":
+			var ra: Dictionary = a["rule"]
+			var rb: Dictionary = b["rule"]
+			var sa: Array = ra["selectors"]
+			var sb: Array = rb["selectors"]
+			if sa.size() != sb.size():
+				return null
+			for k in sb.size():
+				if sa[k]["parts"] != sb[k]["parts"]:
+					return null
+			var da: Array = ra["declarations"]
+			var db: Array = rb["declarations"]
+			var same := da.size() == db.size()
+			if same:
+				for k in db.size():
+					if da[k]["property"] != db[k]["property"] or da[k]["value"] != db[k]["value"]:
+						same = false
+						break
+			if not same:
+				out[i] = rb
+	return out
+
+
+## Give the compiled rules of sheet `si` the declarations in `patch` (see
+## sheet_patch) and mark the elements the changed rules match now. The next
+## update() recomputes those elements, and inheritance carries the change
+## to their subtrees. An element that a changed rule does not match now
+## reads the new declarations when its inputs change.
+func patch_rules(si: int, patch: Dictionary) -> void:
+	var rs := PackedInt32Array()
+	for r in _rule_sheet.size():
+		if _rule_sheet[r] != si:
+			continue
+		var rule = patch.get(_rule_item[r])
+		if rule == null:
+			continue
+		var dc := _compile_decls(rule)
+		_rule_dprop[r] = dc[0]
+		_rule_dval[r] = dc[1]
+		_rule_dflag[r] = dc[2]
+		_rule_dexp[r] = dc[3]
+		rs.append(r)
+		if _native != null:
+			_native.call("patch_rule", r, dc[0], dc[1], dc[2], dc[3])
+	if rs.is_empty():
+		return
+	if _native != null:
+		_native.call("force_rules", rs, PATCH_MATCH_LIMIT)
+	var hit := {}
+	for r in rs:
+		hit[r] = true
+	var sels := PackedInt32Array()
+	for s in _sel_rule.size():
+		if hit.has(_sel_rule[s]):
+			# explain_style reads these on both backends.
+			_sel_entries[s] = null
+			_sel_origins[s] = null
+			sels.append(s)
+	if _native != null:
+		return
+	var n := els.size()
+	if rs.size() > PATCH_MATCH_LIMIT:
+		for i in n:
+			_ov_force.append(i)
+		return
+	for i in n:
+		for s in sels:
+			var r := _sel_rule[s]
+			var lo := _rule_scope_lo[r]
+			if lo != -2 and (i < lo or i >= _rule_scope_hi[r]):
+				continue
+			var need := _sel_need[s]
+			if need != 0 and (_bloom[i] & need) != need:
+				continue
+			var parts: Array = _sel_parts[s]
+			if _match_from(parts, parts.size() - 1, i, _rule_scope_idx[r]):
+				_ov_force.append(i)
+				break
+
+
+## Move the rule diagnostics of a patched sheet: `moved` maps the old selector
+## offsets to the new ones, `source` is the new text of the sheet `file`.
+func move_rule_warnings(file: String, source: String, moved: Dictionary) -> void:
+	for k in _rule_warnings.size():
+		var w: Dictionary = _rule_warnings[k]
+		if String(w["file"]) != file:
+			continue
+		var no = moved.get(int(w["offset"]))
+		if no != null:
+			_rule_warnings[k] = UxmlDiagnostic.make(w["kind"], w["message"], source, no, file)
 
 
 # ---------------------------------------------------------------------------
