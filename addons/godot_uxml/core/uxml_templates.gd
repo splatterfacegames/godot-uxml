@@ -58,6 +58,9 @@ var _reported: Dictionary = {}
 var style_from: Dictionary = {}
 ## Cloned element -> path of the template file it was authored in.
 var element_paths: Dictionary = {}
+## Cloned element -> the TemplateContainer (the expanded <Instance>) whose
+## template it was cloned from.
+var instances: Dictionary = {}
 ## Every cloned element (the loader skips them in entry-file checks; the
 ## template file reports its own).
 var clones: Dictionary = {}
@@ -284,7 +287,7 @@ func _instantiate(inst: UxmlElement, tmpl: Dictionary, anchor: UxmlElement, dept
 	for child in (tmpl["root"] as UxmlElement).children:
 		if child.local == "Template":
 			continue
-		clone_list.append(_clone(child, anchor, path))
+		clone_list.append(_clone(child, anchor, path, inst))
 	inst.children = clone_list
 
 	# Slot and content-container definitions belong to this template only:
@@ -313,7 +316,7 @@ func _instantiate(inst: UxmlElement, tmpl: Dictionary, anchor: UxmlElement, dept
 		_slots[inst] = slots
 
 
-func _clone(t: UxmlElement, anchor: UxmlElement, path: String) -> UxmlElement:
+func _clone(t: UxmlElement, anchor: UxmlElement, path: String, inst: UxmlElement) -> UxmlElement:
 	var c := UxmlElement.new()
 	c.id = _next_id
 	_next_id += 1
@@ -328,11 +331,12 @@ func _clone(t: UxmlElement, anchor: UxmlElement, path: String) -> UxmlElement:
 	_orig[c] = _offset(t)
 	clones[c] = true
 	element_paths[c] = path
+	instances[c] = inst
 	if t.local == "Style":
 		var rec: Dictionary = _cache[path]
 		style_from[c] = {"path": path, "source": rec["source"], "offset": _offset(t)}
 	for ch in t.children:
-		c.children.append(_clone(ch, anchor, path))
+		c.children.append(_clone(ch, anchor, path, inst))
 	return c
 
 

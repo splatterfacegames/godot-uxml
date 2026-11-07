@@ -173,6 +173,27 @@ Run the example:
 godot --path . --script res://examples/minimal/minimal.gd
 ```
 
+### Editor APIs
+
+Tools such as a UXML editor use these calls. The calls take a
+`UxmlElement`, so elements without a `name` work too.
+
+```gdscript
+doc.load_source(text, path, "", resolver)   # read every file through a resolver
+doc.get_control_for(element)                # also get_native_for, get_element_for
+doc.explain_style(element, "margin-top")    # every declaration, winner first
+doc.set_forced_states(element, PackedStringArray(["hover"]))
+doc.get_transitions()                       # and seek_transitions(seconds)
+doc.element_at(point)                       # deepest element at a point
+doc.reload_stylesheet(origin, uss_text)     # restyle without a reload
+doc.replace_source(uxml_text)               # edit in place when possible
+UxmlControls.catalog()                      # elements and attributes
+```
+
+Element offsets (`open_tag_start`, `open_tag_end`, `source_end`, attribute
+offsets) are a documented contract. Every diagnostic has `offset` and
+`end_offset`. See [docs/design.md](docs/design.md), "Editor APIs".
+
 ## Unity coverage
 
 godot-uxml supports Unity UI Toolkit 6000.3: every UXML element and

@@ -743,6 +743,7 @@ impl<'a> Pass<'a> {
         dd.set("offset", offset);
         dd.set("line", line);
         dd.set("column", column);
+        dd.set("end_offset", self.c.end_offset(i));
         self.warnings.push(&dd.to_variant());
     }
 

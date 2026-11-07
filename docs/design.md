@@ -420,8 +420,13 @@ Stylesheets dedupe by resolved path (diamond imports load once); a true
 
 ## Diagnostics
 
-Plain Dictionaries: `{kind, message, file, line, column, offset}` — see
-`UxmlDiagnostic` for the kind list. Nothing throws: every failure mode is a
+Plain Dictionaries: `{kind, message, file, line, column, offset,
+end_offset}` — see `UxmlDiagnostic` for the kind list. `offset` and
+`end_offset` are String indices into the source of `file`: an element
+diagnostic spans the element's open tag (`open_tag_start` to
+`open_tag_end`), an attribute diagnostic `name="value"`, a USS diagnostic
+the declaration or rule head (before `;`, `{` or `}`). The native and the
+GDScript backends give the same `end_offset`. Nothing throws: every failure mode is a
 diagnostic plus a deterministic fallback (element kept, rule dropped,
 declaration dropped, file skipped). Kinds: `malformed`,
 `unsupported-control`, `unsupported-feature`, `unsupported-selector`,
@@ -1907,6 +1912,186 @@ items). Item `i` lives in pool slot `i % pool`, so scrolling re-binds only
 rows that scrolled out; slots past the item count are `display: none`.
 `virtualization-method="DynamicHeight"` is diagnosed (`unsupported-value`):
 rows keep `fixed-item-height`.
+
+## Editor APIs
+
+The calls a UXML editor needs on top of the game API. They take the
+`UxmlElement` itself, so elements without a `name` work too. An element of
+an earlier load is not an element of the current load: the calls give
+null or `{}`. None of them costs anything when unused: forced states add
+one empty-Dictionary check to a restyle, provenance and the hit test are
+queries that keep nothing, and the partial reloads run only when called.
+Tests: `tests/test_editor_api.gd` (every scenario that reads cascade,
+layout or runtime state runs on the native and the GDScript paths and
+compares the traces); `bench/equiv_runtime.gd` also drives forced states
+and compares `end_offset`.
+
+```gdscript
+# Loads with a caller resolver (unsaved buffers): the resolver reads every
+# file of the load; reload() keeps the resolver.
+doc.load_source(text, "/abs/project/Assets/UI/main.uxml", "", buffer_resolver)
+doc.load_document("Assets/UI/main.uxml", "", buffer_resolver)
+
+# Element handles
+var model := doc.get_document_model()          # UxmlDocumentModel
+var c := doc.get_control_for(el)               # outer control
+var n := doc.get_native_for(el)                # interactive native
+var e := doc.get_element_for(any_control)      # inverse; may be a part
+var p := doc.get_parent_element(el)
+var st := doc.get_computed_style_for(el)
+doc.set_element_state_for(el, "hover", true)   # input may clear it
+
+# Partial reload
+doc.reload_stylesheet(origin, uss_text)        # restyle, keep the controls
+doc.replace_source(uxml_text)                  # in place when possible
+doc.get_last_replace_mode()                    # "in-place" / "reload"
+
+# Provenance: every declaration of a longhand, winner first
+for d in doc.explain_style(el, "margin-top", {"hover": true}):
+    print(d["rank"], d["specificity"], d["value"], d["origin"])
+
+# Forced pseudo-states (state preview)
+doc.set_forced_states(el, PackedStringArray(["hover", "focus"]))
+doc.clear_forced_states()
+
+# Transition timeline (transitions_manual = true)
+var tracks := doc.get_transitions()
+doc.seek_transitions(0.35)
+
+# Hit test (document coordinates)
+var hit := doc.element_at(point, true)        # respect picking-mode
+
+# Catalog, templates
+var catalog := UxmlControls.catalog()
+var inst := model.instance_of(clone)          # the TemplateContainer
+var off := model.source_offset_of(clone)      # offset in the template file
+```
+
+### Source offsets (contract)
+
+`UxmlElement.open_tag_start` is the String index (not a byte index) of the
+`<` of the element's open tag; `open_tag_end` is past its `>` or `/>`;
+`source_end` is past the close tag (or past `/>`). `attributes[i].offset`
+is the index of the attribute name. The native and the GDScript parser
+give the same values (`test_source_offset_contract` checks every UXML
+fixture and Unity parity case on both).
+
+The offsets index into the source of the entry document
+(`UxmlDocumentModel.source`) for every element authored in that file,
+before and after the load (the runtime keeps them). Two kinds of element
+are not authored in the entry file:
+
+- a template clone carries the offsets of the outermost `<Instance>` of
+  the entry file, so that runtime diagnostics name a real place in the
+  entry file. `path_of(element)` gives the template file and
+  `source_offset_of(element)` the index of the clone's `<` in that file;
+  `instance_of(element)` gives the TemplateContainer whose expansion made
+  the clone (the innermost one; call again for the next);
+- a control part carries the offsets of its control element.
+
+`replace_source()` moves the offsets of the kept elements to the new text.
+
+### Loads with a caller resolver
+
+`load_document(path, root, resolver)` and `load_source(uxml, path, root,
+resolver)` take an optional `UxmlResourceResolver`. With one, the load
+reads every file through it (`<Style src>`, `@import`, templates, item
+templates, images, fonts; for `load_document` the document too) and `root`
+is not used: the project root is the resolver's. `reload()` keeps the
+resolver. A document from `load_source()` reloads through the resolver when
+the resolver can read its path, else from the same text. `null` keeps the
+old behaviour.
+
+### Partial reload
+
+`reload_stylesheet(origin, text)` parses the author sheet again in place
+(`UxmlLoader.reparse_sheet`): its items, its import and value diagnostics,
+its new `@import`s. The controls and their state stay; the cascade is
+built again and every control applied, so running transitions end. The
+applier forgets the diagnostics it reported (`forget_warnings`), and the
+applies report again what still holds. Theme sheets are not reloadable.
+A sheet that only the old text imported stays in `sheets`, unreferenced,
+so `origin.sheet` indices can differ from a fresh load. A cycle through a
+sheet that imports the reloaded sheet is not diagnosed again.
+
+`replace_source(uxml)` loads the new text as a model first. It edits in
+place when the raw element trees of the old and the new text match (same
+tags, same children) and only `class` and `style` values differ, with no
+templates, no `<Bindings>`, the same stylesheets, and `class` / `style`
+values that the runtime has not changed since the load. Then:
+
+1. the kept elements get the new offsets, and parts the offsets of their
+   control; the model gets the new text and the loader diagnostics of the
+   new text; later diagnostics move with their elements;
+2. the attribute edits go through `UxmlElement.set_attribute` (behaviors
+   see them);
+3. a new cascade is built over the same elements (diagnostics at the new
+   offsets). The running transitions move to the new cascade with their
+   overrides; preorder indices do not change. Only the controls whose
+   computed style changed are applied again (`_inject`, treated as fresh
+   changes so the layout settles as after any style change).
+
+Otherwise the document loads again from the new text. Behavior view state
+(scroll offsets, selections, tabs, split sizes), forced states and the
+focus move to the new element with the same `name` (a name used once), or
+else at the same tree position with the same tag. `source_replaced(in_place)`
+is emitted either way.
+
+### Provenance
+
+`explain_style(element, property, states)` lists every declaration of the
+longhand that applies to the element, winner first (see the method's doc
+comment for the entry shape). The query runs on the compiled rules of the
+GDScript cascade, which both backends compile, with its own matching
+context (names, class sets and state bits read from the elements and the
+document's runtime state), and keeps nothing. `states` changes the
+element's own pseudo-states for the query only. The order is the
+cascade's: `all: initial`, then inline, author and theme rank, then
+specificity, then source order. The winner's value and origin equal the
+computed style (`test_explain_agrees_with_the_cascade` checks every
+property of three fixtures on both paths). A shorthand declaration gives
+`property: "margin"` and the longhand value; `rank: "inherited"` and
+`"default"` entries close the list when no declaration gives the value.
+
+### Forced pseudo-states
+
+`set_forced_states(element, states)` keeps states on until cleared. The
+restyle merges them into `element_states` (hover, active, focus, checked,
+selected) and into the runtime disabled / enabled sets (disabled,
+enabled), so transitions, native disabled flags and descendants react as
+for a real change, and real input cannot clear them. The merge runs only
+while some element has forced states.
+
+### Transition snapshot and seek
+
+`get_transitions()` reads the running transitions of `UssTransitions`
+(`snapshot()`); `seek_transitions(seconds)` puts every running transition
+`seconds` after its start (`UssTransitions.seek`): the eased value is
+written as for a frame, without events; a transition put past its end
+shows the end value and keeps running until playback passes the end,
+which then emits `transition_end`. One GDScript implementation serves both
+cascade backends.
+
+### Hit test
+
+`element_at(point, respect_picking, include_parts)` walks the element
+tree from the root, children last-first, with each control's global
+transform (USS transforms are `offset_transform` with input following the
+transform), the clip of `overflow: hidden` (`clip_contents`, and the
+`UxmlClip` inset of the padding or content box; rounded corners are not
+tested), and visibility (`display: none`, `visibility: hidden` and parked
+subtrees are not drawn). `picking-mode="Ignore"` (or a binding's
+pickingMode) removes the element, not its children. A part hit gives its
+control element unless `include_parts`.
+
+### Catalog
+
+`UxmlControls.catalog()` lists the authorable elements (no part types):
+namespace, name, `container` (takes authored children), `editor_only`,
+`uxml_object` (Columns and sort descriptions), and the attributes with
+type, default (UXML text) and enum choices. Names and defaults follow
+Unity 6000.3. A test keeps the catalog inside `UssControls`: every element
+is a known control and every attribute is in `KNOWN_ATTRIBUTES`.
 
 ## Unsupported / out of scope (diagnosed, not silent)
 
