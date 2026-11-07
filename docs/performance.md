@@ -1352,3 +1352,352 @@ What remains:
 - Both layouts of a steady-state op (the timed restyle and the settling
   layout in the next frame) still do this work; the settling layout is
   older than this branch and outside the timed region.
+
+## Cost of Unity's box drawing, recovered (`perf/boxstyle`)
+
+Goal: recover what the pixel-parity merge (`unity/pixels`, 825dbcb) added
+to restyles, without changing any drawn pixel. That merge replaced
+`StyleBoxFlat` with `UxmlBoxStyle` for boxes with a radius, per-side
+colours or a background under a border. `bench/bench.gd -- --quick`
+against the main before it showed hover toggle (button) +10.7 %, hover
+toggle (card) +10.5 %, transition frame (bg colour) +8.1 %, hud frame +
+refresh +6.4 % and set_text + refresh +5.3 %, on a machine that varies by
+±10 %.
+
+### Where the time went
+
+Timed per call in one process (`bench/box_ab.gd` and scratch scripts on
+the large bench document; µs):
+
+| what | before | after |
+| --- | ---: | ---: |
+| `_stylebox` (build a box from its style) | 50–70 | 20 |
+| `UxmlBoxStyle.new()` alone / `StyleBoxFlat.new()` alone | 3.1 / 0.9 | (same) |
+| apply of the hovered Button (`card-7-ok`) | 180–230 | 75–105 |
+| apply of the hovered card (UxmlBox) | 65–90 | 28–40 |
+| first draw of a new `UxmlBoxStyle` (cached geometry) | 10–12 | (same; no new box on a hover) |
+| draw again / `StyleBoxFlat` draw (rounded) | 4 / 16 | (same) |
+| geometry build of a new size (button / card / r30 b3) | 320 / 490 / 840 | (same) |
+
+- **`UxmlBoxStyle` itself costs little.** Creating one costs 2 µs more
+  than a `StyleBoxFlat`, and a cached draw is faster than a rounded
+  `StyleBoxFlat` draw. With the old flat boxes swapped back in (a
+  temporary switch), the hover ops moved by −8 % to +5 % in one process:
+  within the noise.
+- **Building any box from its style cost 50–70 µs**, flat or not: four
+  widths, four colours, four radii and four paddings parsed and checked
+  per build, plus the box and its margins. A hover builds the box of every
+  re-applied control, a `refresh()` the box of every UxmlBox (they had no
+  memo), a colour transition one per frame.
+- **Installing the new box** on a Button's five slots, and then the
+  **theme update** that ends every themed apply: `end_bulk_theme_override`
+  always notifies, even when no override changed. Together about 45 µs of
+  a Button's apply; the colour overrides (five per Button) were written
+  again on every apply too.
+- **Fitted Buttons, without the theme.** The merge also fits a Button
+  that is smaller than its text and padding (`fit_button`), and places a
+  fitted Button again in every layout. Without the default theme, 305 of
+  the 309 Buttons of the large document are fitted, and every refit wrote
+  the margins and meta of five slots and updated the minimum size: about
+  8 ms per layout (set_class churn, set_text + relayout, resize and
+  width transitions were 1.5 times f6696c6).
+- Not the box: the native cascade update is 0.6–0.7 ms of the 1.2 ms
+  button hover and 1.1 ms of the 2.2 ms card hover; the merge did not
+  change it.
+- **Draws.** Every `refresh()` redrew every UxmlBox (each got a new box,
+  and the box setters redraw). A box with nothing visible (a radius
+  without background or border colour) still looked up or built its
+  geometry. The geometry build of a new size is 0.3–0.9 ms, 60–70 % of it
+  the triangle emission in GDScript.
+- Found on the way: the geometry cache key counted the opaque sides, but
+  one-colour sides are one mesh that leaves the transparent sides out, so
+  two boxes that differ only in a transparent side shared the first one's
+  mesh. The key now has the transparent sides of one-colour boxes too.
+
+### What changed
+
+- `_stylebox` is split into a record and a box. `_box_rec` gives the
+  record (kind of box, background and border colours, widths, radii,
+  content margins) from a static cache keyed by the values of the 17
+  style entries it reads; on a miss, the shape (widths, radii, padding)
+  comes from a second static cache keyed by the 12 non-colour values, and
+  only the colours are read again. A colour transition, which makes a new
+  colour value every frame, misses the first cache but not the second. A
+  record or shape whose build warned is not kept, so every element still
+  gets its own diagnostic, in the same order. `_make_box` builds the box
+  from the record (8 µs).
+- `_recolor`: when the new record has the same kind, widths, radii and
+  margins as the installed box, the box takes the new colours in place
+  (`UxmlBoxStyle.set_colors`; a `StyleBoxFlat` with its signals blocked)
+  and the control redraws; with the same colours nothing happens at all.
+  The themed path does this only for a box that is still installed on
+  every slot with the margins it was built with (`_installed_as_built`),
+  so a box whose margins the placement changed (percentage padding, a
+  fitted Button) is built again as before; a UxmlBox only when its box
+  has the record's margins and no background image is involved.
+  `set_colors` keeps the geometry unless the colours change its flags
+  (which sides are opaque, whether the sides have one colour, which are
+  transparent).
+- Unchanged colour and font size overrides are not written again. For a
+  Button, the bulk theme override of a themed apply opens at the first
+  override write or property change (`_ov`, `_setp`), so an apply that
+  changes nothing ends without a theme update. Property changes count
+  because Godot's Button shapes its text again on a theme update but not
+  on a `clip_text` change (`test_clipped_text_measure_follows_changes`
+  fails without it). Other controls update their theme at every apply,
+  as before: with the lazy update on Labels too, `bench/equiv_runtime.gd`
+  found Label sizes that differ between the incremental and the
+  full-refresh document after runtime text and state changes.
+- Fitted Buttons: the native placement keeps, per Button, the rect size,
+  insets and minimum size of its last fit, and skips `fit_button` while
+  they are the same and the Button is at its rect (a forced placement,
+  after a re-apply, drops it). `fit_button` itself, on both paths,
+  returns without writing when every slot already has the fitted margins.
+  `tests/test_visual.gd` (`test_fitted_buttons_follow_changes`) compares
+  fitted Buttons with a fresh load after relayouts, text set on the
+  control, a resize, a recolour and new padding, on both paths. It fails
+  when the early return skips its margin check.
+- `UxmlBoxStyle._draw` returns before looking up geometry when nothing
+  is visible. The `UxmlBox` box setters redraw only for a new value.
+- The geometry cache key has the transparent sides of one-colour boxes
+  (see above).
+- `UxmlStyleApplier.restyle_reuse` switches the restyle reuse off
+  (records, shapes, recolouring, skipped writes, the lazy bulk; not the
+  fitted-Button memo, which is native) for
+  `bench/box_ab.gd`, which compares the two in one process like
+  `bench/clip_ab.gd`.
+- `tests/test_visual.gd` (`test_restyled_boxes_match_fresh`) restyles
+  rounded and square Buttons and boxes (colours only; colours that
+  change the geometry flags; margins, widths, radii and kind; a colour
+  transition) and compares every box with a fresh load of the same
+  styles on both paths: kind, colours, widths, radii, margins and the
+  shared geometry. It also checks that colour-only restyles and the
+  transition keep their box objects, and that a transparent side gives
+  other geometry (it fails with the old key).
+
+Tried and dropped:
+
+- Swapping `StyleBoxFlat` back in for every box (a temporary switch, to
+  measure what `UxmlBoxStyle` costs): −8 % to +5 % on the hover ops in one
+  process, within the noise. The cost was in building and installing
+  boxes, flat or not.
+- A faster geometry build in GDScript: appends to packed arrays cost
+  0.1 µs each; the build is mostly call and loop overhead, so only a
+  native build would make it much cheaper. That file is also where the
+  pixel work changes the edge antialiasing, so the build stays as it is.
+
+### Results
+
+No drawn pixel changed: `bench/pixels.py` gives the same summary as
+a0fa025, and all 354 images it renders (177 cases, two renders each) are
+identical to a0fa025's, pixel for pixel.
+
+**In-process A/B on this branch** (`bench/box_ab.gd`, two runs of 60
+rounds per mode, A/B ratio of the medians; A reuses, B is
+`restyle_reuse = false`; the fitted-Button memo is on in both):
+
+| op | theme | no theme |
+| --- | ---: | ---: |
+| hover toggle (button) | 0.904 / 0.921 | 0.944 / 0.949 |
+| hover toggle (card) | 0.980 / 0.957 | 0.908 / 0.975 |
+| hover move (card i -> i+1) | 0.853 / 0.992 | 0.987 / 0.987 |
+| focus toggle (list item) | 0.963 / 0.954 | 1.013 / 0.979 |
+| set_class churn (card) | 1.005 / 1.061 | 1.011 / 0.980 |
+| set_text + refresh | 0.818 / 0.827 | 0.902 / 0.916 |
+| hud frame (8 labels + refresh) | 0.758 / 0.885 | 0.857 / 0.842 |
+| hud hover toggle | 0.907 / 0.898 | 0.962 / 0.903 |
+| transition frame (bg color) | 0.872 / 0.869 | 1.006 / 0.973 |
+| transition frame (card border color) | 0.960 / 0.976 | 0.976 / 0.971 |
+| load review.uxml | 1.008 / 0.953 | 0.982 / 0.998 |
+| load runtime.uxml | 0.968 / 0.983 | 0.984 / 1.095 |
+| load Options.uxml | 0.968 / 0.977 | 0.984 / 1.183 |
+| load wl_settings.uxml | 0.943 / 0.937 | 1.007 / 0.943 |
+| load wl_inventory.uxml | 0.979 / 0.920 | 0.932 / 0.936 |
+
+The noise floor of this harness is about ±3 % for the ops and ±8 % for
+the small no-theme loads (the 1.095 and 1.183 runs). Without the theme
+the hovered button has no radius and no hover colour of its own, so less
+of the work applies.
+
+**f6696c6 (before `UxmlBoxStyle`), a0fa025 (main) and this branch**:
+`bench/bench.gd -- --quick` and `bench/workloads.gd -- --quick`, each with
+and without `-- --no-theme`, in separate worktrees. Each of 12 rounds ran
+every script and mode for f6696c6, then a0fa025, then the branch. The
+tables give the median of the 12 medians (ms, native core). Other
+agents' Godot and Unity processes loaded the machine heavily during this
+run (every time is about 1.5 times what it was in the earlier sections),
+so single ops spread by ±10 % or more.
+
+`bench.gd`, theme:
+
+| op | f6696c6 | a0fa025 | branch | branch / f6696c6 | branch / a0fa025 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| parse_uxml(big) | 32.084 | 30.672 | 28.337 | 0.883 | 0.924 |
+| parse_uss(3 sheets) | 8.479 | 9.011 | 8.148 | 0.961 | 0.904 |
+| loader(big) | 69.691 | 63.248 | 58.914 | 0.845 | 0.931 |
+| cascade resolve(big) | 144.017 | 128.157 | 127.927 | 0.888 | 0.998 |
+| cascade resolve(big, hover) | 150.219 | 148.188 | 130.787 | 0.871 | 0.883 |
+| load_document(big) full | 1051.387 | 998.231 | 939.669 | 0.894 | 0.941 |
+| load_document(runtime.uxml) | 33.739 | 33.974 | 29.273 | 0.868 | 0.862 |
+| load_document(review.uxml) | 55.397 | 53.002 | 48.169 | 0.870 | 0.909 |
+| load_document(Options.uxml) | 27.301 | 28.694 | 27.110 | 0.993 | 0.945 |
+| load_document(Menu.uxml) | 5.680 | 5.723 | 5.563 | 0.979 | 0.972 |
+| hover toggle (button) | 2.071 | 1.921 | 1.762 | 0.851 | 0.917 |
+| hover toggle (card, desc sel) | 3.345 | 3.147 | 3.287 | 0.983 | 1.044 |
+| hover move (card i -> i+1) | 2.978 | 2.957 | 2.757 | 0.926 | 0.932 |
+| focus toggle (list item) | 2.786 | 2.645 | 2.483 | 0.891 | 0.939 |
+| set_class churn (card) | 22.914 | 22.387 | 22.533 | 0.983 | 1.006 |
+| set_text + refresh | 317.269 | 289.332 | 242.232 | 0.763 | 0.837 |
+| set_text + relayout | 18.456 | 18.484 | 19.271 | 1.044 | 1.043 |
+| resize relayout | 19.763 | 19.512 | 20.761 | 1.050 | 1.064 |
+| idle restyle (no change) | 1.280 | 1.101 | 1.288 | 1.007 | 1.171 |
+| transition frame (bg color) | 1.502 | 1.555 | 1.382 | 0.921 | 0.889 |
+| transition frame (width) | 17.160 | 17.990 | 19.480 | 1.135 | 1.083 |
+| hud frame (8 labels + refresh) | 4.922 | 4.345 | 3.888 | 0.790 | 0.895 |
+| hud frame (8 labels + relayout) | 0.877 | 0.881 | 0.898 | 1.025 | 1.019 |
+| hud frame (8 labels, no refresh) | 0.058 | 0.058 | 0.058 | 1.009 | 1.000 |
+| hud hover toggle | 0.463 | 0.481 | 0.466 | 1.006 | 0.967 |
+| geomean ratio | | | | 0.933 | 0.960 |
+
+
+`bench.gd`, no theme:
+
+| op | f6696c6 | a0fa025 | branch | branch / f6696c6 | branch / a0fa025 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| parse_uxml(big) | 33.877 | 33.406 | 32.477 | 0.959 | 0.972 |
+| parse_uss(3 sheets) | 8.172 | 8.566 | 9.189 | 1.124 | 1.073 |
+| loader(big) | 64.307 | 66.434 | 64.195 | 0.998 | 0.966 |
+| cascade resolve(big) | 130.764 | 132.832 | 139.523 | 1.067 | 1.050 |
+| cascade resolve(big, hover) | 140.314 | 140.852 | 143.609 | 1.023 | 1.020 |
+| load_document(big) full | 913.596 | 854.012 | 867.514 | 0.950 | 1.016 |
+| load_document(runtime.uxml) | 28.996 | 23.909 | 26.319 | 0.908 | 1.101 |
+| load_document(review.uxml) | 45.109 | 42.350 | 42.643 | 0.945 | 1.007 |
+| load_document(Options.uxml) | 20.483 | 18.487 | 17.852 | 0.872 | 0.966 |
+| load_document(Menu.uxml) | 4.927 | 4.690 | 4.494 | 0.912 | 0.958 |
+| hover toggle (button) | 2.001 | 2.042 | 1.944 | 0.972 | 0.952 |
+| hover toggle (card, desc sel) | 2.970 | 3.011 | 2.764 | 0.931 | 0.918 |
+| hover move (card i -> i+1) | 2.803 | 2.711 | 2.643 | 0.943 | 0.975 |
+| focus toggle (list item) | 2.442 | 2.319 | 2.114 | 0.866 | 0.911 |
+| set_class churn (card) | 21.613 | 31.044 | 22.081 | 1.022 | 0.711 |
+| set_text + refresh | 239.689 | 336.933 | 328.757 | 1.372 | 0.976 |
+| set_text + relayout | 20.270 | 31.923 | 19.939 | 0.984 | 0.625 |
+| resize relayout | 19.998 | 33.559 | 22.501 | 1.125 | 0.670 |
+| idle restyle (no change) | 1.321 | 1.304 | 1.206 | 0.913 | 0.925 |
+| transition frame (bg color) | 1.508 | 1.796 | 1.649 | 1.093 | 0.918 |
+| transition frame (width) | 18.468 | 31.047 | 19.650 | 1.064 | 0.633 |
+| hud frame (8 labels + refresh) | 4.524 | 4.739 | 4.080 | 0.902 | 0.861 |
+| hud frame (8 labels + relayout) | 0.913 | 0.876 | 0.869 | 0.951 | 0.992 |
+| hud frame (8 labels, no refresh) | 0.059 | 0.057 | 0.058 | 0.975 | 1.009 |
+| hud hover toggle | 0.477 | 0.469 | 0.457 | 0.958 | 0.975 |
+| geomean ratio | | | | 0.988 | 0.917 |
+
+
+`workloads.gd`, theme:
+
+| op | f6696c6 | a0fa025 | branch | branch / f6696c6 | branch / a0fa025 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| settings: load + first layout | 116.970 | 112.510 | 106.364 | 0.909 | 0.945 |
+| settings: switch tab (display none/flex) | 14.076 | 16.321 | 13.407 | 0.952 | 0.821 |
+| settings: hover row | 0.623 | 0.585 | 0.592 | 0.949 | 1.013 |
+| inventory: load + first layout | 141.070 | 146.698 | 128.077 | 0.908 | 0.873 |
+| inventory: hover slot | 1.118 | 1.030 | 0.938 | 0.839 | 0.911 |
+| inventory: select slot (set_class) | 2.455 | 2.444 | 2.518 | 1.026 | 1.030 |
+| inventory: count change + relayout | 1.977 | 1.704 | 1.857 | 0.940 | 1.090 |
+| dialog: load + first layout | 14.941 | 17.147 | 18.485 | 1.237 | 1.078 |
+| dialog: typewriter char + relayout | 0.671 | 0.791 | 0.643 | 0.958 | 0.812 |
+| dialog: hover choice | 0.186 | 0.181 | 0.185 | 0.992 | 1.019 |
+| list1k: load + first layout | 2512.398 | 2343.305 | 2574.579 | 1.025 | 1.099 |
+| list1k: hover row | 1.750 | 1.468 | 1.583 | 0.905 | 1.079 |
+| list1k: update one row + relayout | 27.825 | 24.770 | 30.018 | 1.079 | 1.212 |
+| listview10k: load + 10k items + first layout | 109.645 | 100.738 | 115.350 | 1.052 | 1.145 |
+| listview10k: scroll 3 rows (rebind + relayout) | 4.944 | 4.728 | 5.385 | 1.089 | 1.139 |
+| listview10k: hover row | 0.517 | 0.560 | 0.581 | 1.125 | 1.037 |
+| listview10k: update all visible items (refresh_list) | 3.614 | 3.757 | 3.974 | 1.099 | 1.058 |
+| geomean ratio | | | | 1.000 | 1.015 |
+
+
+`workloads.gd`, no theme:
+
+| op | f6696c6 | a0fa025 | branch | branch / f6696c6 | branch / a0fa025 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| settings: load + first layout | 100.487 | 91.688 | 97.406 | 0.969 | 1.062 |
+| settings: switch tab (display none/flex) | 10.968 | 10.059 | 10.190 | 0.929 | 1.013 |
+| settings: hover row | 0.566 | 0.528 | 0.549 | 0.971 | 1.039 |
+| inventory: load + first layout | 140.286 | 123.959 | 135.650 | 0.967 | 1.094 |
+| inventory: hover slot | 0.909 | 0.913 | 0.923 | 1.015 | 1.011 |
+| inventory: select slot (set_class) | 2.437 | 2.046 | 2.428 | 0.996 | 1.186 |
+| inventory: count change + relayout | 1.947 | 1.831 | 1.996 | 1.025 | 1.090 |
+| dialog: load + first layout | 13.393 | 13.992 | 14.639 | 1.093 | 1.046 |
+| dialog: typewriter char + relayout | 0.612 | 0.603 | 0.629 | 1.027 | 1.043 |
+| dialog: hover choice | 0.188 | 0.181 | 0.187 | 0.997 | 1.033 |
+| list1k: load + first layout | 1950.895 | 1742.542 | 1968.753 | 1.009 | 1.130 |
+| list1k: hover row | 1.574 | 1.565 | 1.736 | 1.103 | 1.109 |
+| list1k: update one row + relayout | 23.132 | 19.709 | 21.367 | 0.924 | 1.084 |
+| listview10k: load + 10k items + first layout | 101.133 | 87.948 | 95.465 | 0.944 | 1.085 |
+| listview10k: scroll 3 rows (rebind + relayout) | 3.969 | 3.963 | 4.287 | 1.080 | 1.082 |
+| listview10k: hover row | 0.348 | 0.383 | 0.396 | 1.138 | 1.034 |
+| listview10k: update all visible items (refresh_list) | 3.514 | 3.588 | 3.575 | 1.017 | 0.996 |
+| geomean ratio | | | | 1.010 | 1.066 |
+
+What the tables show:
+
+- With the theme, against a0fa025: hover toggle (button) −8 %,
+  transition frame (bg colour) −11 %, hud frame + refresh −10 %,
+  set_text + refresh −16 %, hover move −7 %, and the loads −3 % to −14 %.
+  Against f6696c6, every op the merge had made slower is now faster
+  than before it: hover toggle (button) −15 %, transition frame (bg)
+  −8 %, hud frame + refresh −21 %, set_text + refresh −24 %. Hover
+  toggle (card) is 0.98 / 1.04: it also restyles a Label's colour, which
+  still updates the Label's theme.
+- Without the theme, the fitted-Button memo takes back what fitting cost:
+  set_class churn, set_text + relayout, resize relayout and transition
+  frame (width) were 1.4 to 1.7 times f6696c6 on a0fa025 and are now
+  0.98 to 1.13 times. set_text + refresh stays at 1.37 times f6696c6 (see
+  below).
+- `workloads.gd` touches little of this; its geomeans are 1.015 (theme)
+  and 1.066 (no theme) against a0fa025 in this run, with the list1k and
+  listview10k ops (no changed code on their path besides the box record)
+  spread from 0.996 to 1.21. An earlier 15-round run on a quieter
+  machine, of the branch before Labels went back to a theme update on
+  every apply, had geomeans of 0.973 and 0.983 and the same ops at 0.99
+  to 1.04 (and `bench.gd` geomeans of 0.974 / 0.933).
+- `bench/render_cost.gd` (windowed, seven alternating runs each): a frame
+  of the large document took 1.05 to 2.03 ms on a0fa025 (median 1.47,
+  render CPU 0.79) and 1.14 to 1.94 ms on the branch (median 1.59, render
+  CPU 0.86). The spread between runs is larger than the difference; a
+  static frame draws the same meshes (and none for invisible boxes) on
+  both.
+
+Correctness, on the final state of the branch (each run on its own):
+`tests/run_tests.py` 2235 checks across 347 tests (main: 2202 / 345; the
+two new visual tests add the rest); `bench/parity.gd` UNITY PARITY
+176/177 (structure 4329/4329, geometry 14519/14520, style
+302242/302243, element properties 5177/5177, import diagnostics 86/86),
+PARITY 32 match / 12 differ, as on main; `bench/equiv.gd` 1530 (native)
+/ 1295 (`--gdscript`), `bench/equiv_layout.gd` 216 / 216,
+`bench/equiv_runtime.gd` 1400 / 1400, `bench/equiv_parse.gd`
+2783 / 2783, 0 failures each; `bench/pixels.py` PIXELS 177 cases, boxes
+90 exact, 6 more within 1px, 81 differ, box pixels 99.094 % exact,
+99.296 % within 1px, runtime rects 3114/3558, as on main.
+
+### What remains
+
+- A fitted Button is built again on every apply. The placement changed
+  its margins, so it is no longer as built, and the fit is redone after
+  the apply. Without the theme the large document has 305 of them, so
+  `refresh()` (set_text + refresh) is still 1.37 times f6696c6 there.
+  With the theme only 5 Buttons are fitted.
+- Labels still update their theme at the end of every apply, including
+  an apply that changes nothing: about 45 µs each. Making that lazy, as
+  for Buttons, needs another way to make Godot's Label shape its text
+  again after a runtime text or size change.
+- The first draw of a box at a new size builds its geometry in GDScript:
+  0.3 to 0.9 ms (button 0.32, card 0.49, a 30 px radius with a 3 px
+  border 0.84). It runs once per size and geometry, at the first frame
+  of a load (17 builds, 9 ms, for the large document) and when a resize
+  makes new sizes. A native build is the lever that is left.
+- The first draw of a new `UxmlBoxStyle` object costs 10 µs against 4 µs
+  for a later draw, for the cache key of its geometry. A recolour keeps
+  the object, so this is now paid at loads and shape changes only.
+- The native cascade update is most of a hover now (0.6 to 0.7 ms of the
+  1.1 to 1.2 ms button hover).
