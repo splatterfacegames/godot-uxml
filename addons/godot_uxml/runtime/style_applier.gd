@@ -1085,6 +1085,39 @@ static func label_max_content(l: Label) -> float:
 	return total
 
 
+## Godot floors a Label at the width of its text; Unity lets a Label be
+## narrower than its text and draws the text past the box (px-material: a
+## Label laid out 80px wide with 92px of text, drawn at 92px in Godot). A
+## one-line Label that the layout gives less width than its text gets
+## clip_text (its minimum width is then 1, so the control takes the
+## laid-out width) and draws its text unclipped (`_unclip` resets the
+## canvas clip after the Label's own draw). It is measured as its full
+## text, like overflow: hidden text (`uxml_clip_text`, clip_texts; the
+## native measurer reads the same meta); `uxml_wfit` marks it. apply()
+## puts clip_text back when it applies the text overflow
+## (_apply_elision), and the next placement fits the Label again. Called
+## by both placements after the control got its laid-out size.
+func fit_label_width(c: Label) -> void:
+	if c.has_meta(&"uxml_clip_text") or c.clip_text or c.autowrap_mode != TextServer.AUTOWRAP_OFF:
+		return
+	c.set_meta(&"uxml_clip_text_default", false)
+	c.set_meta(&"uxml_clip_text", true)
+	c.set_meta(&"uxml_wfit", true)
+	clip_texts += 1
+	if not c.has_meta(&"uxml_unclip"):
+		c.set_meta(&"uxml_unclip", true)
+		c.draw.connect(UxmlStyleApplier._unclip.bind(c))
+	c.clip_text = true
+	c.remove_meta(&"uxml_clip_full")
+
+
+## After the draw of a Label fitted by fit_label_width: the text draws past
+## the box, as Unity draws it (Label set the canvas clip for clip_text).
+static func _unclip(c: Label) -> void:
+	if c.has_meta(&"uxml_wfit"):
+		RenderingServer.canvas_item_set_clip(c.get_canvas_item(), c.clip_contents)
+
+
 ## Godot floors a Control at its minimum size, and the minimum height of a
 ## Label is one line of its font. Unity draws text that does not fit its
 ## box: a Label in a 20px TreeView row is 14px high, and a Label row of a
@@ -2462,10 +2495,14 @@ func _apply_elision(c: Control, style: Dictionary, el: UxmlElement) -> void:
 			c.set_meta("uxml_clip_text", true)
 			clip_texts += 1
 		c.clip_text = true
+		if c.has_meta(&"uxml_wfit"):
+			c.remove_meta(&"uxml_wfit")  # clipped now, not just narrow
 	elif c.has_meta("uxml_clip_text"):
 		c.clip_text = bool(c.get_meta("uxml_clip_text_default"))
 		c.remove_meta("uxml_clip_text")
 		c.remove_meta("uxml_clip_text_default")
+		if c.has_meta(&"uxml_wfit"):
+			c.remove_meta(&"uxml_wfit")
 		clip_texts -= 1
 	var to := _str(style, "text-overflow")
 	if not to.is_empty() and to != "clip" and to != "ellipsis":
