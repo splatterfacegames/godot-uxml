@@ -263,7 +263,7 @@ func _save_rects(doc: UxmlDocument, file: String) -> void:
 		if not (c is Control) or not (c as Control).is_visible_in_tree():
 			continue
 		var t := origin.affine_inverse() * (c as Control).get_global_transform()
-		if not t.x.is_equal_approx(Vector2.RIGHT) or not t.y.is_equal_approx(Vector2.DOWN):
+		if t.x.distance_to(Vector2.RIGHT) > 1e-4 or t.y.distance_to(Vector2.DOWN) > 1e-4:
 			continue  # rotated or scaled: Unity's worldBound is a bounding box
 		out[p] = [t.origin.x, t.origin.y, (c as Control).size.x, (c as Control).size.y]
 	var f := FileAccess.open(_out.path_join(file), FileAccess.WRITE)

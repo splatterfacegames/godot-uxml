@@ -224,6 +224,11 @@ func _build(rect: Rect2, img_round: bool, uniform: bool) -> Array:
 		# Outer fraction u -> inner fraction: piecewise linear through the
 		# split, so the segment between the two split points is the line.
 		var placed := false
+		# At a square corner every sample sits on the corner; the feather of
+		# each side runs along the split line, scaled so that it is half a
+		# pixel across that side's edge: the sides still meet on the line.
+		var na := _split_normal(dir, first)
+		var nb := _split_normal(dir, second)
 		for i in n + 1:
 			var u := float(i) / float(n)
 			if not placed and u >= f_o - _EPS:
@@ -243,6 +248,12 @@ func _build(rect: Rect2, img_round: bool, uniform: bool) -> Array:
 					sa[3] = -dir.normalized()
 				var sb := sa.duplicate()
 				sb[4] = second
+				if sharp:
+					sa[1] = na
+					sb[1] = nb
+				if isharp:
+					sa[3] = na
+					sb[3] = nb
 				samples.append(sa)
 				samples.append(sb)
 				placed = true
@@ -253,8 +264,13 @@ func _build(rect: Rect2, img_round: bool, uniform: bool) -> Array:
 				ui = 0.0 if f_o < _EPS else u / f_o * f_i
 			else:
 				ui = f_i + (u - f_o) / maxf(1.0 - f_o, _EPS) * (1.0 - f_i)
-			samples.append(_sample(cx, cy, orx, ory, icx, icy, irx, iry, a0 + PI * 0.5 * u,
-				a0 + PI * 0.5 * ui, sharp, isharp, k, second if placed else first))
+			var sm := _sample(cx, cy, orx, ory, icx, icy, irx, iry, a0 + PI * 0.5 * u,
+				a0 + PI * 0.5 * ui, sharp, isharp, k, second if placed else first)
+			if sharp:
+				sm[1] = nb if placed else na
+			if isharp:
+				sm[3] = nb if placed else na
+			samples.append(sm)
 	var count := samples.size()
 	var full := Color(1.0, 1.0, 1.0, 1.0)
 	var none := Color(1.0, 1.0, 1.0, 0.0)
@@ -265,12 +281,13 @@ func _build(rect: Rect2, img_round: bool, uniform: bool) -> Array:
 		for i in count:
 			var s: Array = samples[i]
 			var t: Array = samples[(i + 1) % count]
-			var p0: Vector2 = s[2] - s[3] * 0.5
-			var p1: Vector2 = t[2] - t[3] * 0.5
+			var sn := _fill_ni(s)
+			var tn := _fill_ni(t)
+			var p0: Vector2 = s[2] - sn * 0.5
+			var p1: Vector2 = t[2] - tn * 0.5
 			if p0.distance_squared_to(p1) > 1e-8:
 				_tri(_G_MASK, centre, p0, p1, full, full, full)
-			if s[3] != Vector2.ZERO or t[3] != Vector2.ZERO:
-				_quad(_G_MASK, p0, p1, t[2] + t[3] * 0.5, s[2] + s[3] * 0.5, full, full, black, black)
+			_quad(_G_MASK, p0, p1, t[2] + tn * 0.5, s[2] + sn * 0.5, full, full, black, black)
 		return _meshes(rect.size)
 	# The background fills the box. Under a side with an opaque border its
 	# edge is half a pixel inside the outer edge; elsewhere (no border, or a
@@ -278,16 +295,28 @@ func _build(rect: Rect2, img_round: bool, uniform: bool) -> Array:
 	# an opaque border is half background, a translucent border shows the
 	# background out to its antialiased outer pixels). The edge is
 	# antialiased over a pixel; a square corner has none on the grid.
+	# A segment's inner edge ends where the next one's starts unless their
+	# shifts differ (an opaque side beside a translucent one, at a square
+	# corner): the fan closes the gap between them.
+	var last := Vector2.INF
+	var first_p := Vector2.INF
 	for i in count:
 		var s: Array = samples[i]
 		var t: Array = samples[(i + 1) % count]
 		var side: int = s[4]
 		var under: bool = widths[side] > 0.0 and colors[side].a >= 1.0
 		var shift := 0.5 if under else 0.0
-		var n0: Vector2 = s[1] if s[1] != Vector2.ZERO else (s[5] if under else Vector2.ZERO)
-		var n1: Vector2 = t[1] if t[1] != Vector2.ZERO else (t[5] if under else Vector2.ZERO)
+		var n0 := _fill_n(s)
+		var n1 := _fill_n(t)
 		var p0: Vector2 = s[0] - n0 * (0.5 + shift)
 		var p1: Vector2 = t[0] - n1 * (0.5 + shift)
+		if i == 0:
+			first_p = p0
+		elif last.distance_squared_to(p0) > 1e-8:
+			_tri(_G_BG, centre, last, p0, full, full, full)
+		last = p1
+		if i == count - 1 and last.distance_squared_to(first_p) > 1e-8:
+			_tri(_G_BG, centre, last, first_p, full, full, full)
 		if p0.distance_squared_to(p1) > 1e-8:
 			_tri(_G_BG, centre, p0, p1, full, full, full)
 		if n0 != Vector2.ZERO or n1 != Vector2.ZERO:
@@ -297,10 +326,12 @@ func _build(rect: Rect2, img_round: bool, uniform: bool) -> Array:
 		for i in count:
 			var s: Array = samples[i]
 			var t: Array = samples[(i + 1) % count]
-			var a: Vector2 = s[0] - s[1] * 0.5
-			var b: Vector2 = t[0] - t[1] * 0.5
+			var sn := _fill_n(s)
+			var tn := _fill_n(t)
+			var a: Vector2 = s[0] - sn * 0.5
+			var b: Vector2 = t[0] - tn * 0.5
 			_tri(_G_IMAGE, centre, a, b, full, full, full)
-			_quad(_G_IMAGE, a, b, t[0] + t[1] * 0.5, s[0] + s[1] * 0.5, full, full, none, none)
+			_quad(_G_IMAGE, a, b, t[0] + tn * 0.5, s[0] + sn * 0.5, full, full, none, none)
 	# Border: per segment, in the group of its side: the strip between the
 	# outer and the inner outline, feathered on both edges.
 	var edges: Array = []
@@ -358,7 +389,7 @@ func _meshes(size: Vector2) -> Array:
 static func _thick(s: Array) -> float:
 	var n: Vector2 = s[1]
 	var d: Vector2 = s[0] - s[2]
-	return d.dot(n) if n != Vector2.ZERO else d.length()
+	return d.length() if s[6] else d.dot(n)
 
 
 ## The four points of the border strip at a sample, from outside in, and
@@ -370,7 +401,7 @@ func _edges(s: Array) -> Array:
 	var no: Vector2 = s[1]
 	var i: Vector2 = s[2]
 	var ni: Vector2 = s[3]
-	var d := (o - i).dot(no) if no != Vector2.ZERO else (o - i).length()
+	var d := (o - i).length() if s[6] else (o - i).dot(no)
 	if d < 1.0:
 		var m := (o + i) * 0.5
 		var cov := clampf(d, 0.0, 1.0)
@@ -381,12 +412,35 @@ func _edges(s: Array) -> Array:
 func _sample(cx: float, cy: float, orx: float, ory: float, icx: float, icy: float,
 		irx: float, iry: float, a: float, ai: float, sharp: bool, isharp: bool, k: int, side: int) -> Array:
 	var o := Vector2(cx + orx * _grow * cos(a), cy + ory * _grow * sin(a))
-	# A square corner has no normal: its edges are not feathered (Unity
-	# draws straight edges hard; the box is on the pixel grid).
-	var no := Vector2.ZERO if sharp else Vector2(cos(a) / orx, sin(a) / ory).normalized()
+	# A square corner's normal is its miter: the straight edges beside it
+	# are feathered over one pixel centred on the edge, Unity's coverage
+	# clamp(0.5 - distance). On the pixel grid every pixel centre is half a
+	# pixel off the edge, so the edge stays hard; at a fractional position,
+	# under a rotation or a scale it is antialiased as Unity draws it.
+	var no: Vector2 = _MITER[k] if sharp else Vector2(cos(a) / orx, sin(a) / ory).normalized()
 	var inner := Vector2(icx + irx * _grow * cos(ai), icy + iry * _grow * sin(ai))
-	var ni := Vector2.ZERO if isharp else Vector2(cos(ai) / irx, sin(ai) / iry).normalized()
-	return [o, no, inner, ni, side, _MITER[k]]
+	var ni: Vector2 = _MITER[k] if isharp else Vector2(cos(ai) / irx, sin(ai) / iry).normalized()
+	return [o, no, inner, ni, side, _MITER[k], sharp, isharp]
+
+
+## The feather normal of `side` at the split of a square corner: along the
+## split line (`dir`, inward), one pixel across the side's edge; the miter
+## when the line runs along the edge.
+static func _split_normal(dir: Vector2, side: int) -> Vector2:
+	var across := absf(dir.y) if side % 2 == 0 else absf(dir.x)
+	if across < _EPS:
+		return Vector2(signf(-dir.x) if dir.x != 0.0 else 0.0, signf(-dir.y) if dir.y != 0.0 else 0.0)
+	return -dir / across
+
+
+## The outer and inner normals of a sample for a fill (background, image,
+## mask): the miter at a square corner (the split normals are the border's).
+static func _fill_n(s: Array) -> Vector2:
+	return s[5] if s[6] else s[1]
+
+
+static func _fill_ni(s: Array) -> Vector2:
+	return s[5] if s[7] else s[3]
 
 
 ## Where the line from `corner` along `dir` meets the ellipse arc of the

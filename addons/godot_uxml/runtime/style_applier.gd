@@ -1895,6 +1895,9 @@ static func _px_of(e) -> float:
 ## element's own size, origin) are ratios Godot re-resolves on resize.
 ## offset_transform_visual_only = false: input follows the transform, as
 ## Unity picking does.
+const _NO_SNAP := 1e-5
+
+
 func _apply_transform(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	var te = style.get("translate")
 	var re = style.get("rotate")
@@ -1909,6 +1912,7 @@ func _apply_transform(c: Control, style: Dictionary, el: UxmlElement) -> void:
 			c.offset_transform_scale = Vector2.ONE
 			c.offset_transform_pivot = Vector2.ZERO
 			c.offset_transform_pivot_ratio = Vector2(0.5, 0.5)
+			c.rotation = 0.0
 		return
 	var tpx := Vector2.ZERO
 	var tratio := Vector2.ZERO
@@ -1950,6 +1954,14 @@ func _apply_transform(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	c.offset_transform_scale = sc
 	c.offset_transform_pivot = opx
 	c.offset_transform_pivot_ratio = oratio
+	# Godot snaps a Control's canvas transform origin to the pixel grid
+	# (gui/common/snap_controls_to_pixels, on by default) unless its own
+	# rotation is off the quarter turns, and the offset transform is inside
+	# the snapped part: a rotated, scaled or fractionally translated element
+	# drew up to half a pixel off (px-transform, rotate: 15deg 0.2px left).
+	# Unity does not snap. A rotation of 1e-5 rad (0.004px over 400px)
+	# turns the snap off for the element.
+	c.rotation = _NO_SNAP
 
 
 ## cursor: a Unity keyword -> mouse_default_cursor_shape (Unity itself
