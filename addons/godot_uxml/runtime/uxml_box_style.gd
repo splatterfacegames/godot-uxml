@@ -22,8 +22,9 @@ extends StyleBox
 ## each side, the clipped image, the clip mask), its vertex colours white
 ## with the coverage in alpha (the mask: the coverage in the colour
 ## channels), drawn with the part's colour as the modulate. A colour change
-## (a hover, a colour transition) needs no new geometry; a new size builds
-## it once.
+## (a hover, a colour transition: set_colors on the installed box) needs no
+## new geometry unless it changes which sides are opaque or transparent or
+## whether the sides have one colour; a new size builds it once.
 
 var bg_color := Color(0, 0, 0, 0)
 ## Border widths: top, right, bottom, left (px, on the pixel grid).
@@ -68,6 +69,9 @@ const _NUDGE := [Vector2(-0.007, 0.007), Vector2(-0.007, -0.007), Vector2(-0.007
 func _draw(to_canvas_item: RID, rect: Rect2) -> void:
 	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
 		return
+	if (bg_color.a <= 0.0 and image == null and not fill_inner and colors[0].a <= 0.0
+			and colors[1].a <= 0.0 and colors[2].a <= 0.0 and colors[3].a <= 0.0):
+		return  # nothing to draw: no geometry needed
 	if rect.size != _geo_size or _geo == null:
 		_find_geo(rect.size)
 	var xf := Transform2D(0.0, rect.position)
@@ -94,22 +98,40 @@ func _draw(to_canvas_item: RID, rect: Rect2) -> void:
 			_mesh(to_canvas_item, 1 + k, xf, colors[k], RID())
 
 
-## The shared geometry for a size (this style's inputs do not change after
-## the applier built it, so a size is the only key per instance).
+## The shared geometry for a size (this style's geometry inputs do not
+## change after the applier built it, and set_colors drops the geometry
+## when new colours change its flags, so a size is the only key per
+## instance).
 var _geo_size := Vector2(-1.0, -1.0)
 var _img_round := false
 ## The side whose colour every drawn side has (-1: the sides differ).
 var _uniform := -1
 
 
+## The geometry flags of _geo (what of the colours, the image and
+## fill_inner its geometry depends on).
+var _geo_flags := -1.0
+
+
 ## Call after changing widths, radii, colours, image or fill_inner of a
-## style that has drawn.
+## style that has drawn (set_colors needs no call).
 func invalidate() -> void:
 	_geo = null
 	_geo_size = Vector2(-1.0, -1.0)
 
 
-func _find_geo(size: Vector2) -> void:
+## New colours (a hover, a colour transition): the geometry stays when it
+## does not depend on what changed (which sides are opaque, whether the
+## drawn sides have one colour); the next draw builds it otherwise.
+func set_colors(bg: Color, side_colors: Array) -> void:
+	bg_color = bg
+	colors = side_colors.duplicate()
+	if _geo != null and _shape_flags() != _geo_flags:
+		invalidate()
+
+
+## Sets _img_round and _uniform; returns the geometry flags.
+func _shape_flags() -> float:
 	var st := image as StyleBoxTexture
 	_img_round = st != null and st.texture != null 		and (radii[0] > 0.0 or radii[1] > 0.0 or radii[2] > 0.0 or radii[3] > 0.0) 		and st.texture_margin_left == 0.0 and st.texture_margin_top == 0.0 		and st.texture_margin_right == 0.0 and st.texture_margin_bottom == 0.0
 	_uniform = -1
@@ -124,6 +146,14 @@ func _find_geo(size: Vector2) -> void:
 	for k in 4:
 		if widths[k] > 0.0 and colors[k].a >= 1.0:
 			flags += float(8 << k)
+		# One mesh for all sides leaves the transparent ones out.
+		if _uniform >= 0 and colors[k].a > 0.0:
+			flags += float(128 << k)
+	return flags
+
+
+func _find_geo(size: Vector2) -> void:
+	var flags := _shape_flags()
 	var key := PackedFloat64Array([size.x, size.y, widths[0], widths[1], widths[2], widths[3],
 		radii[0], radii[1], radii[2], radii[3], flags])
 	var hit = _cache.get(key)
@@ -134,6 +164,7 @@ func _find_geo(size: Vector2) -> void:
 		_cache[key] = hit
 	_geo = hit
 	_geo_size = size
+	_geo_flags = flags
 
 
 func _mesh(ci: RID, g: int, xf: Transform2D, modulate: Color, tex: RID) -> void:

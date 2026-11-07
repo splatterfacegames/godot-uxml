@@ -20,8 +20,12 @@ var natural_size := Vector2.ZERO
 
 
 ## The stylebox drawn behind the element, or null for no background.
+## Setting the same object again does not redraw (the applier redraws a
+## box it recoloured).
 var box_style: StyleBox = null:
 	set(v):
+		if v == box_style:
+			return
 		box_style = v
 		queue_redraw()
 
@@ -29,6 +33,8 @@ var box_style: StyleBox = null:
 ## container). Element images use a TextureRect child instead.
 var box_texture: Texture2D = null:
 	set(v):
+		if v == box_texture:
+			return
 		box_texture = v
 		queue_redraw()
 
@@ -36,6 +42,8 @@ var box_texture: Texture2D = null:
 ## -unity-background-image-tint-color). Drawn instead of box_texture.
 var box_texture_style: StyleBox = null:
 	set(v):
+		if v == box_texture_style:
+			return
 		box_texture_style = v
 		queue_redraw()
 

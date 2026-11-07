@@ -30,6 +30,14 @@ extends RefCounted
 ## first-frame parity with the pre-optimization runtime.
 const BULK_THEME_OVERRIDES := true
 
+## A restyle reuses what it can: a box's shape comes from the cache of its
+## style values (_box_rec), an installed box takes new colours in place
+## when only its colours change (_recolor), an unchanged theme override is
+## not written again, and an apply that writes no override updates no
+## theme (_ov). The result is the same either way; false does all the
+## work every time (bench/box_ab.gd compares the two in one process).
+static var restyle_reuse := true
+
 var _resolver: UxmlResourceResolver
 var _uxml_path: String
 var _source: String
@@ -286,11 +294,50 @@ func _apply_themed(c: Control, style: Dictionary, el: UxmlElement, include_skin:
 	# All override writes for this control land as ONE theme-changed
 	# notification instead of one per slot/color (10+ for a Button).
 	if BULK_THEME_OVERRIDES:
-		c.begin_bulk_theme_override()
+		# A Button's bulk opens at the first override write or property
+		# change (_ov): an apply that changes nothing (a recoloured box,
+		# unchanged text styling) updates no theme. Other controls update
+		# their theme at every apply, as before: a Label shapes its text
+		# again on a theme update, and some of its sizes after runtime text
+		# and state changes depend on that (bench/equiv_runtime.gd differs
+		# without it).
+		var prev_c := _bulk_c
+		var prev_open := _bulk_open
+		_bulk_c = c
+		_bulk_open = not restyle_reuse or not c is BaseButton
+		if _bulk_open:
+			c.begin_bulk_theme_override()
 		_apply_themed_inner(c, style, el, include_skin)
-		c.end_bulk_theme_override()
+		var opened := _bulk_open
+		_bulk_c = prev_c
+		_bulk_open = prev_open
+		if opened:
+			c.end_bulk_theme_override()
 	else:
 		_apply_themed_inner(c, style, el, include_skin)
+
+
+## The control of the running _apply_themed and whether its bulk theme
+## override is open.
+static var _bulk_c: Control = null
+static var _bulk_open := false
+
+
+## Before a write on `c` (a theme override, or a property whose change
+## may need the theme update; Godot's Button, for one, shapes its text
+## again on a theme change but not on a clip_text change): opens the bulk
+## override of the running _apply_themed, whose end updates the theme.
+static func _ov(c: Control) -> void:
+	if c == _bulk_c and not _bulk_open:
+		_bulk_open = true
+		c.begin_bulk_theme_override()
+
+
+## Sets a property of `c` that changes, after _ov.
+static func _setp(c: Control, prop: StringName, v: Variant) -> void:
+	if c.get(prop) != v:
+		_ov(c)
+		c.set(prop, v)
 
 
 ## Per themed control without a background image: [the style entries of
@@ -373,8 +420,23 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 				sb = memo[1]
 				keep = sb != null and _installed_as_built(c, slots, sb, memo[2])
 			if not keep and (not same or sb != null):
-				sb = _stylebox(style, el)
-				_box_memo[c] = [inputs, sb, null if sb == null else (sb.get_meta("uxml_margins") as Array).duplicate()]
+				var rec := _box_rec(style, el, false, inputs)
+				var old = memo[1] if memo != null else null
+				var rc := -1
+				if old != null and restyle_reuse and _installed_as_built(c, slots, old, rec[_R_MARGINS]):
+					rc = _recolor(old, rec)
+				if rc >= 0:
+					# At most the colours changed (a hover, a colour
+					# transition): the installed box takes them, and the
+					# control redraws without a new box and a theme update.
+					sb = old
+					keep = true
+					if rc == 1:
+						c.queue_redraw()
+					_box_memo[c] = [inputs, sb, (rec[_R_MARGINS] as Array).duplicate()]
+				else:
+					sb = _make_box(rec)
+					_box_memo[c] = [inputs, sb, null if sb == null else (rec[_R_MARGINS] as Array).duplicate()]
 		if not keep:
 			# A Button without a USS box draws none (Unity's RepeatButton and
 			# `all: initial` draw no box): not Godot's theme box, whose
@@ -384,6 +446,7 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 			for slot in slots:
 				if sb == _NO_BOX and c.has_theme_stylebox_override(slot) and c.get_theme_stylebox(slot) == sb:
 					continue  # installed: a new override would update the theme again
+				_ov(c)
 				if sb != null:
 					c.add_theme_stylebox_override(slot, sb)
 				else:
@@ -398,8 +461,13 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 	var color := _color(style, "color", el)
 	for name in _font_color_names(c):
 		if color != null:
-			c.add_theme_color_override(name, color)
+			# An unchanged override is not written (a write updates the
+			# control's theme).
+			if not restyle_reuse or not c.has_theme_color_override(name) or c.get_theme_color(name) != color:
+				_ov(c)
+				c.add_theme_color_override(name, color)
 		elif c.has_theme_color_override(name):
+			_ov(c)
 			c.remove_theme_color_override(name)
 
 	if c is LineEdit or c is TextEdit:
@@ -408,8 +476,12 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 	var size_name := _font_size_name(c)
 	var font_size := _int(style, "font-size", el)
 	if font_size > 0:
-		c.add_theme_font_size_override(size_name, font_size)
+		if (not restyle_reuse or not c.has_theme_font_size_override(size_name)
+				or c.get_theme_font_size(size_name) != font_size):
+			_ov(c)
+			c.add_theme_font_size_override(size_name, font_size)
 	elif c.has_theme_font_size_override(size_name):
+		_ov(c)
 		c.remove_theme_font_size_override(size_name)
 
 	_apply_auto_size(c, style, el)
@@ -450,8 +522,10 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 		# An unchanged override is not set again (a theme change makes the
 		# control shape its text again).
 		if not c.has_theme_font_override(font_name) or c.get_theme_font(font_name) != font:
+			_ov(c)
 			c.add_theme_font_override(font_name, font)
 	elif c.has_theme_font_override(font_name):
+		_ov(c)
 		c.remove_theme_font_override(font_name)
 
 	_apply_text_layout(c, style, el)
@@ -478,8 +552,10 @@ func _apply_edit_colors(c: Control, style: Dictionary, el: UxmlElement) -> void:
 		var item: String = _EDIT_COLORS[prop]
 		var col = _color(style, prop, el) if style.has(prop) else null
 		if col != null:
+			_ov(c)
 			c.add_theme_color_override(item, col)
 		elif c.has_theme_color_override(item):
+			_ov(c)
 			c.remove_theme_color_override(item)
 
 
@@ -524,6 +600,7 @@ func _apply_auto_size(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	# Until the next placement fits the laid-out box, draw at the last
 	# fitted size (or the maximum).
 	var fs := int(c.get_meta(_AUTOSIZE_FS, int(floorf(spec[1]))))
+	_ov(c)
 	c.add_theme_font_size_override(_font_size_name(c), fs)
 
 
@@ -654,14 +731,18 @@ func _apply_text_outline(c: Control, style: Dictionary, el: UxmlElement) -> void
 	var w := _float_px(style, "-unity-text-outline-width", el)
 	var col = _color(style, "-unity-text-outline-color", el)
 	if w > 0.0:
+		_ov(c)
 		c.add_theme_constant_override("outline_size", maxi(1, roundi(w * 2.0)))
 		# Unity's initial outline colour is transparent.
 		var oc: Color = col if col != null else Color.TRANSPARENT
+		_ov(c)
 		c.add_theme_color_override("font_outline_color", oc)
 	else:
 		if c.has_theme_constant_override("outline_size"):
+			_ov(c)
 			c.remove_theme_constant_override("outline_size")
 		if c.has_theme_color_override("font_outline_color"):
+			_ov(c)
 			c.remove_theme_color_override("font_outline_color")
 
 
@@ -825,8 +906,20 @@ func _has_slice_or_tint(style: Dictionary) -> bool:
 ## for them and the wrapper gets it. For sliders the groove slot is themed
 ## on the native control itself.
 func _apply_box(box: UxmlBox, el: UxmlElement, style: Dictionary) -> void:
-	box.box_style = _stylebox(style, el)
+	var rec := _box_rec(style, el, false)
 	var tex := _texture(style, "background-image", el)
+	var old := box.box_style
+	var rc := -1
+	if (tex == null and restyle_reuse and old != null and rec[_R_KIND] != 0
+			and old.get_meta("uxml_margins", null) == rec[_R_MARGINS]
+			and _margins_are(old, rec[_R_MARGINS])):
+		rc = _recolor(old, rec)
+	if rc >= 0:
+		# At most the colours changed: the box keeps its style object.
+		if rc == 1:
+			box.queue_redraw()
+	else:
+		box.box_style = _make_box(rec)
 	if tex != null and box.box_style != null and _box_drawn(box.box_style):
 		# A background colour, border or radius with the image: the image
 		# draws between the fill and the border (UxmlBoxStyle), as in Unity.
@@ -1225,8 +1318,13 @@ func fit_button(c: Button, want: Vector2, start: Vector2, end: Vector2) -> bool:
 	var fitted: bool = m != [start.x, start.y, end.x, end.y]
 	if not fitted and not c.has_meta(&"uxml_bfit"):
 		return false
+	var slots := _stylebox_slots(c)
+	if fitted and c.size == want and c.has_meta(&"uxml_bfit") and _fit_as(c, slots, m):
+		# Fitted the same at the last placement (a fitted Button is
+		# placed again by every layout): nothing to write.
+		return true
 	var seen := {}
-	for slot in _stylebox_slots(c):
+	for slot in slots:
 		if not c.has_theme_stylebox_override(slot):
 			continue
 		var s := c.get_theme_stylebox(slot)
@@ -1249,6 +1347,22 @@ func fit_button(c: Button, want: Vector2, start: Vector2, end: Vector2) -> bool:
 	c.update_minimum_size()
 	c.size = want
 	return fitted
+
+
+## Every stylebox override of `c` has the margins `m` ([l, t, r, b]) and
+## the uxml_margins meta of them.
+static func _fit_as(c: Control, slots: Array, m: Array) -> bool:
+	for slot in slots:
+		if not c.has_theme_stylebox_override(slot):
+			continue
+		var s := c.get_theme_stylebox(slot)
+		if s == null:
+			continue
+		if (s.content_margin_left != m[0] or s.content_margin_top != m[1]
+				or s.content_margin_right != m[2] or s.content_margin_bottom != m[3]
+				or s.get_meta("uxml_margins", null) != m):
+			return false
+	return true
 
 
 ## The height of a one-line Label with the font it has without fit_label:
@@ -1438,27 +1552,83 @@ const _PAD := ["padding-top", "padding-right", "padding-bottom", "padding-left"]
 ## `force_box`: a UxmlBoxStyle even when StyleBoxFlat would draw the box
 ## the same (a background image goes between its fill and its border).
 func _stylebox(style: Dictionary, el: UxmlElement, force_box := false) -> StyleBox:
+	return _make_box(_box_rec(style, el, force_box))
+
+
+## What _stylebox builds, as a record: [kind (0 none, 1 UxmlBoxStyle,
+## 2 StyleBoxFlat), background colour (or null), widths, border colours,
+## radii, the StyleBoxFlat border colour, content margins (l, t, r, b)].
+## Records and their parts are shared: never written after the build.
+const _R_KIND := 0
+const _R_BG := 1
+const _R_WIDTHS := 2
+const _R_COLORS := 3
+const _R_RADII := 4
+const _R_FLAT_BORDER := 5
+const _R_MARGINS := 6
+const _NO_REC := [0, null, null, null, null, null, null]
+## The shape of a box: what the border widths, radii and padding give
+## ([widths, radii, content margins, any border, any radius, any padding]),
+## by their values (_BOX_KEYS less the colours). A shape is a function of
+## those values alone, so documents and controls with the same values share
+## it (static); one whose build warned is not kept (each element gets its
+## own warning). The colours are read on every build: they change on a
+## hover or every frame of a colour transition.
+static var _box_shapes: Dictionary = {}
+const _BOX_SHAPES_MAX := 4096
+## Whole records by all their values (_BOX_KEYS) and force_box, kept like
+## the shapes: a hover between two styles finds both.
+static var _box_recs: Dictionary = {}
+const _BOX_RECS_MAX := 4096
+## Indices of the shape entries in _BOX_KEYS.
+const _SHAPE_AT := [1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15, 16]
+var _warns := 0
+
+
+## `inputs`: the entries of _BOX_KEYS in `style`, when the caller has them.
+## Diagnostics come in the order of the properties: background colour,
+## border widths, border colours, radii.
+func _box_rec(style: Dictionary, el: UxmlElement, force_box: bool, inputs = null) -> Array:
+	if not restyle_reuse:
+		return _box_rec_of(style, el, force_box, null)
+	var vals: Array = [force_box]
+	if inputs != null:
+		for e in inputs:
+			vals.append(null if e == null else e["value"])
+	else:
+		for k in _BOX_KEYS:
+			var e = style.get(k)
+			vals.append(null if e == null else e["value"])
+	var hit = _box_recs.get(vals)
+	if hit != null:
+		return hit
+	var w0 := _warns
+	var rec := _box_rec_of(style, el, force_box, vals)
+	if _warns == w0:
+		if _box_recs.size() >= _BOX_RECS_MAX:
+			_box_recs.clear()
+		_box_recs[vals] = rec
+	return rec
+
+
+## _box_rec without the record cache; `vals`: [force_box, the values of
+## _BOX_KEYS] (null: no shape cache either).
+func _box_rec_of(style: Dictionary, el: UxmlElement, force_box: bool, vals) -> Array:
+	var shape = null
+	var key: Array = []
+	if vals != null:
+		for i in _SHAPE_AT:
+			key.append(vals[i + 1])
+		shape = _box_shapes.get(key)
 	var bg := _color(style, "background-color", el)
-	# Per-side values in [top, right, bottom, left] order; corners clockwise
-	# from top-left. Diagnostics are emitted in the original order.
-	var widths := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
-	var any_border := false
-	for k in 4:
-		var e = style.get(_BW[k])
-		if e == null:
-			continue
-		var w := 0.0
-		var p := UssValues.parse_length(String(e["value"]))
-		if p["kind"] == "px":
-			# On the pixel grid, as the layout lays the border out (and
-			# Unity draws it: 1.5px draws 2px wide).
-			w = UxmlFlexLayout.grid_box(maxf(0.0, p["value"]), true)
-		elif p["kind"] == "invalid":
-			_warn(el, "border-width", "border-%s-width: %s" % [_SIDES[k], p["problem"]])
-		else:
-			_warn(el, "border-width", "border-%s-width: only px is supported" % _SIDES[k])
-		widths[k] = w
-		any_border = any_border or w > 0.0
+	var shape_warns := 0
+	var widths: PackedFloat64Array
+	if shape != null:
+		widths = shape[0]
+	else:
+		var w0 := _warns
+		widths = _border_widths(style, el)
+		shape_warns += _warns - w0
 	var any_bcolor := false
 	var first_bcolor: Variant = null
 	# Unity's initial border colour is transparent (measured: a border
@@ -1487,6 +1657,143 @@ func _stylebox(style: Dictionary, el: UxmlElement, force_box := false) -> StyleB
 			if widths[k] > 0.0:
 				first_bcolor = bcolors[k]
 				break
+	if shape == null:
+		var w1 := _warns
+		shape = _box_shape(style, el, widths)
+		shape_warns += _warns - w1
+		if vals != null and shape_warns == 0:
+			if _box_shapes.size() >= _BOX_SHAPES_MAX:
+				_box_shapes.clear()
+			_box_shapes[key] = shape
+	var any_border: bool = shape[3]
+	var any_radius: bool = shape[4]
+	var has_visual: bool = bg != null or any_border or any_bcolor or any_radius or shape[5]
+	if not has_visual:
+		return _NO_REC
+	# StyleBoxFlat draws a box like Unity when its corners are square, its
+	# drawn sides have one colour and it has no background under a border;
+	# Unity's elliptic corners, per-side colours and the background under
+	# the border (seen through a translucent border, or an opaque one at
+	# an opacity below 1) need UxmlBoxStyle.
+	if force_box or any_radius or mixed or (any_border and bg != null and bg.a > 0.0):
+		return [1, bg, widths, bcolors, shape[1], null, shape[2]]
+	return [2, bg, widths, bcolors, shape[1], first_bcolor, shape[2]]
+
+
+## A new box from a record (null for none).
+static func _make_box(rec: Array) -> StyleBox:
+	var kind: int = rec[_R_KIND]
+	if kind == 0:
+		return null
+	var bg = rec[_R_BG]
+	var widths: PackedFloat64Array = rec[_R_WIDTHS]
+	var m: Array = rec[_R_MARGINS]
+	if kind == 1:
+		var ub := UxmlBoxStyle.new()
+		ub.bg_color = bg if bg != null else Color.TRANSPARENT
+		ub.widths = widths
+		ub.colors = (rec[_R_COLORS] as Array).duplicate()
+		ub.radii = rec[_R_RADII]
+		_set_margins(ub, m)
+		return ub
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg if bg != null else Color.TRANSPARENT
+	var fc = rec[_R_FLAT_BORDER]
+	sb.border_color = fc if fc != null else Color.TRANSPARENT
+	sb.border_width_top = int(widths[0])
+	sb.border_width_right = int(widths[1])
+	sb.border_width_bottom = int(widths[2])
+	sb.border_width_left = int(widths[3])
+	# The margins inflate get_combined_minimum_size(): the uxml_margins
+	# meta records what USS put there so the layout's intrinsic measurer
+	# can subtract them and the flex insets are not counted twice.
+	_set_margins(sb, m)
+	sb.draw_center = bg != null
+	return sb
+
+
+## Content margins (border + padding, [l, t, r, b]) and their
+## uxml_margins meta.
+static func _set_margins(sb: StyleBox, m: Array) -> void:
+	sb.content_margin_left = m[0]
+	sb.content_margin_top = m[1]
+	sb.content_margin_right = m[2]
+	sb.content_margin_bottom = m[3]
+	sb.set_meta("uxml_margins", m.duplicate())
+
+
+static func _margins_are(sb: StyleBox, m: Array) -> bool:
+	return (sb.content_margin_left == m[0] and sb.content_margin_top == m[1]
+		and sb.content_margin_right == m[2] and sb.content_margin_bottom == m[3])
+
+
+## Gives `sb` (a box _make_box built) the colours of `rec` when `rec`
+## builds the same kind of box with the same widths and radii (the caller
+## checked the margins): `sb` then draws what a new box from `rec` would.
+## Returns -1 when it cannot, 0 when `sb` has these colours, 1 when it
+## took them. The box emits no `changed` (the caller redraws its control;
+## a `changed` would update the control's theme).
+static func _recolor(sb: StyleBox, rec: Array) -> int:
+	var kind: int = rec[_R_KIND]
+	var bg = rec[_R_BG]
+	var widths: PackedFloat64Array = rec[_R_WIDTHS]
+	if kind == 1:
+		var ub := sb as UxmlBoxStyle
+		if (ub == null or ub.image != null or ub.fill_inner or ub.widths != widths
+				or ub.radii != rec[_R_RADII]):
+			return -1
+		var nbg: Color = bg if bg != null else Color.TRANSPARENT
+		if ub.bg_color == nbg and ub.colors == rec[_R_COLORS]:
+			return 0
+		ub.set_colors(nbg, rec[_R_COLORS])
+		return 1
+	if kind == 2:
+		var f := sb as StyleBoxFlat
+		if (f == null or f.get_script() != null or f.border_width_top != int(widths[0])
+				or f.border_width_right != int(widths[1]) or f.border_width_bottom != int(widths[2])
+				or f.border_width_left != int(widths[3]) or f.corner_radius_top_left != 0
+				or f.corner_radius_top_right != 0 or f.corner_radius_bottom_right != 0
+				or f.corner_radius_bottom_left != 0):
+			return -1
+		var fc = rec[_R_FLAT_BORDER]
+		var nbg: Color = bg if bg != null else Color.TRANSPARENT
+		var nbc: Color = fc if fc != null else Color.TRANSPARENT
+		if f.bg_color == nbg and f.border_color == nbc and f.draw_center == (bg != null):
+			return 0
+		f.set_block_signals(true)
+		f.bg_color = nbg
+		f.border_color = nbc
+		f.draw_center = bg != null
+		f.set_block_signals(false)
+		return 1
+	return -1
+
+
+## Border widths [top, right, bottom, left] on the pixel grid.
+func _border_widths(style: Dictionary, el: UxmlElement) -> PackedFloat64Array:
+	var widths := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
+	for k in 4:
+		var e = style.get(_BW[k])
+		if e == null:
+			continue
+		var w := 0.0
+		var p := UssValues.parse_length(String(e["value"]))
+		if p["kind"] == "px":
+			# On the pixel grid, as the layout lays the border out (and
+			# Unity draws it: 1.5px draws 2px wide).
+			w = UxmlFlexLayout.grid_box(maxf(0.0, p["value"]), true)
+		elif p["kind"] == "invalid":
+			_warn(el, "border-width", "border-%s-width: %s" % [_SIDES[k], p["problem"]])
+		else:
+			_warn(el, "border-width", "border-%s-width: only px is supported" % _SIDES[k])
+		widths[k] = w
+	return widths
+
+
+## The shape of a box with these border widths (see _box_shapes).
+func _box_shape(style: Dictionary, el: UxmlElement, widths: PackedFloat64Array) -> Array:
+	var any_border := widths[0] > 0.0 or widths[1] > 0.0 or widths[2] > 0.0 or widths[3] > 0.0
+	# Corners clockwise from top-left.
 	var radii := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 	var any_radius := false
 	for k in 4:
@@ -1522,63 +1829,8 @@ func _stylebox(style: Dictionary, el: UxmlElement, force_box := false) -> StyleB
 		elif p["kind"] == "percent":
 			any_pad = true
 		any_pad = any_pad or pads[k] > 0.0
-
-	var has_visual := (
-		bg != null or any_border or any_bcolor or any_radius or any_pad
-	)
-	if not has_visual:
-		return null
-
-	# StyleBoxFlat draws a box like Unity when its corners are square, its
-	# drawn sides have one colour and it has no background under a border;
-	# Unity's elliptic corners, per-side colours and the background under
-	# the border (seen through a translucent border, or an opaque one at
-	# an opacity below 1) need UxmlBoxStyle.
-	if force_box or any_radius or mixed or (any_border and bg != null and bg.a > 0.0):
-		var ub := UxmlBoxStyle.new()
-		ub.bg_color = bg if bg != null else Color.TRANSPARENT
-		ub.widths = widths.duplicate()
-		ub.colors = bcolors
-		ub.radii = radii.duplicate()
-		_box_margins(ub, widths, pads)
-		return ub
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = bg if bg != null else Color.TRANSPARENT
-	sb.border_color = first_bcolor if first_bcolor != null else Color.TRANSPARENT
-	sb.border_width_top = int(widths[0])
-	sb.border_width_right = int(widths[1])
-	sb.border_width_bottom = int(widths[2])
-	sb.border_width_left = int(widths[3])
-	sb.content_margin_top = widths[0] + pads[0]
-	sb.content_margin_right = widths[1] + pads[1]
-	sb.content_margin_bottom = widths[2] + pads[2]
-	sb.content_margin_left = widths[3] + pads[3]
-	# The margins inflate get_combined_minimum_size() — record what USS put
-	# there so the layout's intrinsic measurer can subtract them and the
-	# flex insets are not counted twice.
-	sb.set_meta("uxml_margins", [
-		widths[3] + pads[3],
-		widths[0] + pads[0],
-		widths[1] + pads[1],
-		widths[2] + pads[2],
-	])
-	sb.draw_center = bg != null
-	return sb
-
-
-## Content margins (border + padding) of a UxmlBoxStyle, as _stylebox
-## gives a StyleBoxFlat.
-static func _box_margins(sb: StyleBox, widths: PackedFloat64Array, pads: PackedFloat64Array) -> void:
-	sb.content_margin_top = widths[0] + pads[0]
-	sb.content_margin_right = widths[1] + pads[1]
-	sb.content_margin_bottom = widths[2] + pads[2]
-	sb.content_margin_left = widths[3] + pads[3]
-	sb.set_meta("uxml_margins", [
-		widths[3] + pads[3],
-		widths[0] + pads[0],
-		widths[1] + pads[1],
-		widths[2] + pads[2],
-	])
+	var margins := [widths[3] + pads[3], widths[0] + pads[0], widths[1] + pads[1], widths[2] + pads[2]]
+	return [widths, radii, margins, any_border, any_radius, any_pad]
 
 
 ## Post-layout correction: the flex pass has resolved percentage padding
@@ -1666,14 +1918,14 @@ func _apply_text_layout(c: Control, style: Dictionary, el: UxmlElement) -> void:
 		hv = _parse_text_align(align, el)
 	var has_align := hv.x >= 0
 	if c is Label or c is RichTextLabel:
-		c.horizontal_alignment = hv.x if has_align else int(c.get_meta("uxml_halign", 0))
-		c.vertical_alignment = hv.y if has_align else int(c.get_meta("uxml_valign", 0))
+		_setp(c, &"horizontal_alignment", hv.x if has_align else int(c.get_meta("uxml_halign", 0)))
+		_setp(c, &"vertical_alignment", hv.y if has_align else int(c.get_meta("uxml_valign", 0)))
 	elif c is Button and not c is OptionButton:
 		# Unity's initial -unity-text-align is upper-left (a Button's theme
 		# rule sets middle-center; a RepeatButton has none).
-		c.alignment = hv.x if has_align else HORIZONTAL_ALIGNMENT_LEFT
+		_setp(c, &"alignment", hv.x if has_align else HORIZONTAL_ALIGNMENT_LEFT)
 	elif c is LineEdit:
-		c.alignment = hv.x if has_align else int(c.get_meta("uxml_halign", 0))
+		_setp(c, &"alignment", hv.x if has_align else int(c.get_meta("uxml_halign", 0)))
 	if c is Label or c is RichTextLabel:
 		var ws := _str(style, "white-space")
 		# pre-wrap keeps white space at wrap points (no edge trimming); the
@@ -1681,14 +1933,14 @@ func _apply_text_layout(c: Control, style: Dictionary, el: UxmlElement) -> void:
 		var keep_ws := ws == "pre-wrap"
 		if keep_ws or c.has_meta("uxml_trim_set"):
 			c.set_meta("uxml_trim_set", true)
-			c.autowrap_trim_flags = 0 if keep_ws else int(c.get_meta("uxml_trim", 0))
+			_setp(c, &"autowrap_trim_flags", 0 if keep_ws else int(c.get_meta("uxml_trim", 0)))
 		match ws:
 			"normal", "pre-wrap":
-				c.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				_setp(c, &"autowrap_mode", TextServer.AUTOWRAP_WORD_SMART)
 			"nowrap", "pre":
-				c.autowrap_mode = TextServer.AUTOWRAP_OFF
+				_setp(c, &"autowrap_mode", TextServer.AUTOWRAP_OFF)
 			"":
-				c.autowrap_mode = int(c.get_meta("uxml_autowrap", 0))
+				_setp(c, &"autowrap_mode", int(c.get_meta("uxml_autowrap", 0)))
 			_:
 				_warn(el, "white-space", 'white-space: "%s" is not supported' % ws)
 
@@ -1747,6 +1999,7 @@ func _warn_diag(kind: String, key: String, el: UxmlElement, message: String) -> 
 
 
 func _warn(el: UxmlElement, prop: String, message: String) -> void:
+	_warns += 1
 	_warn_diag(
 		"unsupported-value",
 		"%s:%s:%s" % [prop, message, el.get_instance_id()], el, message
@@ -2420,14 +2673,20 @@ func _apply_text_shadow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 ## Godot's own (sharp) font shadow: color null removes it.
 static func _theme_shadow(c: Control, color, offset: Vector2) -> void:
 	if color != null:
+		_ov(c)
 		c.add_theme_color_override("font_shadow_color", color)
+		_ov(c)
 		c.add_theme_constant_override("shadow_offset_x", roundi(offset.x))
+		_ov(c)
 		c.add_theme_constant_override("shadow_offset_y", roundi(offset.y))
+		_ov(c)
 		c.add_theme_constant_override("shadow_outline_size", 0)
 	else:
+		_ov(c)
 		c.remove_theme_color_override("font_shadow_color")
 		for k in ["shadow_offset_x", "shadow_offset_y", "shadow_outline_size"]:
 			if c.has_theme_constant_override(k):
+				_ov(c)
 				c.remove_theme_constant_override(k)
 
 
@@ -2453,14 +2712,17 @@ func _apply_paragraph_spacing(c: Control, style: Dictionary, el: UxmlElement) ->
 			float(_effective_font_size(c, style, el)), el)
 	if c is RichTextLabel:
 		if px != 0:
+			_ov(c)
 			c.add_theme_constant_override("paragraph_separation", px)
 		elif c.has_theme_constant_override("paragraph_separation"):
+			_ov(c)
 			c.remove_theme_constant_override("paragraph_separation")
 		return
 	var l := c as Label
 	if px == 0:
 		if l.has_meta("uxml_label_settings"):
 			l.remove_meta("uxml_label_settings")
+			_ov(l)
 			l.label_settings = null
 		return
 	var ls := LabelSettings.new()
@@ -2476,6 +2738,8 @@ func _apply_paragraph_spacing(c: Control, style: Dictionary, el: UxmlElement) ->
 	ls.shadow_offset = Vector2(
 		l.get_theme_constant("shadow_offset_x"), l.get_theme_constant("shadow_offset_y"))
 	l.set_meta("uxml_label_settings", true)
+	if l.label_settings != ls:
+		_ov(l)
 	l.label_settings = ls
 
 
@@ -2503,11 +2767,11 @@ func _apply_elision(c: Control, style: Dictionary, el: UxmlElement) -> void:
 			c.set_meta("uxml_clip_text_default", c.clip_text)
 			c.set_meta("uxml_clip_text", true)
 			clip_texts += 1
-		c.clip_text = true
+		_setp(c, &"clip_text", true)
 		if c.has_meta(&"uxml_wfit"):
 			c.remove_meta(&"uxml_wfit")  # clipped now, not just narrow
 	elif c.has_meta("uxml_clip_text"):
-		c.clip_text = bool(c.get_meta("uxml_clip_text_default"))
+		_setp(c, &"clip_text", bool(c.get_meta("uxml_clip_text_default")))
 		c.remove_meta("uxml_clip_text")
 		c.remove_meta("uxml_clip_text_default")
 		if c.has_meta(&"uxml_wfit"):
@@ -2538,6 +2802,7 @@ func _unelide(c: Control) -> void:
 	if not c.has_meta("uxml_full_text"):
 		return
 	if String(c.get("text")) == String(c.get_meta("uxml_elided")):
+		_ov(c)
 		c.set("text", c.get_meta("uxml_full_text"))
 	c.remove_meta("uxml_full_text")
 	c.remove_meta("uxml_elided")
@@ -2691,4 +2956,5 @@ func _render_rich(c: RichTextLabel) -> void:
 	if c.get_meta("uxml_rich_key", []) == key:
 		return
 	c.set_meta("uxml_rich_key", key)
+	_ov(c)
 	UxmlRichText.render(c, pr["ops"], font, fs, col)
