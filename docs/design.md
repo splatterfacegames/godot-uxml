@@ -1268,7 +1268,7 @@ Behavior (`UxmlContainerBehaviors`):
 | Scroller | low and high RepeatButtons step by the page size (`*-page-size` of the ScrollView, else a tenth of the dragger, Unity's `k_ScrollPageOverlapFactor`; 20 for a standalone Scroller) after 250 ms and every 30 ms while held; a press on the track pages toward the pointer; the dragger follows the pointer; the focused ScrollerSlider takes `ui_*`, page, Home and End. A standalone Scroller sends `value_changed` |
 | ListView, TreeView, multi-column | selection by click (Ctrl adds, Shift extends for `selection-type="Multiple"`), `set_selection`, keys and controller (`ui_up`/`ui_down`, page, Home, End, Shift); the selected row gets `unity-collection-view__item--selected`, `:checked` (Unity 6000.3) and `:selected` (Unity's alias of `:checked`). Enter, controller A and a double click send `items_chosen`. The footer adds and removes items, the size field sets the count, `reorderable` rows move by drag (`item_index_changed`). TreeView: the toggle, `ui_right` and `ui_left` open and close items. Multi-column: a click on a sortable header sorts (`column_sorting_changed`; `sorting-mode="Default"` sorts the items source), the resize handles change a column width |
 | TabView | a click or `ui_accept` on a header selects its Tab (`value_changed` with the index); the other Tabs are `display: none`; the close button of a `closeable` Tab closes it (`tab_closed`); in a `reorderable` TabView a drag of a header moves its Tab (`tab_reordered`, `move_tab`). Headers are focusable so a controller can reach them |
-| TwoPaneSplitView | a drag on the dragline sets the fixed pane size (`set_split_dimension`), between 0 and the view size; the dragline anchor sits past the fixed pane's margins, as Unity's PostDisplaySetup places it (measured: `ctl-more-2`, Label panes with theme margins) |
+| TwoPaneSplitView | a drag on the dragline sets the fixed pane size (`set_split_dimension`), between 0 and the view size; the end of a drag that changed the size emits `split_changed(view, dimension)`; the dragline anchor sits past the fixed pane's margins, as Unity's PostDisplaySetup places it (measured: `ctl-more-2`, Label panes with theme margins) |
 | IMGUIContainer | `set_imgui_handler(name, draw, input)`: `draw.call(box, rect)` runs in the control's `_draw`, `input.call(box, event)` in its `gui_input`. Unity's `onGUIHandler` is C# IMGUI code, which Godot cannot run |
 
 ### Editor controls
@@ -1991,6 +1991,7 @@ doc.set_element_state_for(el, "hover", true)   # input may clear it
 
 # Partial reload
 doc.reload_stylesheet(origin, uss_text)        # restyle, keep the controls
+doc.get_last_reload_mode()                     # "restyle" / "cascade" / "full"
 doc.replace_source(uxml_text)                  # in place when possible
 doc.get_last_replace_mode()                    # "in-place" / "reload"
 
@@ -2005,6 +2006,21 @@ doc.clear_forced_states()
 # Transition timeline (transitions_manual = true)
 var tracks := doc.get_transitions()
 doc.seek_transitions(0.35)
+doc.finish_transitions()                       # end values now, no events
+doc.clear_completed_transitions()              # a run as if it were the first
+var kinds := doc.preview_transitions(el, PackedStringArray(), PackedStringArray(["hover"]))
+
+# Field values without a restyle (Unity SetValueWithoutNotify, or `value`)
+doc.set_field_value("volume", 0.5)              # no event
+doc.set_field_value("volume", 0.7, true)        # value_changed if it changed
+var v = doc.get_field_value("volume")
+
+# Runtime classes of an element, with or without a name
+doc.set_author_classes(el, PackedStringArray(["a", "b"]))  # control classes stay
+var author := doc.get_author_classes(el)
+
+# A split view tells the end of a drag
+doc.split_changed.connect(func(view, dimension): pass)
 
 # Hit test (document coordinates)
 var hit := doc.element_at(point, true)        # respect picking-mode
@@ -2040,6 +2056,10 @@ doc.close_context_menu()
 # Diagnostics carry a severity (R11)
 for d in doc.diagnostics:
     print(d["severity"], " ", d["kind"])        # "error" / "warning" / "info"
+
+# Public helpers (see "Public helpers")
+UssTransitions.easing(UssProperties.EASING_MODES.find("ease-in"), 0.5)
+UxmlStyleApplier.elide_text(text, width, "end", font, font_size)
 
 # Catalog, templates
 var catalog := UxmlControls.catalog()
@@ -2086,13 +2106,62 @@ old behaviour.
 
 `reload_stylesheet(origin, text)` parses the author sheet again in place
 (`UxmlLoader.reparse_sheet`): its items, its import and value diagnostics,
-its new `@import`s. The controls and their state stay; the cascade is
-built again and every control applied, so running transitions end. The
-applier forgets the diagnostics it reported (`forget_warnings`), and the
-applies report again what still holds. Theme sheets are not reloadable.
-A sheet that only the old text imported stays in `sheets`, unreferenced,
-so `origin.sheet` indices can differ from a fresh load. A cycle through a
-sheet that imports the reloaded sheet is not diagnosed again.
+its new `@import`s. The controls and their state stay, and running
+transitions end at their end values. Theme sheets are not reloadable. A sheet
+that only the old text imported stays in `sheets`, unreferenced, so
+`origin.sheet` indices can differ from a fresh load. A cycle through a sheet
+that imports the reloaded sheet is not diagnosed again.
+
+The work follows the edit. `UssCascade.sheet_patch` compares the old and the
+new items; `get_last_reload_mode()` tells which path ran:
+
+- **`restyle`: only declarations changed.** The selectors, the rule order and
+  the imports stay, so the buckets, the ancestor features and the bloom bits
+  of the compiled rules stay valid. `patch_rules` writes the new declarations
+  into both backends and marks the elements that a changed rule matches now.
+  The update runs on the forced path that a transition frame uses: only those
+  subtrees are visited, only the marked elements are computed, and inheritance
+  carries a change down (a new `for_children` marks the children). A changed
+  rule that does not match an element now (a state that is off) needs nothing:
+  the element reads the new declarations when its inputs change. Above 32
+  changed rules every element is computed, as the matching would cost more.
+  The controls with another computed style are applied, and a layout runs only
+  for a change that is not paint-only. A style that differs only in
+  `transition-*` properties applies nothing: the controls do not read them.
+- **`cascade`: selectors, rules or imports changed.** The rules compile again
+  and every element is computed in a new cascade, as for an in-place
+  `replace_source` (`_swap_cascade`). Only the controls with another computed
+  style or other effective flags are applied. One layout runs.
+- **`full`: the reference.** With `_partial_reload` false every reload builds a
+  new cascade and applies every control. `bench/equiv_runtime.gd` and
+  `tests/test_editor_api.gd` compare the two paths with this one.
+
+A partial reload keeps the result of a full one in three places:
+
+- **Diagnostics.** The applier forgets its diagnostics
+  (`forget_warnings`), and each element that had one applies again
+  (`warned_elements`), so a report of a style the element no longer has goes,
+  and one that still holds comes back. An element without a report reports
+  nothing for a style it keeps. The order of the diagnostics can differ: the
+  applied elements report first. The rule diagnostics of a patched sheet move
+  to the new offsets.
+- **Transitions.** Each running transition drops its override, and a new
+  `UssTransitions` starts empty, so the restyle of the reload starts nothing.
+- **Fits.** The fits of Labels and Buttons belong to the controls. On the
+  GDScript path the applier and the controls keep them. On the native path
+  they are in `Placement`, which a new native cascade over the same elements
+  takes over (`adopt_placement`). A new cascade also compares its flags with
+  the applied ones: its own start at 0, so an element shown through an ancestor
+  would keep its hidden look. Before these two fixes, a full reload or an
+  in-place `replace_source` could leave a stale fit on the native path and a
+  hidden control on both.
+
+`bench/equiv_runtime.gd` runs random stylesheet edits on each fixture, with
+state changes and running transitions between them: new values, new and
+removed declarations, keywords, `var()`, values that report, selector changes,
+new and removed rules, unsupported selectors, comments. After each edit it
+compares every control, stylebox, font, computed style and (sorted) diagnostic:
+partial with full, on each path, and native with GDScript.
 
 `replace_source(uxml)` loads the new text as a model first. It edits in
 place when the raw element trees of the old and the new text match (same
@@ -2151,6 +2220,80 @@ written as for a frame, without events; a transition put past its end
 shows the end value and keeps running until playback passes the end,
 which then emits `transition_end`. One GDScript implementation serves both
 cascade backends.
+
+`finish_transitions()` ends every running transition at its end value and
+restyles. The clock stays, no event is emitted, and the transition is not a
+completed one, so a later change to the same value starts a new transition.
+
+`preview_transitions(element, from_states, to_states)` lists what
+`get_transitions()` would list after that state change, for every element it
+affects, descendants included. It runs the real rules: a second cascade over
+the same elements (kept until the rules change) takes the current states of
+the document with `from_states` and then `to_states` on the element, and a new
+`UssTransitions` processes the change. No running or completed transition
+counts, so the answer does not depend on the history. The document does not
+change. `test_preview_transitions` compares the tracks with real runs.
+
+### A completed transition after an instant change
+
+Unity keeps a completed transition until a later style change with a positive
+combined duration replaces it:
+
+```
+.a { min-width: 100px; transition: min-width 1s; }
+.a:hover { min-width: 200px; }
+.a:checked { min-width: 300px; transition-duration: 0s; }
+
+hover -> normal: completes at 100px
+normal -> checked: instant, 300px
+checked -> normal: no transition, 100px at once
+```
+
+CSS removes the completed transition at the second change. Unity does not:
+`StylePropertyAnimationSystem.Values<T>.StartTransition` tests `combinedDuration
+<= 0` and returns before it removes the entry, and
+`VisualTreeStyleUpdater.CancelAnimationsWithNoTransitionProperty` runs only for
+an element with a running animation (UnityCsReference 6000.3, read; not
+measured in a run). A property with no transition in its new style does not
+reach `StartTransition` at all. `UssTransitions` follows Unity, and
+`test_completed_transition_after_an_instant_change` pins the behaviour. A tool
+that plays a state change as if it were the first calls
+`clear_completed_transitions()` before the change.
+
+### Field values
+
+`set_field_value(name, value, notify)` writes through the field's two-way
+binding path (`Behavior.bind_write`). The cascade does not read `value`, so the
+write marks nothing for the cascade and queues no restyle. What the behavior
+changes in turn takes its own path: `:checked` is a state change, a class of a
+part is a model change, and the shown text of a dropdown is a `set_text`
+(`_text_stable`). The signals of the document are blocked during the write,
+which covers every behavior, and `notify` emits `value_changed` once when the
+value read back differs.
+
+### Public helpers
+
+These static members are API. A change of their signature or meaning is a
+breaking change, and `test_public_helpers` keeps them:
+
+| Member | Use |
+| --- | --- |
+| `UssTransitions.easing(mode, t)` | The eased progress of a Unity timing function. `mode` is the index in `UssProperties.EASING_MODES`. |
+| `UssProperties.EASING_MODES` | The timing function names of USS, in the order of `mode`. |
+| `UssTransitions.SHORTHANDS` | Each `transition-property` shorthand, with the longhands that it matches. |
+| `UxmlStyleApplier.elide_text(text, width, position, font, font_size)` | Unity's `TextElement.ElideText`: the longest text that fits, with `...` at `"start"`, `"middle"` or `"end"`. |
+| `UxmlParts.merged_class(element, author)` | The `class` value with the author classes of `author` and the control classes of `element`. |
+
+### Elided placeholders
+
+`text-overflow: ellipsis` on a single-line text field, its input or its editor
+part elides the placeholder to the width of the `LineEdit` content, at the
+`-unity-text-overflow-position` of that element, with the elision of a Label.
+While the placeholder shows elided, the whole text is the tooltip. Overflow
+need not be `hidden`, as a `LineEdit` always clips. The check runs after each
+placement and each placeholder change; a memo keeps a field with the same text,
+width, font and position from elision work. Only a field with a placeholder is
+in the list of this check.
 
 ### Hit test
 
@@ -2276,11 +2419,18 @@ not follow the measure:
 - on the cross axis: stretched (`align-self`, else the parent's
   `align-items`, is `stretch`, no auto margin) in a parent that does not
   wrap and whose size on that axis does not follow its content: the
-  document root, a px length, or a parent stretched the same way.
+  document root, a px length, a parent stretched the same way, or the
+  viewport of a ScrollView in `Vertical` mode. That viewport grows and
+  shrinks in the row of the ScrollView beside the vertical scroller, so its
+  width does not follow its content whatever the content measures.
+
+A px length includes a zero without a unit (`flex-basis: 0`), which USS and
+the layout read as `0px`.
 
 So a Label of a fixed size, a single-line Label stretched in a column of
-a fixed width, and an element under `display: none` change their text
-without a layout. Any other text change lays out the document, as before
+a fixed width, a Label stretched across a vertical ScrollView, and an element
+under `display: none` change their text without a layout. Any other text
+change lays out the document, as before
 (`relayout()`). The text binding returns "written" instead of "written,
 lay out" for these controls. `layout_count` counts the layout passes
 since the load. A model `text` change of a Label, Button, RepeatButton
