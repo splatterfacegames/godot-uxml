@@ -248,6 +248,9 @@ func _load(doc: UxmlDocument, uxml: String, uxml_path: String, root: String, uss
 	doc._resolver = UxmlResourceResolver.new(root)
 	doc._doc = UxmlLoader.load_source(uxml, uxml_path, doc._resolver, uss)
 	for act in actions:
+		if String(act.get("op", "")) == "set-value" and act.get("value") is Array:
+			_initial_curve_gradient(doc._doc.find_by_name(String(act.get("target", ""))), act["value"])
+			continue
 		if String(act.get("op", "")) != "set-prop":
 			continue
 		var attr: String = PROP_ATTRS.get(String(act.get("prop", "")), "")
@@ -266,6 +269,30 @@ func _load(doc: UxmlDocument, uxml: String, uxml_path: String, root: String, uss
 	UxmlTheme.attach(doc._doc, doc.theme_path, doc.editor_theme, doc.editor_skin)
 	doc._index()
 	doc._restyle_now()
+
+
+## A CurveField's or GradientField's `set-value` ([[time, value], ...] or
+## [[time, "#rrggbb"], ...]) as the field's initial value: an
+## AnimationCurve's keys with flat tangents (Unity's Keyframe(time, value))
+## and a Gradient's colour keys.
+func _initial_curve_gradient(el: UxmlElement, keys: Array) -> void:
+	if el == null:
+		return
+	if el.local == "CurveField":
+		var c := Curve.new()
+		for k in keys:
+			c.add_point(Vector2(float(k[0]), float(k[1])))
+		el.set_meta(&"uxml_initial_value", c)
+	elif el.local == "GradientField":
+		var g := Gradient.new()
+		var offs := PackedFloat32Array()
+		var cols := PackedColorArray()
+		for k in keys:
+			offs.append(float(k[0]))
+			cols.append(Color.html(String(k[1])))
+		g.offsets = offs
+		g.colors = cols
+		el.set_meta(&"uxml_initial_value", g)
 
 
 func _save(file: String) -> void:
