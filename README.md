@@ -247,7 +247,7 @@ of the box pixels match exactly and 99.9% within one pixel. Text is
 compared by placement and amount (the rasterisers differ): the text
 masks overlap 0.88 on average (IoU), and godot-uxml draws 1.02 times
 Unity's text pixels. docs/parity.md, "Pixels", lists the remaining
-differences and their sizes.
+differences and the size of each difference.
 
 ## Tests and benchmarks
 
