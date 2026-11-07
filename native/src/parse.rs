@@ -3,8 +3,9 @@
 //! offset, span and message is identical. They return plain data; the
 //! GDScript parsers build UxmlElement objects and diagnostics from it with
 //! their own code (bench/equiv_parse.gd compares both paths, including on
-//! fuzzed input). Attribute values containing '&' are handed back raw with
-//! a flag: entity decoding stays in GDScript (decode_entities), so numeric
+//! fuzzed input). Attribute values containing '&' or a literal tab or line
+//! break are handed back raw with a flag: entity decoding and attribute
+//! whitespace normalization stay in GDScript (decode_entities), so numeric
 //! overflow behaviour is Godot's own.
 
 use godot::prelude::*;
@@ -176,13 +177,13 @@ impl<'a> Uxml<'a> {
                 self.warn(format!("attribute \"{name}\" has an unterminated value"), start, l);
                 self.pos = l;
                 let v = sub(self.s, vs, l);
-                let raw = v.contains('&');
+                let raw = v.contains(|c| c == '&' || c == '\n' || c == '\r' || c == '\t');
                 Some((name, v, raw, start))
             }
             Some(close) => {
                 self.pos = close + 1;
                 let v = sub(self.s, vs, close);
-                let raw = v.contains('&');
+                let raw = v.contains(|c| c == '&' || c == '\n' || c == '\r' || c == '\t');
                 Some((name, v, raw, start))
             }
         }

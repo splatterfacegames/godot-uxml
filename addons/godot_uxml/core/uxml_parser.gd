@@ -336,7 +336,14 @@ func _parse_element() -> UxmlElement:
 ## output, which is never re-scanned — so &#38;lt; becomes the literal text
 ## "&lt;", not "<". Numeric references outside the Unicode range (and
 ## surrogate halves) and unknown entity names are left as written.
+##
+## XML attribute-value normalization comes first: a literal line break
+## (CR LF, CR or LF) or tab is a space, as Unity's XML reader reads it
+## (uss-text-wrap: a value written over two lines is one line of text);
+## `&#10;` stays a line break.
 static func decode_entities(text: String) -> String:
+	if text.contains("\n") or text.contains("\r") or text.contains("\t"):
+		text = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ").replace("\t", " ")
 	if text.find("&") < 0:
 		return text # nothing to decode — skip the regex scan entirely
 	var out := ""
