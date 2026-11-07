@@ -1,9 +1,12 @@
 # godot-uxml
 
+[Splatterface Games](https://www.splatterfacegames.com/) · [Repository](https://github.com/splatterfacegames/godot-uxml) · [Apache License 2.0](LICENSE)
+
 godot-uxml is a Godot 4 addon. The addon loads Unity UI Toolkit documents
 (UXML) and stylesheets (USS) and makes native Godot controls from the files.
-Authors make the UI in `jethac/uxml-editor`. The same files then
-run in Godot without changes.
+Authors make the UI in
+[splatterfacegames/uxml-editor](https://github.com/splatterfacegames/uxml-editor).
+The same files then run in Godot without changes.
 
 - Engine: Godot 4.7.
 - Language: GDScript, with an optional native core in Rust (GDExtension).
