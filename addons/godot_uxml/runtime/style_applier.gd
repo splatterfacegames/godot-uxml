@@ -426,6 +426,11 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 	if unity_line_metrics and (c is Label or c is Button or c is LineEdit or c is TextEdit
 			or c is RichTextLabel) and not _has_url_font(style):
 		font = _line_font(c, font, style, el)
+	if unity_line_metrics and (c is Label or c is TextEdit) and not c.has_theme_constant_override(&"line_spacing"):
+		# Unity's lines follow each other at the line height; Godot adds
+		# line_spacing (Label 3px, TextEdit 4px): a three-line TextField
+		# was 85px high, Unity's 73px (ctl-textfield-multiline).
+		c.add_theme_constant_override(&"line_spacing", 0)
 	var keep_fit := false
 	fit_seen.erase(c)
 	if fitted.has(c):
@@ -1005,7 +1010,9 @@ func _line_font(c: Control, font: Font, style: Dictionary, el: UxmlElement) -> F
 		var bottom := roundi(want_h - base.get_height(fs)) - top
 		hit = base if top == 0 and bottom == 0 else with_spacing(base, top, bottom)
 		per[fs] = hit
-	return hit if hit != base or font != null else font
+	if hit == base and font == null and not c.has_meta(&"uxml_base_font_forced"):
+		return font
+	return hit
 
 
 ## A cache key for a font by content: _font() makes a new FontVariation
@@ -1081,6 +1088,39 @@ static func label_max_content(l: Label) -> float:
 	var total := w + (0.0 if sb == null else sb.get_minimum_size().x)
 	l.set_meta(&"uxml_maxc", [l.text, total])
 	return total
+
+
+## Godot floors a Label at the width of its text; Unity lets a Label be
+## narrower than its text and draws the text past the box (px-material: a
+## Label laid out 80px wide with 92px of text, drawn at 92px in Godot). A
+## one-line Label that the layout gives less width than its text gets
+## clip_text (its minimum width is then 1, so the control takes the
+## laid-out width) and draws its text unclipped (`_unclip` resets the
+## canvas clip after the Label's own draw). It is measured as its full
+## text, like overflow: hidden text (`uxml_clip_text`, clip_texts; the
+## native measurer reads the same meta); `uxml_wfit` marks it. apply()
+## puts clip_text back when it applies the text overflow
+## (_apply_elision), and the next placement fits the Label again. Called
+## by both placements after the control got its laid-out size.
+func fit_label_width(c: Label) -> void:
+	if c.has_meta(&"uxml_clip_text") or c.clip_text or c.autowrap_mode != TextServer.AUTOWRAP_OFF:
+		return
+	c.set_meta(&"uxml_clip_text_default", false)
+	c.set_meta(&"uxml_clip_text", true)
+	c.set_meta(&"uxml_wfit", true)
+	clip_texts += 1
+	if not c.has_meta(&"uxml_unclip"):
+		c.set_meta(&"uxml_unclip", true)
+		c.draw.connect(UxmlStyleApplier._unclip.bind(c))
+	c.clip_text = true
+	c.remove_meta(&"uxml_clip_full")
+
+
+## After the draw of a Label fitted by fit_label_width: the text draws past
+## the box, as Unity draws it (Label set the canvas clip for clip_text).
+static func _unclip(c: Label) -> void:
+	if c.has_meta(&"uxml_wfit"):
+		RenderingServer.canvas_item_set_clip(c.get_canvas_item(), c.clip_contents)
 
 
 ## Godot floors a Control at its minimum size, and the minimum height of a
@@ -1239,7 +1279,14 @@ func _capture_base_font(c: Control) -> void:
 	if c == null or c.has_meta("uxml_base_font_set"):
 		return
 	c.set_meta("uxml_base_font_set", true)
-	c.set_meta("uxml_base_font", c.get_theme_font(_font_name(c)))
+	var f := c.get_theme_font(_font_name(c))
+	if unity_line_metrics and f == ThemeDB.fallback_font:
+		# The default theme draws Unity's default font (Inter, which
+		# NotInter clones) where Godot would draw its own default font. A
+		# Godot theme or project font is kept.
+		f = UxmlTheme.default_font()
+		c.set_meta(&"uxml_base_font_forced", true)
+	c.set_meta("uxml_base_font", f)
 
 
 func _font(c: Control, style: Dictionary, el: UxmlElement) -> Font:
@@ -1287,12 +1334,9 @@ func _font(c: Control, style: Dictionary, el: UxmlElement) -> Font:
 		_capture_base_font(c)
 		fv.base_font = c.get_meta("uxml_base_font", null)
 	if font_style == "bold" or font_style == "bold-and-italic":
-		fv.variation_embolden = 0.6
+		fv.variation_embolden = BOLD_EMBOLDEN
 	if font_style == "italic" or font_style == "bold-and-italic":
-		var t := Transform2D()
-		t.x = Vector2(1.0, 0.0)
-		t.y = Vector2(0.2, 1.0)
-		fv.variation_transform = t
+		fv.variation_transform = ITALIC_TRANSFORM
 	return fv
 
 
@@ -1322,12 +1366,9 @@ func _spaced_font(c: Control, font: Font, style: Dictionary, el: UxmlElement) ->
 	var fv := FontVariation.new()
 	fv.base_font = base
 	if font_style == "bold" or font_style == "bold-and-italic":
-		fv.variation_embolden = 0.6
+		fv.variation_embolden = BOLD_EMBOLDEN
 	if font_style == "italic" or font_style == "bold-and-italic":
-		var t := Transform2D()
-		t.x = Vector2(1.0, 0.0)
-		t.y = Vector2(0.2, 1.0)
-		fv.variation_transform = t
+		fv.variation_transform = ITALIC_TRANSFORM
 	fv.spacing_glyph = glyph
 	fv.spacing_space = space
 	_fv_cache[key] = fv
@@ -1886,6 +1927,19 @@ static func _px_of(e) -> float:
 ## element's own size, origin) are ratios Godot re-resolves on resize.
 ## offset_transform_visual_only = false: input follows the transform, as
 ## Unity picking does.
+const _NO_SNAP := 1e-5
+
+## Unity's synthetic bold and italic of a font without those faces
+## (TextCore): the glyphs are emboldened and slanted. Godot's FontVariation
+## transform is FreeType's matrix: the x axis (1, slant) shears x by y.
+## Measured on bench/pixels (uss-text `italic`, `bold`, `bi`): a slant of
+## 0.2 and an embolden of 0.6 give Unity's amount of ink (Bold: 188 text
+## pixels, Unity 183). Before, the transform sheared y by x (the y axis
+## (0.2, 1)), which draws upright glyphs.
+const BOLD_EMBOLDEN := 0.6
+const ITALIC_TRANSFORM := Transform2D(Vector2(1.0, 0.2), Vector2(0.0, 1.0), Vector2.ZERO)
+
+
 func _apply_transform(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	var te = style.get("translate")
 	var re = style.get("rotate")
@@ -1900,6 +1954,7 @@ func _apply_transform(c: Control, style: Dictionary, el: UxmlElement) -> void:
 			c.offset_transform_scale = Vector2.ONE
 			c.offset_transform_pivot = Vector2.ZERO
 			c.offset_transform_pivot_ratio = Vector2(0.5, 0.5)
+			c.rotation = 0.0
 		return
 	var tpx := Vector2.ZERO
 	var tratio := Vector2.ZERO
@@ -1941,6 +1996,14 @@ func _apply_transform(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	c.offset_transform_scale = sc
 	c.offset_transform_pivot = opx
 	c.offset_transform_pivot_ratio = oratio
+	# Godot snaps a Control's canvas transform origin to the pixel grid
+	# (gui/common/snap_controls_to_pixels, on by default) unless its own
+	# rotation is off the quarter turns, and the offset transform is inside
+	# the snapped part: a rotated, scaled or fractionally translated element
+	# drew up to half a pixel off (px-transform, rotate: 15deg 0.2px left).
+	# Unity does not snap. A rotation of 1e-5 rad (0.004px over 400px)
+	# turns the snap off for the element.
+	c.rotation = _NO_SNAP
 
 
 ## cursor: a Unity keyword -> mouse_default_cursor_shape (Unity itself
@@ -2441,10 +2504,14 @@ func _apply_elision(c: Control, style: Dictionary, el: UxmlElement) -> void:
 			c.set_meta("uxml_clip_text", true)
 			clip_texts += 1
 		c.clip_text = true
+		if c.has_meta(&"uxml_wfit"):
+			c.remove_meta(&"uxml_wfit")  # clipped now, not just narrow
 	elif c.has_meta("uxml_clip_text"):
 		c.clip_text = bool(c.get_meta("uxml_clip_text_default"))
 		c.remove_meta("uxml_clip_text")
 		c.remove_meta("uxml_clip_text_default")
+		if c.has_meta(&"uxml_wfit"):
+			c.remove_meta(&"uxml_wfit")
 		clip_texts -= 1
 	var to := _str(style, "text-overflow")
 	if not to.is_empty() and to != "clip" and to != "ellipsis":

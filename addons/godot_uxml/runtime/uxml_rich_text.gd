@@ -474,12 +474,9 @@ static func _variant(font: Font, bold: bool, italic: bool, glyph: int, shift: fl
 	var fv := FontVariation.new()
 	fv.base_font = font
 	if bold:
-		fv.variation_embolden = 0.6
+		fv.variation_embolden = UxmlStyleApplier.BOLD_EMBOLDEN
 	if italic:
-		var t := Transform2D()
-		t.x = Vector2(1.0, 0.0)
-		t.y = Vector2(0.2, 1.0)
-		fv.variation_transform = t
+		fv.variation_transform = UxmlStyleApplier.ITALIC_TRANSFORM
 	if glyph != 0:
 		fv.spacing_glyph = glyph
 	if not is_zero_approx(shift):

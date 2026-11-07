@@ -408,6 +408,21 @@ impl Placement {
             c.set_size(r.size);
         }
         if let (Some(lbl), Some(a)) = (&io.labels[i], applier) {
+            // UxmlDocument._place_control: a Label narrower than its text
+            // (UxmlStyleApplier.fit_label_width) gets clip_text and the
+            // `uxml_clip_text` meta the measure reads.
+            if d(c.get_size().x) > d(r.size.x) + 0.01 {
+                let mut a = a.clone();
+                a.call("fit_label_width", &[c.to_variant()]);
+                if let Some(e) = io.cliptext.borrow_mut().get_mut(i) {
+                    *e = None;
+                }
+                if lbl.has_meta("uxml_wfit") {
+                    c.set_size(r.size);
+                }
+            }
+        }
+        if let (Some(lbl), Some(a)) = (&io.labels[i], applier) {
             // UxmlDocument._place_control: Godot floors a Label at one text
             // line; Unity's box can be shorter (UxmlStyleApplier.fit_label).
             // A fitted Label is fitted again only for a new height.
@@ -1215,6 +1230,12 @@ impl<'a> Pass<'a> {
             };
             if fit_h >= 0.0 {
                 ms.y = f(fit_h);
+            }
+        }
+        if let Some(lbl) = &self.io.labels[i] {
+            // Unity measures an empty text 0 x 0 (UxmlDocument._measure_leaf).
+            if lbl.get_text().is_empty() {
+                return Vector2::ZERO;
             }
         }
         if let Some(m) = self.sb_margins(i, &c) {

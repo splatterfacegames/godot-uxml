@@ -84,7 +84,10 @@ UxmlResourceResolver ──────────────▶│ follows <S
   `Template`, `Instance` and `AttributeOverrides` are template syntax. The
   loader expands the syntax (see "UXML templates" below).
 - Attributes preserved in source order with values XML-entity decoded
-  (single-pass: `&#38;lt;` → literal `&lt;`, never `<`).
+  (single-pass: `&#38;lt;` → literal `&lt;`, never `<`). Before the
+  decode, a literal line break (CR LF, CR or LF) or tab in a value is a
+  space (XML attribute-value normalization, as Unity's reader:
+  `uss-text-wrap`); `&#10;` stays a line break.
   Consumers read `name`, `class`, `style`, `enabled`, `text`, `label`,
   `value`, `low-value`, `high-value`, `choices`, `src`, `image`, etc.
   Attributes outside `UssControls.KNOWN_ATTRIBUTES` warn
@@ -1085,7 +1088,10 @@ KeyboardTextEditor):
   names). The menu shows each name as Unity's ObjectNames.NicifyVariableName
   writes the name ("FlexStart" as "Flex Start"). `include-obsolete-values` shows the
   obsolete names too. Without a registered type, a binding to a property
-  with an enum hint gives the entries.
+  with an enum hint gives the entries. Unity's own enum types need no
+  registration (`UxmlInputParts.BUILTIN_ENUMS`: the UIElements style,
+  picking, selection and scroller enums, `TextAnchor`, `FontStyle`,
+  `ScaleMode`, in Unity's declaration order; `ctl-enum-open`).
 
 Value types of `value_changed` and of `bind_read`:
 
@@ -1412,7 +1418,16 @@ Deviations from Unity:
 measured values on Unity's class names (`tools/unity-dump`, default runtime
 theme, panel 400x300 at pixelsPerPoint 1). godot-uxml wrote the file; the file is
 not Unity's stylesheet, and the check, arrow and help box images are
-godot-uxml's own SVGs.
+godot-uxml's own SVGs. Their shapes, sizes, positions and colours follow
+what Unity draws, measured on the reference renders (`bench/pixels.py`),
+not Unity's image files: the Scroller arrows (`scroller-*.svg`, a 9.4 x
+10px triangle centred in the 24px button), the foldout arrows (8.8 x
+8.9px in the 22px box), the popup and enum arrow (`dropdown-arrow.svg`,
+filling its 10px box), the toggle check (arms on x - y = -6.5 and
+x + y = 26.5 of the 24px box, 2.8px thick), the HelpBox icons (a white
+speech bubble with a grey ring and mark, a #c99700 triangle, a #b10c0c
+octagon), the editor breadcrumbs (#333333 / #d0d0d0 with a darker
+chevron) and the gradient checker (7.5px cells).
 
 `UxmlTheme.attach(doc, path)` adds the sheet to the model with no scope
 and `"theme": true`, and puts the sheet first in cascade order. A document
@@ -1458,22 +1473,46 @@ The theme also has the measured values of painted properties (see
   only when an author rule also sets `overflow: hidden`, as in Unity.
 - `.unity-help-box__icon { -unity-background-scale-mode: scale-to-fit }`.
 
-Line height. Unity lays one line of its default font (NotInter-Regular,
-an Inter clone) out `ceil(1.2099 x font-size)` high, with the baseline
-0.969 em below the line top (measured in every dump: 9px 11, 10px 13,
-14px 17, 16px 20, 18px 22, 20px 25). Godot's default font is taller (20px
-at 14px). Godot's `line_spacing` constant and LabelSettings change only
-the space between lines, not the height of one line or of a LineEdit, so
-they cannot give Unity's line height. A FontVariation can: with the
-default theme (`UxmlStyleApplier.unity_line_metrics`), a Label, Button,
-LineEdit, TextEdit or RichTextLabel without a `-unity-font` file gets a
-FontVariation of its font with whole-pixel top and bottom spacing for its
-font size (cached per font and size). One line is then Unity's height
-(17px at 14px), the baseline is at Unity's ascent, and the glyphs keep
-Godot's font. A TextField is 39px high and a Label 25px at 14px, as in
-Unity. A `-unity-font` file keeps its own metrics (Unity's metrics of
-another font are not known), and `-unity-text-auto-size` keeps the
-spacing of the authored size.
+Default font. Unity's runtime theme draws NotInter-Regular and the
+editor skin Inter-Regular SDF; both have the advances and vertical
+metrics of Inter 3.009 (line height 1.2102 em, ascent 0.9688 em; 368 of
+375 single-line text measures in the dumps match Godot's measure of
+Inter to the pixel). The default theme ships Inter 3.009
+(`themes/fonts/Inter-Regular.woff2`, SIL OFL 1.1, the upstream web
+release; `licenses/Inter.LICENSE`): `UxmlStyleApplier._capture_base_font`
+uses it where the control's theme font is Godot's fallback font, so a
+Godot theme or project font is kept. The font imports with Godot's
+defaults (grayscale antialiasing, light hinting, automatic subpixel
+positioning). Measured on 16 text cases (`bench/pixels.py`): Godot's
+default font had text mask IoU 0.801 and 1.153 times Unity's ink; Inter
+with the defaults 0.891 and 1.011; no hinting with quarter-pixel
+positioning 0.872; light hinting with quarter-pixel positioning 0.891;
+no subpixel positioning 0.855; MSDF 0.689 (1.197 times the ink, soft
+small text). Synthetic bold is an embolden of 0.6 (188 text pixels for
+Unity's 183 in `uss-text` `bold`), synthetic italic a slant of 0.2 (the
+FontVariation transform's x axis, `ITALIC_TRANSFORM`).
+
+Line height. Unity lays one line of its default font out
+`ceil(1.2099 x font-size)` high, with the baseline 0.969 em below the
+line top (measured in every dump: 9px 11, 10px 13, 14px 17, 16px 20,
+18px 22, 20px 25). Godot rounds Inter's ascent and descent separately
+(18px for one line at 14px). Godot's `line_spacing` constant and
+LabelSettings change only the space between lines, not the height of one
+line or of a LineEdit, so they cannot give Unity's line height. A
+FontVariation can: with the default theme
+(`UxmlStyleApplier.unity_line_metrics`), a Label, Button, LineEdit,
+TextEdit or RichTextLabel without a `-unity-font` file gets a
+FontVariation of its font with whole-pixel top and bottom spacing for
+its font size (cached per font and size). One line is then Unity's
+height (17px at 14px) and the baseline is at Unity's ascent. Labels and
+TextEdits get `line_spacing` 0: Unity's lines follow each other at the
+line height (a three-line TextField is 73px high, as in Unity; with
+Godot's 4px it was 85px). A TextField is 39px high and a Label 25px at
+14px, as in Unity. A `-unity-font` file keeps its own metrics (Unity's
+metrics of another font are not known), and `-unity-text-auto-size`
+keeps the spacing of the authored size. Lines of a multi-line text are
+whole pixels: Unity's three 12px lines are 44px high
+(3 x 14.52), godot-uxml's 45px.
 
 ### Layout
 
@@ -1913,6 +1952,16 @@ rows keep `fixed-item-height`.
   the text: in the `uxml_maxc` meta (GDScript; an apply or new insets
   drop it) and, in the native layout, per control until the control is
   applied again or gets new insets.
+- Godot floors a Label at the width of its text; Unity lets a Label be
+  narrower and draws the text past the box (`px-material`: an 80px Label
+  with 92px of text). When the layout gives a one-line Label less width
+  than its text, `UxmlStyleApplier.fit_label_width` (both placements)
+  sets `clip_text` (the minimum width is then 1) and resets the canvas
+  clip after the Label's own draw, so the text draws unclipped. The Label
+  then measures as its full text through the overflow: hidden path
+  (`uxml_clip_text`, `clip_texts`; `uxml_wfit` marks it). The next apply
+  of its text overflow puts `clip_text` back.
+- An empty text measures 0 x 0, as Unity's (Godot measures one line).
 - Godot floors a Label at one text line. When the layout gives a
   one-line Label less height (a Label in a 20px TreeView row is 14px, a
   Label row of a ListView is the item height), `UxmlStyleApplier.
@@ -1925,7 +1974,10 @@ rows keep `fixed-item-height`.
   best-fit font size drop it. A font override from a restyle ends the
   fit; the next placement fits again. Some Labels stay taller than the
   box after the fit (Godot does not shrink a line below the glyph
-  extent). When that floor holds a fitted Label and a new box needs a
+  extent: one line is at least the font size high, also for an empty
+  text; measured with Inter, a negative top spacing lowers the floor but
+  moves the glyphs up, and the font transform's origin does not move
+  them). When that floor holds a fitted Label and a new box needs a
   larger deficit, the fit stays: a larger deficit does not change the
   size or the text, and the font does not change for each small box.
 - Godot floors a Button at its text plus its stylebox's content margins
@@ -2553,11 +2605,28 @@ same way where `StyleBoxFlat` cannot, and `StyleBoxFlat` draws the rest
   arc coverage, `clamp(0.5 - distance)`): the arcs are tessellated with
   their vertices slightly outside the arc, so the chords cut it and the
   coverage of the edge pixels matches (measured to within 5 of 255).
-  Straight edges on the pixel grid stay hard.
+  Straight edges are feathered the same way, over one pixel centred on
+  the edge: on the pixel grid every pixel centre is half a pixel off the
+  edge, so the edge stays hard; at a fractional position, under a
+  rotation or a scale it is antialiased as Unity draws it (`px-transform`
+  99.6% exact). At a square corner each side's feather runs along the
+  split line, scaled so that it is half a pixel across that side's edge,
+  so the sides still meet on the line. The background fan closes the gap
+  beside a translucent side.
+- Godot snaps a Control's canvas transform origin to the pixel grid
+  (`gui/common/snap_controls_to_pixels`, on by default) unless the
+  control's own `rotation` is off the quarter turns; the USS transform is
+  the offset transform, inside the snapped part, so a rotated, scaled or
+  fractionally translated element drew up to half a pixel off (rotate:
+  15deg, 0.2px). Unity does not snap. `_apply_transform` sets a rotation
+  of 1e-5 rad (0.004px over 400px) on transformed elements, which turns
+  the snap off for them.
 - The tessellation is built at the first draw for a rect and kept until
   the rect changes; a draw is one `canvas_item_add_triangle_array`.
 - A Button without a USS box (a RepeatButton, `all: initial`) gets an
   empty stylebox, not Godot's theme box.
+  `UxmlRepeatButton` is not flat (a flat Button draws no stylebox): the
+  arrow buttons of a Scroller draw their USS box and image.
 
 ### Cursor
 
@@ -2787,3 +2856,10 @@ Unity. Unity measured these rules in batch mode (6000.3.24f1):
 - Deviation: a height that comes from the parent (a stretched row item,
   a growing column item) does not constrain the measurement; the
   placement still fits that height.
+- Not confirmed by the renders: in the reference renders
+  (`bench/pixels.py`) and dumps Unity lays out and draws best-fit text
+  at its `font-size` (`uss-text` `auto`: 12px in a 90 x 30px box, layout
+  measure 53 x 15; `uss-text-inherit`: 27px and 10px text with
+  `best-fit 6px 20px`), so the advanced text generator is probably off
+  in the dump project. godot-uxml draws the fitted size, and these two
+  cases differ there.

@@ -617,7 +617,37 @@ static func enum_info(type_attr: String) -> Dictionary:
 		var kb := String(k).split(",")[0].strip_edges()
 		if kb == bare or _last_segment(kb) == last:
 			return _enums[k]
+	if BUILTIN_ENUMS.has(bare):
+		register_enum(bare, BUILTIN_ENUMS[bare])
+		return _enums[bare]
 	return {}
+
+
+## Unity's own enum types that an EnumField can name in UXML (`type=
+## "UnityEngine.UIElements.Align, UnityEngine.UIElementsModule"`): their
+## values in declaration order, as Unity 6000.3 lists them (measured:
+## ctl-enum-open shows Auto, Flex Start, Center, Flex End, Stretch). A
+## registered type of the same name wins.
+const BUILTIN_ENUMS := {
+	"UnityEngine.UIElements.Align": ["Auto", "FlexStart", "Center", "FlexEnd", "Stretch"],
+	"UnityEngine.UIElements.Justify": ["FlexStart", "Center", "FlexEnd", "SpaceBetween", "SpaceAround", "SpaceEvenly"],
+	"UnityEngine.UIElements.FlexDirection": ["Column", "ColumnReverse", "Row", "RowReverse"],
+	"UnityEngine.UIElements.Wrap": ["NoWrap", "Wrap", "WrapReverse"],
+	"UnityEngine.UIElements.Position": ["Relative", "Absolute"],
+	"UnityEngine.UIElements.Overflow": ["Visible", "Hidden"],
+	"UnityEngine.UIElements.Visibility": ["Visible", "Hidden"],
+	"UnityEngine.UIElements.DisplayStyle": ["Flex", "None"],
+	"UnityEngine.UIElements.WhiteSpace": ["Normal", "NoWrap", "Pre", "PreWrap"],
+	"UnityEngine.UIElements.TextOverflow": ["Clip", "Ellipsis"],
+	"UnityEngine.UIElements.PickingMode": ["Position", "Ignore"],
+	"UnityEngine.UIElements.SelectionType": ["None", "Single", "Multiple"],
+	"UnityEngine.UIElements.ScrollerVisibility": ["Auto", "AlwaysVisible", "Hidden"],
+	"UnityEngine.UIElements.ScrollViewMode": ["Vertical", "Horizontal", "VerticalAndHorizontal"],
+	"UnityEngine.TextAnchor": ["UpperLeft", "UpperCenter", "UpperRight", "MiddleLeft", "MiddleCenter",
+		"MiddleRight", "LowerLeft", "LowerCenter", "LowerRight"],
+	"UnityEngine.FontStyle": ["Normal", "Bold", "Italic", "BoldAndItalic"],
+	"UnityEngine.ScaleMode": ["StretchToFill", "ScaleAndCrop", "ScaleToFit"],
+}
 
 
 static func _last_segment(type_name: String) -> String:

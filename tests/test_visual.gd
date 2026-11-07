@@ -118,11 +118,14 @@ func test_transforms() -> void:
 	# position + translate (10 + 0, 0.5 * 40) + R*S about the top-left.
 	var xf := m.get_transform()
 	h.check(xf.origin.is_equal_approx(m.position + Vector2(10, 20)), "translate applied (%s)" % xf.origin)
-	h.check(xf.x.is_equal_approx(Vector2(0, 2)), "scale then rotate (%s)" % xf.x)
+	# Within 1e-4: the 1e-5 rad rotation that turns Godot's pixel snap off.
+	h.check(xf.x.distance_to(Vector2(0, 2)) < 1e-4, "scale then rotate (%s)" % xf.x)
+	h.check(m.rotation != 0.0 and absf(m.rotation) < 1e-4, "no pixel snap under a transform")
 	doc.set_class("moved", "box")
 	await h.process_frame
 	h.check(not m.offset_transform_enabled, "transform removed -> off")
 	h.eq(m.get_transform().origin, m.position, "no residual transform")
+	h.eq(m.rotation, 0.0, "no snap rotation left")
 	_unload(doc)
 
 

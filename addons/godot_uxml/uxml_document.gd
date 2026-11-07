@@ -943,6 +943,10 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 			# without the fit (UxmlStyleApplier.fit_label; the native
 			# measurer reads the `uxml_fit` meta that fit_label sets with it).
 			ms.y = UxmlStyleApplier.unfitted_height(c)
+		if c.text.is_empty():
+			# Unity measures an empty text 0 x 0 (Godot: one line high);
+			# the placement fits the Label into its box (fit_label).
+			ms = Vector2(_hpad(c), _vpad(c))
 	# A USS stylebox carries padding+border as content margins, which the
 	# minimum size already counts — the flex pass adds the same insets on
 	# top of the intrinsic size, so take them back out here. Only styleboxes
@@ -968,6 +972,16 @@ func _volatile_measures() -> Dictionary:
 				and not c.has_meta(&"uxml_autosize")):
 			out[el] = c.size.x - _hpad(c)
 	return out
+
+
+## The vertical USS padding and border a control's stylebox carries.
+static func _vpad(c: Control) -> float:
+	if c.has_theme_stylebox_override("normal"):
+		var sb: StyleBox = c.get_theme_stylebox("normal")
+		if sb != null and sb.has_meta("uxml_margins"):
+			var m: Array = sb.get_meta("uxml_margins")
+			return m[1] + m[3]
+	return 0.0
 
 
 ## The horizontal USS padding and border a control's stylebox carries
@@ -1119,6 +1133,11 @@ func _place_control(el: UxmlElement) -> void:
 		UxmlStyleApplier.autosize_place(c, cs)
 	c.position = r.position
 	c.size = r.size
+	if _applier != null and c is Label and c.size.x > r.size.x + 0.01:
+		# Narrower than its text (UxmlStyleApplier.fit_label_width; the
+		# native placement does the same).
+		_applier.fit_label_width(c)
+		c.size = r.size
 	if _applier != null and c is Label:
 		# Godot floors a Label at one text line; Unity's box can be shorter.
 		# A one-line Label taller than its box is fitted; a fitted Label is

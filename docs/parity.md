@@ -397,9 +397,10 @@ Comparison, per case:
   `1px` (every pixel within 8 of a neighbour) or `differs`.
 - **text**: the text pixels of each side are where its render and its
   text-free render differ by more than 24. Unity draws NotInter (an Inter
-  clone) through TextCore's SDF renderer; godot-uxml draws Godot's
-  default font through its own rasteriser (with Unity's line height,
-  design.md "Line height"), so text is compared by placement and amount:
+  clone) through TextCore's SDF renderer; godot-uxml draws Inter 3.009
+  (the same metrics) through Godot's rasteriser (with Unity's line
+  height, design.md "Default font", "Line height"), so text is compared
+  by placement and amount:
   the IoU of the two text masks (each dilated by 1px), the text pixel
   counts, and per text block (both masks joined over 3x1px gaps) the
   largest difference of the bounding-box edges.
@@ -416,212 +417,229 @@ names the smallest Unity element around each region of box differences.
 ### Result
 
 Over 177 cases (the 170 Unity cases of the model comparison and the
-seven `px-*` cases), main (f6696c6) against this branch, with the same
-Unity renders:
+seven `px-*` cases), with the same Unity renders. "unity/pixels" is the
+state before this round (main a0fa025), "after" this branch:
 
-| | main | after |
+| | unity/pixels | after |
 | --- | ---: | ---: |
-| cases, boxes exact (every pixel within 8 of 255) | 70 | 90 |
-| cases, boxes within 1px | 4 | 6 |
-| cases that differ | 103 | 81 |
-| box pixels exact (mean over the cases) | 98.467% | 99.094% |
-| box pixels within 1px | 98.820% | 99.296% |
-| runtime rects within 0.5px | 3095 of 3558 | 3114 of 3558 |
-| text mask IoU (mean over the 120 cases with text) | 0.730 | 0.772 |
+| cases, boxes exact (every pixel within 8 of 255) | 90 | 98 |
+| cases, boxes within 1px | 6 | 13 |
+| cases that differ | 81 | 66 |
+| box pixels exact (mean over the cases) | 99.094% | 99.806% |
+| box pixels within 1px | 99.296% | 99.895% |
+| runtime rects within 0.5px | 3114 of 3558 | 3369 of 3551 |
+| text mask IoU (mean over all cases, as `bench/pixels.py` prints it) | 0.845 | 0.917 |
+| text mask IoU (mean over the 119 cases with text) | 0.778 | 0.884 |
+| text pixels, godot-uxml / Unity (all cases) | 1.144 | 1.021 |
 
-The paint cases after the fixes: `px-filter` exact (largest error 6);
-`px-background` within 1px (99.79% exact, largest error 48 on curved
-and filtered image edges); `px-border` 99.95% exact (the rest
-antialiased corner pixels, largest error 25); `px-clip` 99.58% exact and
-100% within 1px (a rotated clip's edges, see below); `px-material`
-99.26% (a Label wider than its box, see below); `px-transform` 97.45%
-exact, 99.83% within 1px; `px-text` 99.13% (box pixels; a wrapping Label
-wraps into one more line with Godot's font and draws its background
-taller).
+(The runtime rects count 7 elements fewer: the arrow buttons and sliders
+of Scrollers that are hidden in `ctl-scrollview-visibility` are now
+hidden in the runtime too; before they were visible and differed.)
 
-Per case (before: main; text and runtime rects after):
+By feature:
 
-| case | boxes before | boxes after | exact | within 1px | max error | text IoU | text px Unity / godot-uxml | runtime rects before | after |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| absolute-import-assets | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| absolute-import-package-project | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| absolute-import-packages | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| absolute-import-project | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| absolute-import-rooted-packages | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| absolute-offsets | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| align-items | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 6/6 | 6/6 |
-| border-box | differs 95.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 2/2 | 2/2 |
-| button-absolute-in-border | differs 93.25% | exact | 100.00% | 100.00% | 0 | 0.85 | 41 / 46 | 1/2 | 2/2 |
-| button-align-items | differs 99.09% | exact | 100.00% | 100.00% | 0 | 0.91 | 205 / 220 | 1/2 | 2/2 |
-| button-border-box | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.92 | 89 / 100 | 1/1 | 1/1 |
-| button-flex-grow | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.92 | 319 / 371 | 3/3 | 3/3 |
-| button-row-margins | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.86 | 138 / 149 | 4/4 | 4/4 |
-| button-sizes-to-text | differs 99.81% | differs | 99.81% | 99.89% | 106 | 0.69 | 412 / 483 | 1/2 | 1/2 |
-| child-combinator-through-parts | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 5/5 | 5/5 |
-| ctl-attrs | differs 99.77% | differs | 99.97% | 99.99% | 205 | 0.50 | 1990 / 2206 | 17/25 | 18/25 |
-| ctl-basefield | differs 99.64% | differs | 99.64% | 99.74% | 155 | 0.75 | 2633 / 3189 | 23/26 | 23/26 |
-| ctl-basic | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.87 | 665 / 790 | 5/7 | 5/7 |
-| ctl-button | differs 80.61% | 1px | 100.00% | 100.00% | 39 | 0.88 | 985 / 1158 | 3/10 | 10/10 |
-| ctl-button-states | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.87 | 676 / 783 | 4/4 | 4/4 |
-| ctl-containers | differs 99.92% | 1px | 100.00% | 100.00% | 9 | 0.86 | 782 / 928 | 10/10 | 10/10 |
-| ctl-disabled | differs 98.45% | differs | 99.93% | 99.99% | 102 | 0.87 | 771 / 901 | 17/19 | 17/19 |
-| ctl-dropdown | differs 83.76% | differs | 83.76% | 87.20% | 205 | 0.37 | 1042 / 1012 | 4/23 | 4/23 |
-| ctl-dropdown-menu-hover | differs 99.91% | differs | 99.91% | 99.98% | 134 | 0.86 | 700 / 802 | 5/5 | 5/5 |
-| ctl-dropdown-open | differs 99.91% | differs | 99.91% | 99.98% | 134 | 0.89 | 931 / 1140 | 5/5 | 5/5 |
-| ctl-dropdown-states | differs 99.41% | differs | 99.85% | 99.96% | 159 | 0.90 | 751 / 872 | 15/15 | 15/15 |
-| ctl-enum | differs 99.86% | differs | 99.86% | 99.97% | 138 | 0.31 | 1607 / 657 | 15/15 | 15/15 |
-| ctl-enum-open | differs 69.79% | differs | 69.79% | 70.47% | 228 | 0.11 | 1451 / 196 | 5/5 | 5/5 |
-| ctl-focus-minmax | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.90 | 568 / 642 | 21/21 | 21/21 |
-| ctl-foldout | differs 99.82% | differs | 99.82% | 99.95% | 205 | 0.89 | 1066 / 1193 | 21/24 | 21/24 |
-| ctl-foldout-click | differs 99.95% | differs | 99.95% | 99.99% | 205 | 0.90 | 389 / 455 | 5/6 | 5/6 |
-| ctl-forced-states | differs 99.79% | differs | 99.91% | 99.96% | 205 | 0.87 | 2009 / 2355 | 38/42 | 39/42 |
-| ctl-helpbox | differs 97.78% | differs | 97.90% | 98.32% | 255 | 0.85 | 1555 / 1845 | 9/14 | 9/14 |
-| ctl-hover-dropdown | differs 99.95% | differs | 99.95% | 99.99% | 159 | 0.89 | 214 / 269 | 5/5 | 5/5 |
-| ctl-hover-minmax | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 169 / 218 | 7/7 | 7/7 |
-| ctl-hover-numeric | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.86 | 195 / 251 | 4/4 | 4/4 |
-| ctl-hover-slider | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 169 / 218 | 7/7 | 7/7 |
-| ctl-hover-slider-track | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 169 / 218 | 6/6 | 6/6 |
-| ctl-hover-textfield | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 284 / 346 | 4/4 | 4/4 |
-| ctl-imgui | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 2/2 | 2/2 |
-| ctl-listview | differs 98.55% | differs | 99.04% | 99.14% | 205 | 0.82 | 1406 / 1644 | 33/33 | 33/33 |
-| ctl-listview-chrome | differs 99.58% | differs | 99.58% | 99.79% | 205 | 0.76 | 1274 / 1449 | 24/30 | 24/30 |
-| ctl-listview-dynamic | differs 98.61% | differs | 99.28% | 99.34% | 205 | 0.81 | 1929 / 2279 | 35/35 | 35/35 |
-| ctl-listview-keys | differs 98.97% | differs | 99.04% | 99.14% | 205 | 0.81 | 853 / 1004 | 19/19 | 19/19 |
-| ctl-listview-reorder | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.80 | 874 / 1037 | 30/30 | 30/30 |
-| ctl-minmaxslider | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.90 | 460 / 553 | 20/20 | 20/20 |
-| ctl-more | differs 99.30% | differs | 99.57% | 99.65% | 255 | 0.73 | 3229 / 3763 | 73/82 | 73/82 |
-| ctl-more-2 | differs 98.77% | differs | 98.88% | 99.29% | 205 | 0.89 | 573 / 649 | 51/51 | 51/51 |
-| ctl-multicolumn-listview | differs 98.75% | differs | 98.75% | 99.25% | 106 | 0.12 | 2133 / 2054 | 2/55 | 2/55 |
-| ctl-multicolumn-treeview | differs 99.95% | differs | 99.95% | 99.99% | 205 | 0.49 | 912 / 1042 | 30/36 | 30/36 |
-| ctl-numeric | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.80 | 4150 / 4650 | 30/31 | 30/31 |
-| ctl-numeric-focus | differs 99.70% | differs | 99.70% | 99.76% | 117 | 0.75 | 577 / 855 | 19/19 | 19/19 |
-| ctl-pressed | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 327 / 369 | 5/5 | 5/5 |
-| ctl-pressed-toggle | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.90 | 172 / 194 | 4/4 | 4/4 |
-| ctl-probe | differs 99.95% | differs | 99.95% | 99.99% | 205 | 0.86 | 374 / 394 | 9/11 | 9/11 |
-| ctl-progress-range | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 15/18 | 15/18 |
-| ctl-progressbar | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.14 | 527 / 617 | 26/31 | 26/31 |
-| ctl-radio | differs 99.03% | exact | 100.00% | 100.00% | 7 | 0.87 | 1329 / 1490 | 51/55 | 51/55 |
-| ctl-radio-click | differs 99.46% | exact | 100.00% | 100.00% | 8 | 0.88 | 846 / 948 | 25/27 | 25/27 |
-| ctl-rects | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.85 | 1613 / 1800 | 108/108 | 108/108 |
-| ctl-scroller | differs 97.04% | differs | 97.12% | 97.29% | 205 | 1.00 | 0 / 0 | 24/24 | 24/24 |
-| ctl-scrollview-modes | differs 95.84% | differs | 96.16% | 96.58% | 205 | 1.00 | 0 / 0 | 50/50 | 50/50 |
-| ctl-scrollview-scrolled | differs 97.92% | differs | 98.02% | 98.26% | 205 | 1.00 | 0 / 0 | 23/23 | 23/23 |
-| ctl-scrollview-visibility | differs 96.67% | differs | 96.61% | 97.40% | 205 | 0.83 | 486 / 556 | 28/45 | 28/45 |
-| ctl-scrollview-wheel | differs 97.54% | differs | 97.54% | 97.87% | 205 | 1.00 | 0 / 0 | 20/26 | 20/26 |
-| ctl-slider | differs 99.79% | differs | 99.79% | 99.93% | 62 | 0.84 | 607 / 707 | 31/31 | 31/31 |
-| ctl-slider-click | differs 99.86% | differs | 99.86% | 99.95% | 31 | 1.00 | 0 / 0 | 20/20 | 20/20 |
-| ctl-slider-input | differs 99.78% | differs | 99.78% | 99.93% | 78 | 0.84 | 505 / 566 | 25/26 | 25/26 |
-| ctl-slider-keys | differs 99.70% | differs | 99.70% | 99.90% | 75 | 1.00 | 0 / 0 | 45/45 | 45/45 |
-| ctl-slider-states | differs 99.50% | differs | 99.92% | 99.98% | 78 | 0.88 | 991 / 1142 | 34/34 | 34/34 |
-| ctl-slider-vertical | differs 99.78% | differs | 99.78% | 99.93% | 62 | 0.62 | 40 / 61 | 25/26 | 25/26 |
-| ctl-states-more | differs 98.56% | differs | 99.83% | 99.94% | 205 | 0.80 | 1400 / 1518 | 59/62 | 59/62 |
-| ctl-styled-inputs | differs 99.89% | differs | 99.89% | 99.95% | 205 | 0.84 | 1267 / 1422 | 38/38 | 38/38 |
-| ctl-styled-parts | differs 99.71% | differs | 99.79% | 99.83% | 255 | 0.84 | 1387 / 1562 | 28/30 | 28/30 |
-| ctl-styled-states | 1px 99.97% | 1px | 99.97% | 100.00% | 37 | 0.86 | 842 / 1045 | 14/14 | 14/14 |
-| ctl-tabview | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.84 | 889 / 999 | 12/22 | 12/22 |
-| ctl-tabview-click | 1px 99.96% | 1px | 99.96% | 100.00% | 228 | 0.88 | 522 / 596 | 15/19 | 15/19 |
-| ctl-textfield | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.83 | 2455 / 2633 | 27/27 | 27/27 |
-| ctl-textfield-multiline | differs 85.93% | differs | 85.94% | 89.25% | 155 | 0.30 | 1038 / 1147 | 0/23 | 0/23 |
-| ctl-textfield-states | differs 99.65% | differs | 99.64% | 99.71% | 117 | 0.76 | 1326 / 1696 | 20/20 | 20/20 |
-| ctl-toggle | differs 99.81% | differs | 99.89% | 99.94% | 155 | 0.88 | 965 / 1077 | 26/28 | 26/28 |
-| ctl-toggle-states | differs 99.95% | differs | 99.95% | 99.97% | 155 | 0.90 | 813 / 922 | 20/20 | 20/20 |
-| ctl-togglebuttongroup | differs 99.90% | differs | 99.90% | 99.97% | 106 | 0.87 | 683 / 767 | 12/13 | 12/13 |
-| ctl-togglebuttongroup-click | 1px 99.97% | exact | 100.00% | 100.00% | 0 | 0.87 | 313 / 368 | 8/8 | 8/8 |
-| ctl-treeview | differs 99.95% | differs | 99.95% | 99.99% | 205 | 0.88 | 404 / 463 | 14/16 | 14/16 |
-| ctl-treeview-expanded | differs 99.91% | differs | 99.91% | 99.98% | 205 | 0.88 | 1026 / 1127 | 26/31 | 26/31 |
-| ctl-twopane | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 12/12 | 12/12 |
-| ctl-vectors | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.85 | 1822 / 1999 | 85/85 | 85/85 |
-| default-direction | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 3/3 | 3/3 |
-| direction-reverse | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 3/3 | 3/3 |
-| direction-row | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 3/3 | 3/3 |
-| disabled-inherits | differs 98.11% | exact | 100.00% | 100.00% | 0 | 0.88 | 148 / 174 | 2/4 | 4/4 |
-| ed-colorfield | differs 99.70% | differs | 99.71% | 99.94% | 141 | 0.89 | 1222 / 1458 | 83/88 | 83/88 |
-| ed-colorfield-light | differs 99.67% | differs | 99.64% | 99.91% | 174 | 0.89 | 1272 / 1502 | 83/88 | 83/88 |
-| ed-curve-gradient | differs 94.43% | differs | 94.42% | 96.11% | 255 | 0.91 | 791 / 933 | 26/26 | 26/26 |
-| ed-curve-gradient-light | differs 93.95% | differs | 94.42% | 96.10% | 255 | 0.92 | 855 / 995 | 26/26 | 26/26 |
-| ed-field-states | differs 98.95% | differs | 99.56% | 99.90% | 131 | 0.91 | 1466 / 1727 | 41/42 | 41/42 |
-| ed-field-states-light | differs 98.91% | differs | 99.53% | 99.87% | 130 | 0.91 | 1504 / 1775 | 41/42 | 41/42 |
-| ed-inspector | differs 99.15% | differs | 99.81% | 99.91% | 95 | 0.87 | 895 / 1104 | 27/27 | 27/27 |
-| ed-masks | differs 97.20% | differs | 99.84% | 99.94% | 69 | 0.88 | 5169 / 5985 | 65/65 | 65/65 |
-| ed-masks-light | differs 96.87% | differs | 99.78% | 99.86% | 73 | 0.89 | 5440 / 6244 | 65/65 | 65/65 |
-| ed-objectfield | differs 99.74% | differs | 99.76% | 99.92% | 65 | 0.87 | 2226 / 2622 | 34/34 | 34/34 |
-| ed-objectfield-light | differs 99.52% | differs | 99.77% | 99.85% | 94 | 0.88 | 2372 / 2784 | 34/34 | 34/34 |
-| ed-propertyfield | differs 94.67% | differs | 96.31% | 97.08% | 255 | 0.88 | 4739 / 5497 | 81/82 | 81/82 |
-| ed-runtime | differs 98.34% | differs | 99.57% | 99.65% | 192 | 0.91 | 2577 / 3023 | 65/66 | 65/66 |
-| ed-runtime-light | differs 98.20% | differs | 99.47% | 99.62% | 194 | 0.91 | 2669 / 3104 | 65/66 | 65/66 |
-| ed-states-more | differs 97.29% | differs | 97.59% | 99.96% | 199 | 0.72 | 1437 / 1949 | 34/63 | 34/63 |
-| ed-toolbar | differs 90.14% | differs | 90.27% | 91.99% | 154 | 0.78 | 1171 / 1358 | 7/43 | 7/43 |
-| ed-toolbar-light | differs 88.25% | differs | 88.36% | 90.30% | 155 | 0.79 | 1250 / 1429 | 7/43 | 7/43 |
-| ed-toolbar-states | differs 98.93% | differs | 99.23% | 99.83% | 156 | 0.84 | 502 / 610 | 1/16 | 1/16 |
-| ed-toolbar-states-light | differs 98.93% | differs | 99.21% | 99.82% | 191 | 0.87 | 564 / 668 | 1/16 | 1/16 |
-| flex-grow-shrink | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 6/6 | 6/6 |
-| flex-wrap | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| imp-assets-noslash | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| imp-style-noslash | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 2/2 | 2/2 |
-| inherit-vs-direct | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.95 | 22 / 23 | 2/2 | 2/2 |
-| inline-override | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 1/1 | 1/1 |
-| inventory | differs 88.75% | differs | 90.74% | 92.27% | 207 | 0.68 | 2732 / 3158 | 27/41 | 28/41 |
-| justify-content | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 9/9 | 9/9 |
-| lay-absolute | differs 97.92% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 17/17 | 17/17 |
-| lay-fraction | differs 99.93% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 17/17 | 17/17 |
-| lay-minmax | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 19/19 | 19/19 |
-| lay-percent | differs 95.92% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 18/18 | 18/18 |
-| lay-wrap | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 62/62 | 62/62 |
-| min-max-conflict | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 3/3 | 3/3 |
-| nested-absolute | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 3/3 | 3/3 |
-| no-margin-collapse | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 2/2 | 2/2 |
-| padding-and-position | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 3/3 | 3/3 |
-| percent-without-parent-size | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| px-background | differs 97.48% | 1px | 99.79% | 100.00% | 48 | 1.00 | 0 / 0 | 17/17 | 17/17 |
-| px-border | differs 93.44% | differs | 99.95% | 99.97% | 25 | 1.00 | 0 / 0 | 16/16 | 16/16 |
-| px-clip | differs 99.02% | differs | 99.58% | 100.00% | 225 | 1.00 | 0 / 0 | 25/25 | 25/25 |
-| px-filter | differs 98.35% | exact | 100.00% | 100.00% | 6 | 0.81 | 626 / 719 | 31/31 | 31/31 |
-| px-material | differs 99.14% | differs | 99.26% | 99.39% | 200 | 0.75 | 326 / 418 | 14/15 | 14/15 |
-| px-text | differs 99.13% | differs | 99.13% | 99.34% | 215 | 0.70 | 7991 / 9059 | 10/22 | 10/22 |
-| px-transform | differs 97.26% | differs | 97.45% | 99.83% | 255 | 1.00 | 0 / 0 | 1/1 | 1/1 |
-| relative-import-ambiguity | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| resource-resolution | differs 97.22% | differs | 97.22% | 98.08% | 255 | 1.00 | 0 / 0 | 7/7 | 7/7 |
-| scrollview-hierarchy | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 5/5 | 5/5 |
-| scrollview-overflowing | differs 98.97% | differs | 99.04% | 99.14% | 205 | 1.00 | 0 / 0 | 15/15 | 15/15 |
-| scrollview-padding | differs 97.42% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 5/5 | 5/5 |
-| sel-pseudo | differs 92.70% | 1px | 100.00% | 100.00% | 39 | 0.82 | 41 / 57 | 15/16 | 16/16 |
-| sel-root | differs 99.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 5/5 | 5/5 |
-| sibling-overlap | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 2/2 | 2/2 |
-| specificity-tie | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 1/1 | 1/1 |
-| state-vs-id | differs 99.59% | exact | 100.00% | 100.00% | 0 | 0.87 | 34 / 46 | 1/2 | 2/2 |
-| state-vs-inline | differs 99.59% | exact | 100.00% | 100.00% | 0 | 0.87 | 34 / 46 | 1/2 | 2/2 |
-| states-disabled | differs 98.65% | exact | 100.00% | 100.00% | 0 | 0.90 | 166 / 197 | 1/3 | 3/3 |
-| style-subtree-scope | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 4/4 | 4/4 |
-| text-align | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.73 | 194 / 204 | 3/3 | 3/3 |
-| text-size | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.63 | 503 / 619 | 1/2 | 1/2 |
-| theme-class-hook | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.86 | 144 / 192 | 2/2 | 2/2 |
-| tpl-overrides | differs 97.33% | exact | 100.00% | 100.00% | 0 | 0.82 | 2601 / 3039 | 26/26 | 26/26 |
-| tr-reverse | differs 99.70% | differs | 99.71% | 99.86% | 255 | 0.80 | 230 / 261 | 14/15 | 14/15 |
-| tr-t100 | differs 99.60% | differs | 99.60% | 99.73% | 255 | 0.92 | 242 / 276 | 14/15 | 14/15 |
-| tr-t1200 | differs 99.68% | differs | 99.70% | 99.76% | 255 | 0.60 | 606 / 754 | 14/15 | 14/15 |
-| tr-t250 | differs 99.61% | differs | 99.61% | 99.74% | 255 | 0.83 | 294 / 327 | 14/15 | 14/15 |
-| tr-t500 | differs 99.62% | differs | 99.63% | 99.74% | 255 | 0.47 | 342 / 438 | 14/15 | 14/15 |
-| tr-t800 | differs 99.61% | differs | 99.62% | 99.74% | 255 | 0.49 | 459 / 600 | 14/15 | 14/15 |
-| uss-all | differs 81.34% | exact | 100.00% | 100.00% | 0 | 0.00 | 0 / 188 | 0/7 | 0/7 |
-| uss-all-2 | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 8/8 | 8/8 |
-| uss-background | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 25/25 | 25/25 |
-| uss-cursor | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.87 | 32 / 40 | 8/8 | 8/8 |
-| uss-important | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.79 | 116 / 130 | 4/4 | 4/4 |
-| uss-invalid | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.92 | 176 / 201 | 20/20 | 20/20 |
-| uss-invalid-unit | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 2/2 | 2/2 |
-| uss-keywords | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.55 | 209 / 202 | 3/8 | 3/8 |
-| uss-keywords-2 | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.72 | 131 / 170 | 8/8 | 8/8 |
-| uss-keywords-3 | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.09 | 129 / 190 | 5/10 | 5/10 |
-| uss-shorthand | differs 99.63% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 25/25 | 25/25 |
-| uss-slice | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 7/7 | 7/7 |
-| uss-text | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.42 | 7791 / 9432 | 3/23 | 3/23 |
-| uss-text-inherit | differs 91.18% | differs | 91.17% | 92.91% | 125 | 0.42 | 2376 / 3002 | 0/10 | 0/10 |
-| uss-text-wrap | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.13 | 4017 / 4773 | 0/4 | 0/4 |
-| uss-transform | differs 99.47% | differs | 99.47% | 100.00% | 147 | 1.00 | 0 / 0 | 8/8 | 8/8 |
-| uss-var | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.81 | 117 / 113 | 11/11 | 11/11 |
-| uss-visibility | 1px 98.72% | exact | 100.00% | 100.00% | 0 | 1.00 | 0 / 0 | 7/7 | 7/7 |
+| feature | measure before | after |
+| --- | --- | --- |
+| text: Inter 3.009 (NotInter's metrics) in place of Godot's default font | IoU 0.778, 1.144 x Unity's ink | IoU 0.884, 1.021 x; single-line text measures 368 of 375 to the pixel |
+| Labels narrower than their text | `px-material` 99.26% (92 vs 80px) | exact |
+| straight edges antialiased, no pixel snap under a transform | `px-transform` 97.45% / 99.83% within 1px; `ctl-slider` 99.79% | 99.61% / 99.87%; `ctl-slider` exact |
+| multiline TextField (line spacing 0) | 85 vs 73px, `ctl-textfield-multiline` 85.94%, rects 0/23 | 73px, 99.98%, 23/23 |
+| RepeatButton draws its box (Scroller arrows) | `ctl-scroller` 97.12%, `ctl-scrollview-modes` 96.16% | 99.88%, 99.83% |
+| theme images measured (arrows, check, HelpBox, breadcrumbs, checker, editor toggle and dropdown) | `ctl-helpbox` 97.90%, `ctl-foldout` max error 205, `ctl-dropdown` max 138 | 99.47%, max 50, max 39 |
+| EnumField of Unity's enum types | `ctl-enum-open` 69.79% (no menu), `ctl-enum` IoU 0.31 | 99.97%, IoU 0.98 |
+| italic | upright glyphs | slanted |
+| attribute values over two lines | `uss-text-wrap` `w-pre` two lines | one line, IoU 0.13 -> 0.69 |
+| harness: `set-prop`, curve and gradient values, the bound stand-in's defaults | `ed-toolbar` 90.27%, `ed-curve-gradient` 94.42%, `ed-propertyfield` 96.31% | 99.81%, 98.83%, 99.22% |
 
-Differences found and fixed (measured cases in brackets; GDScript and
+The paint cases: `px-filter` and `px-material` exact; `px-background`
+and `px-text` within 1px; `px-border` 99.96% exact (largest error 22,
+antialiased corner pixels); `px-clip` 99.80% exact, 100% within 1px;
+`px-transform` 99.61% exact, 99.87% within 1px (the corners of the
+45-degree and rounded rotated boxes).
+
+Per case (before: unity/pixels; the other columns after):
+
+| case | boxes before | boxes after | exact | within 1px | max error | text IoU before | after | text px Unity / godot-uxml | runtime rects before | after |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| absolute-import-assets | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| absolute-import-package-project | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| absolute-import-packages | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| absolute-import-project | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| absolute-import-rooted-packages | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| absolute-offsets | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| align-items | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 6/6 | 6/6 |
+| border-box | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 2/2 | 2/2 |
+| button-absolute-in-border | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.85 | 0.81 | 41 / 46 | 2/2 | 2/2 |
+| button-align-items | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.91 | 0.93 | 205 / 196 | 2/2 | 2/2 |
+| button-border-box | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.92 | 0.84 | 89 / 100 | 1/1 | 1/1 |
+| button-flex-grow | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.92 | 0.92 | 319 / 322 | 3/3 | 3/3 |
+| button-row-margins | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.86 | 0.83 | 138 / 145 | 4/4 | 4/4 |
+| button-sizes-to-text | differs 99.81% | exact | 100.00% | 100.00% | 0 | 0.69 | 0.86 | 412 / 391 | 1/2 | 2/2 |
+| child-combinator-through-parts | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 5/5 | 5/5 |
+| ctl-attrs | differs 99.97% | differs | 99.98% | 99.99% | 50 | 0.50 | 0.76 | 1990 / 2093 | 18/25 | 20/25 |
+| ctl-basefield | differs 99.64% | exact | 100.00% | 100.00% | 0 | 0.75 | 0.95 | 2633 / 2864 | 23/26 | 26/26 |
+| ctl-basic | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.87 | 0.96 | 665 / 719 | 5/7 | 6/7 |
+| ctl-button | 1px 100.00% | 1px | 99.81% | 100.00% | 106 | 0.88 | 0.91 | 985 / 1049 | 10/10 | 8/10 |
+| ctl-button-states | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.87 | 0.96 | 676 / 674 | 4/4 | 4/4 |
+| ctl-containers | 1px 100.00% | 1px | 100.00% | 100.00% | 9 | 0.86 | 0.94 | 782 / 830 | 10/10 | 10/10 |
+| ctl-disabled | differs 99.93% | differs | 99.97% | 99.99% | 48 | 0.87 | 0.97 | 771 / 740 | 17/19 | 18/19 |
+| ctl-dropdown | differs 83.76% | differs | 99.92% | 99.96% | 39 | 0.37 | 0.97 | 1042 / 1106 | 4/23 | 20/23 |
+| ctl-dropdown-menu-hover | differs 99.91% | differs | 99.97% | 99.99% | 81 | 0.86 | 0.96 | 700 / 758 | 5/5 | 5/5 |
+| ctl-dropdown-open | differs 99.91% | differs | 99.97% | 99.99% | 81 | 0.89 | 0.97 | 931 / 1011 | 5/5 | 5/5 |
+| ctl-dropdown-states | differs 99.85% | differs | 99.94% | 99.98% | 45 | 0.90 | 0.95 | 751 / 776 | 15/15 | 15/15 |
+| ctl-enum | differs 99.86% | differs | 99.95% | 99.98% | 39 | 0.31 | 0.98 | 1607 / 1638 | 15/15 | 15/15 |
+| ctl-enum-open | differs 69.79% | differs | 99.97% | 99.99% | 81 | 0.11 | 0.97 | 1451 / 1550 | 5/5 | 5/5 |
+| ctl-focus-minmax | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.90 | 0.96 | 568 / 613 | 21/21 | 21/21 |
+| ctl-foldout | differs 99.82% | differs | 99.90% | 99.96% | 50 | 0.89 | 0.96 | 1066 / 1124 | 21/24 | 24/24 |
+| ctl-foldout-click | differs 99.95% | differs | 99.98% | 99.99% | 50 | 0.90 | 0.96 | 389 / 409 | 5/6 | 6/6 |
+| ctl-forced-states | differs 99.91% | differs | 99.96% | 99.99% | 119 | 0.87 | 0.94 | 2009 / 2156 | 39/42 | 42/42 |
+| ctl-helpbox | differs 97.90% | differs | 99.47% | 99.89% | 120 | 0.85 | 0.96 | 1555 / 1599 | 9/14 | 13/14 |
+| ctl-hover-dropdown | differs 99.95% | differs | 99.98% | 99.99% | 45 | 0.89 | 0.94 | 214 / 242 | 5/5 | 5/5 |
+| ctl-hover-minmax | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 0.94 | 169 / 194 | 7/7 | 7/7 |
+| ctl-hover-numeric | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.86 | 0.94 | 195 / 221 | 4/4 | 4/4 |
+| ctl-hover-slider | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 0.94 | 169 / 194 | 7/7 | 7/7 |
+| ctl-hover-slider-track | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 0.94 | 169 / 194 | 6/6 | 6/6 |
+| ctl-hover-textfield | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 0.95 | 284 / 318 | 4/4 | 4/4 |
+| ctl-imgui | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 2/2 | 2/2 |
+| ctl-listview | differs 99.04% | differs | 99.96% | 99.98% | 51 | 0.82 | 0.96 | 1406 / 1422 | 33/33 | 33/33 |
+| ctl-listview-chrome | differs 99.58% | differs | 99.83% | 99.99% | 101 | 0.76 | 0.93 | 1274 / 1314 | 24/30 | 26/30 |
+| ctl-listview-dynamic | differs 99.28% | differs | 99.97% | 99.98% | 51 | 0.81 | 0.96 | 1929 / 1952 | 35/35 | 35/35 |
+| ctl-listview-keys | differs 99.04% | differs | 99.96% | 99.98% | 51 | 0.81 | 0.96 | 853 / 869 | 19/19 | 19/19 |
+| ctl-listview-reorder | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.80 | 0.96 | 874 / 895 | 30/30 | 30/30 |
+| ctl-minmaxslider | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.90 | 0.96 | 460 / 484 | 20/20 | 20/20 |
+| ctl-more | differs 99.57% | differs | 99.88% | 99.96% | 120 | 0.73 | 0.81 | 3229 / 3429 | 73/82 | 78/82 |
+| ctl-more-2 | differs 98.88% | differs | 99.85% | 99.98% | 51 | 0.89 | 0.96 | 573 / 612 | 51/51 | 51/51 |
+| ctl-multicolumn-listview | differs 98.75% | exact | 100.00% | 100.00% | 0 | 0.12 | 0.47 | 2133 / 1810 | 2/55 | 43/55 |
+| ctl-multicolumn-treeview | differs 99.95% | differs | 99.98% | 99.99% | 50 | 0.49 | 0.53 | 912 / 1011 | 30/36 | 32/36 |
+| ctl-numeric | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.80 | 0.95 | 4150 / 4367 | 30/31 | 30/31 |
+| ctl-numeric-focus | differs 99.70% | differs | 99.70% | 99.76% | 117 | 0.75 | 0.83 | 577 / 849 | 19/19 | 19/19 |
+| ctl-pressed | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.89 | 0.92 | 327 / 327 | 5/5 | 5/5 |
+| ctl-pressed-toggle | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.90 | 0.95 | 172 / 178 | 4/4 | 4/4 |
+| ctl-probe | differs 99.95% | differs | 99.98% | 99.99% | 50 | 0.86 | 0.92 | 374 / 399 | 9/11 | 11/11 |
+| ctl-progress-range | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 15/18 | 15/18 |
+| ctl-progressbar | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.14 | 0.16 | 527 / 550 | 26/31 | 26/31 |
+| ctl-radio | exact 100.00% | exact | 100.00% | 100.00% | 7 | 0.87 | 0.96 | 1329 / 1411 | 51/55 | 54/55 |
+| ctl-radio-click | exact 100.00% | exact | 100.00% | 100.00% | 8 | 0.88 | 0.96 | 846 / 891 | 25/27 | 26/27 |
+| ctl-rects | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.85 | 0.96 | 1613 / 1719 | 108/108 | 108/108 |
+| ctl-scroller | differs 97.12% | differs | 99.88% | 99.94% | 51 | 1.00 | 1.00 | 0 / 0 | 24/24 | 24/24 |
+| ctl-scrollview-modes | differs 96.16% | differs | 99.83% | 99.92% | 51 | 1.00 | 1.00 | 0 / 0 | 50/50 | 50/50 |
+| ctl-scrollview-scrolled | differs 98.02% | differs | 99.91% | 99.96% | 51 | 1.00 | 1.00 | 0 / 0 | 23/23 | 23/23 |
+| ctl-scrollview-visibility | differs 96.61% | differs | 99.89% | 99.95% | 51 | 0.83 | 0.95 | 486 / 512 | 28/45 | 38/38 |
+| ctl-scrollview-wheel | differs 97.54% | differs | 99.38% | 99.56% | 51 | 1.00 | 1.00 | 0 / 0 | 20/26 | 20/26 |
+| ctl-slider | differs 99.79% | exact | 100.00% | 100.00% | 0 | 0.84 | 0.96 | 607 / 657 | 31/31 | 31/31 |
+| ctl-slider-click | differs 99.86% | differs | 99.86% | 99.98% | 47 | 1.00 | 1.00 | 0 / 0 | 20/20 | 20/20 |
+| ctl-slider-input | differs 99.78% | exact | 100.00% | 100.00% | 0 | 0.84 | 0.88 | 505 / 491 | 25/26 | 25/26 |
+| ctl-slider-keys | differs 99.70% | exact | 100.00% | 100.00% | 1 | 1.00 | 1.00 | 0 / 0 | 45/45 | 45/45 |
+| ctl-slider-states | differs 99.92% | 1px | 100.00% | 100.00% | 48 | 0.88 | 0.95 | 991 / 1033 | 34/34 | 34/34 |
+| ctl-slider-vertical | differs 99.78% | exact | 100.00% | 100.00% | 0 | 0.62 | 0.68 | 40 / 59 | 25/26 | 25/26 |
+| ctl-states-more | differs 99.83% | differs | 99.90% | 99.96% | 119 | 0.80 | 0.90 | 1400 / 1417 | 59/62 | 61/62 |
+| ctl-styled-inputs | differs 99.89% | differs | 99.96% | 99.99% | 57 | 0.84 | 0.95 | 1267 / 1334 | 38/38 | 38/38 |
+| ctl-styled-parts | differs 99.79% | differs | 99.92% | 99.98% | 120 | 0.84 | 0.91 | 1387 / 1430 | 28/30 | 29/30 |
+| ctl-styled-states | 1px 99.97% | 1px | 99.99% | 100.00% | 25 | 0.86 | 0.96 | 842 / 893 | 14/14 | 14/14 |
+| ctl-tabview | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.84 | 0.96 | 889 / 938 | 12/22 | 22/22 |
+| ctl-tabview-click | 1px 99.96% | exact | 100.00% | 100.00% | 0 | 0.88 | 0.96 | 522 / 539 | 15/19 | 19/19 |
+| ctl-textfield | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.83 | 0.90 | 2455 / 2361 | 27/27 | 27/27 |
+| ctl-textfield-multiline | differs 85.94% | differs | 99.98% | 99.98% | 27 | 0.30 | 0.96 | 1038 / 1078 | 0/23 | 23/23 |
+| ctl-textfield-states | differs 99.64% | differs | 99.64% | 99.71% | 117 | 0.76 | 0.82 | 1326 / 1530 | 20/20 | 20/20 |
+| ctl-toggle | differs 99.89% | 1px | 99.97% | 100.00% | 119 | 0.88 | 0.97 | 965 / 1031 | 26/28 | 28/28 |
+| ctl-toggle-states | differs 99.95% | 1px | 99.98% | 100.00% | 119 | 0.90 | 0.96 | 813 / 872 | 20/20 | 20/20 |
+| ctl-togglebuttongroup | differs 99.90% | 1px | 99.88% | 100.00% | 106 | 0.87 | 0.94 | 683 / 720 | 12/13 | 11/13 |
+| ctl-togglebuttongroup-click | exact 100.00% | 1px | 99.90% | 100.00% | 255 | 0.87 | 0.91 | 313 / 315 | 8/8 | 6/8 |
+| ctl-treeview | differs 99.95% | differs | 99.98% | 99.99% | 50 | 0.88 | 0.96 | 404 / 425 | 14/16 | 14/16 |
+| ctl-treeview-expanded | differs 99.91% | differs | 99.96% | 99.98% | 50 | 0.88 | 0.97 | 1026 / 1087 | 26/31 | 26/31 |
+| ctl-twopane | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 12/12 | 12/12 |
+| ctl-vectors | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.85 | 0.96 | 1822 / 1898 | 85/85 | 85/85 |
+| default-direction | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 3/3 | 3/3 |
+| direction-reverse | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 3/3 | 3/3 |
+| direction-row | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 3/3 | 3/3 |
+| disabled-inherits | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.88 | 0.93 | 148 / 158 | 4/4 | 4/4 |
+| ed-colorfield | differs 99.71% | differs | 99.71% | 99.94% | 141 | 0.89 | 0.95 | 1222 / 1185 | 83/88 | 83/88 |
+| ed-colorfield-light | differs 99.64% | differs | 99.64% | 99.91% | 174 | 0.89 | 0.95 | 1272 / 1243 | 83/88 | 83/88 |
+| ed-curve-gradient | differs 94.42% | differs | 98.83% | 99.84% | 135 | 0.91 | 0.97 | 791 / 778 | 26/26 | 26/26 |
+| ed-curve-gradient-light | differs 94.42% | differs | 98.83% | 99.83% | 111 | 0.92 | 0.98 | 855 / 827 | 26/26 | 26/26 |
+| ed-field-states | differs 99.56% | differs | 99.58% | 99.91% | 131 | 0.91 | 0.93 | 1466 / 1383 | 41/42 | 41/42 |
+| ed-field-states-light | differs 99.53% | differs | 99.55% | 99.88% | 130 | 0.91 | 0.94 | 1504 / 1445 | 41/42 | 41/42 |
+| ed-inspector | differs 99.81% | differs | 99.83% | 99.92% | 95 | 0.87 | 0.97 | 895 / 877 | 27/27 | 27/27 |
+| ed-masks | differs 99.84% | 1px | 99.92% | 100.00% | 32 | 0.88 | 0.95 | 5169 / 4855 | 65/65 | 65/65 |
+| ed-masks-light | differs 99.78% | differs | 99.78% | 99.86% | 46 | 0.89 | 0.95 | 5440 / 5123 | 65/65 | 65/65 |
+| ed-objectfield | differs 99.76% | differs | 99.76% | 99.92% | 65 | 0.87 | 0.96 | 2226 / 2126 | 34/34 | 34/34 |
+| ed-objectfield-light | differs 99.77% | differs | 99.77% | 99.85% | 94 | 0.88 | 0.96 | 2372 / 2297 | 34/34 | 34/34 |
+| ed-propertyfield | differs 96.31% | differs | 99.26% | 99.81% | 143 | 0.88 | 0.97 | 4739 / 4504 | 81/82 | 81/82 |
+| ed-runtime | differs 99.57% | differs | 99.61% | 99.71% | 177 | 0.91 | 0.97 | 2577 / 2444 | 65/66 | 66/66 |
+| ed-runtime-light | differs 99.47% | differs | 99.84% | 99.97% | 78 | 0.91 | 0.97 | 2669 / 2544 | 65/66 | 66/66 |
+| ed-states-more | differs 97.59% | differs | 97.69% | 99.98% | 199 | 0.72 | 0.76 | 1437 / 1566 | 34/63 | 34/63 |
+| ed-toolbar | differs 90.27% | differs | 99.82% | 99.99% | 126 | 0.78 | 0.94 | 1171 / 1091 | 7/43 | 42/43 |
+| ed-toolbar-light | differs 88.36% | differs | 99.76% | 99.94% | 170 | 0.79 | 0.94 | 1250 / 1168 | 7/43 | 42/43 |
+| ed-toolbar-states | differs 99.23% | differs | 99.93% | 99.99% | 126 | 0.84 | 0.98 | 502 / 480 | 1/16 | 16/16 |
+| ed-toolbar-states-light | differs 99.21% | differs | 99.91% | 99.95% | 170 | 0.87 | 0.97 | 564 / 541 | 1/16 | 16/16 |
+| flex-grow-shrink | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 6/6 | 6/6 |
+| flex-wrap | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| imp-assets-noslash | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| imp-style-noslash | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 2/2 | 2/2 |
+| inherit-vs-direct | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.95 | 1.00 | 22 / 22 | 2/2 | 2/2 |
+| inline-override | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 1/1 | 1/1 |
+| inventory | differs 90.74% | differs | 91.76% | 93.16% | 207 | 0.68 | 0.79 | 2732 / 2785 | 28/41 | 33/41 |
+| justify-content | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 9/9 | 9/9 |
+| lay-absolute | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 17/17 | 17/17 |
+| lay-fraction | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 17/17 | 17/17 |
+| lay-minmax | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 19/19 | 19/19 |
+| lay-percent | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 18/18 | 18/18 |
+| lay-wrap | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 62/62 | 62/62 |
+| min-max-conflict | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 3/3 | 3/3 |
+| nested-absolute | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 3/3 | 3/3 |
+| no-margin-collapse | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 2/2 | 2/2 |
+| padding-and-position | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 3/3 | 3/3 |
+| percent-without-parent-size | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| px-background | 1px 99.79% | 1px | 99.79% | 100.00% | 48 | 1.00 | 1.00 | 0 / 0 | 17/17 | 17/17 |
+| px-border | differs 99.95% | differs | 99.96% | 99.97% | 22 | 1.00 | 1.00 | 0 / 0 | 16/16 | 16/16 |
+| px-clip | differs 99.58% | differs | 99.80% | 100.00% | 176 | 1.00 | 1.00 | 0 / 0 | 25/25 | 25/25 |
+| px-filter | exact 100.00% | exact | 100.00% | 100.00% | 6 | 0.81 | 0.92 | 626 / 658 | 31/31 | 31/31 |
+| px-material | differs 99.26% | exact | 100.00% | 100.00% | 8 | 0.75 | 0.98 | 326 / 341 | 14/15 | 15/15 |
+| px-text | differs 99.13% | 1px | 99.85% | 100.00% | 30 | 0.70 | 0.89 | 7991 / 8315 | 10/22 | 17/22 |
+| px-transform | differs 97.45% | differs | 99.61% | 99.87% | 255 | 1.00 | 1.00 | 0 / 0 | 1/1 | 1/1 |
+| relative-import-ambiguity | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| resource-resolution | differs 97.22% | differs | 97.22% | 98.08% | 255 | 1.00 | 1.00 | 0 / 0 | 7/7 | 7/7 |
+| scrollview-hierarchy | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 5/5 | 5/5 |
+| scrollview-overflowing | differs 99.04% | differs | 99.96% | 99.98% | 51 | 1.00 | 1.00 | 0 / 0 | 15/15 | 15/15 |
+| scrollview-padding | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 5/5 | 5/5 |
+| sel-pseudo | 1px 100.00% | 1px | 100.00% | 100.00% | 39 | 0.82 | 0.74 | 41 / 48 | 16/16 | 16/16 |
+| sel-root | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 5/5 | 5/5 |
+| sibling-overlap | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 2/2 | 2/2 |
+| specificity-tie | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 1/1 | 1/1 |
+| state-vs-id | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.87 | 0.86 | 34 / 38 | 2/2 | 2/2 |
+| state-vs-inline | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.87 | 0.86 | 34 / 38 | 2/2 | 2/2 |
+| states-disabled | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.90 | 0.86 | 166 / 182 | 3/3 | 3/3 |
+| style-subtree-scope | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 4/4 | 4/4 |
+| text-align | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.73 | 0.75 | 194 / 183 | 3/3 | 3/3 |
+| text-size | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.63 | 0.89 | 503 / 510 | 1/2 | 2/2 |
+| theme-class-hook | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.86 | 0.83 | 144 / 156 | 2/2 | 2/2 |
+| tpl-overrides | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.82 | 0.95 | 2601 / 2757 | 26/26 | 26/26 |
+| tr-reverse | differs 99.71% | differs | 99.86% | 99.98% | 255 | 0.80 | 0.87 | 230 / 225 | 14/15 | 14/15 |
+| tr-t100 | differs 99.60% | differs | 99.76% | 99.86% | 255 | 0.92 | 0.97 | 242 / 244 | 14/15 | 14/15 |
+| tr-t1200 | differs 99.70% | differs | 99.82% | 99.86% | 255 | 0.60 | 0.63 | 606 / 632 | 14/15 | 14/15 |
+| tr-t250 | differs 99.61% | differs | 99.76% | 99.86% | 255 | 0.83 | 0.91 | 294 / 285 | 14/15 | 14/15 |
+| tr-t500 | differs 99.63% | differs | 99.78% | 99.87% | 255 | 0.47 | 0.51 | 342 / 369 | 14/15 | 14/15 |
+| tr-t800 | differs 99.62% | differs | 99.77% | 99.87% | 255 | 0.49 | 0.56 | 459 / 468 | 14/15 | 14/15 |
+| uss-all | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.00 | 0.00 | 0 / 130 | 0/7 | 0/7 |
+| uss-all-2 | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 8/8 | 8/8 |
+| uss-background | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 25/25 | 25/25 |
+| uss-cursor | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.87 | 0.95 | 32 / 32 | 8/8 | 8/8 |
+| uss-important | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.79 | 0.96 | 116 / 126 | 4/4 | 4/4 |
+| uss-invalid | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.92 | 0.97 | 176 / 188 | 20/20 | 20/20 |
+| uss-invalid-unit | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 2/2 | 2/2 |
+| uss-keywords | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.55 | 0.56 | 209 / 162 | 3/8 | 3/8 |
+| uss-keywords-2 | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.72 | 0.78 | 131 / 134 | 8/8 | 8/8 |
+| uss-keywords-3 | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.09 | 0.08 | 129 / 170 | 5/10 | 5/10 |
+| uss-shorthand | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 25/25 | 25/25 |
+| uss-slice | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 7/7 | 7/7 |
+| uss-text | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.42 | 0.80 | 7791 / 7933 | 3/23 | 4/23 |
+| uss-text-inherit | differs 91.17% | differs | 92.87% | 94.60% | 125 | 0.42 | 0.47 | 2376 / 2808 | 0/10 | 0/10 |
+| uss-text-wrap | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.13 | 0.69 | 4017 / 4039 | 0/4 | 0/4 |
+| uss-transform | differs 99.47% | 1px | 99.47% | 100.00% | 77 | 1.00 | 1.00 | 0 / 0 | 8/8 | 8/8 |
+| uss-var | exact 100.00% | exact | 100.00% | 100.00% | 0 | 0.81 | 0.91 | 117 / 107 | 11/11 | 11/11 |
+| uss-visibility | exact 100.00% | exact | 100.00% | 100.00% | 0 | 1.00 | 1.00 | 0 / 0 | 7/7 | 7/7 |
+
+Differences found and fixed in unity/pixels (measured cases in brackets; GDScript and
 native core alike where the layout is involved, `bench/equiv*.gd` keep
 them equal):
 
@@ -642,24 +660,43 @@ them equal):
 | text is measured on leaves only: a Button with children is as large as its children | `ctl-button` (`b-child`, 32px; godot-uxml 39px, and every later element 7px lower) | both layouts skip the measure of a text control with children |
 | a RepeatButton has no box and upper-left text | `ctl-button` (`rb`, 17px high; godot-uxml 25px with Godot's theme box, text centred) | an empty stylebox for a Button without a USS box; Unity's initial alignment |
 
+Differences found and fixed in this round (unity/pixels-2):
+
+| Unity behaviour (measured) | case | fix |
+| --- | --- | --- |
+| the default font is NotInter / Inter-Regular SDF, Inter 3.009's advances and vertical metrics | every case with text | the default theme draws Inter 3.009 (OFL), design.md "Default font" |
+| a Label can be narrower than its text; the text draws past the box | `px-material` (80 vs 92px), `ctl-multicolumn-listview` (rects 2/55 -> 43/55) | `fit_label_width`: clip_text (minimum width 1) and an unclipped draw; measured as the full text in both layouts |
+| an empty text measures 0 x 0 | `ctl-basic` (`label-empty`), HelpBox and ProgressBar labels | both measurers |
+| straight edges are antialiased at fractional positions, under rotation and scale | `px-transform`, `px-clip`, `uss-transform`, sliders | `UxmlBoxStyle` feathers straight edges over one pixel centred on the edge (hard on the grid) |
+| no pixel snap of transformed elements | `px-transform` (`rotate: 15deg` drew 0.2px left), `ctl-slider` (dragger at a fractional translate) | a 1e-5 rad rotation turns Godot's control snap off |
+| lines follow each other at the line height | `ctl-textfield-multiline` (85 vs 73px), `ctl-attrs`, `uss-text` | `line_spacing` 0 on Labels and TextEdits |
+| a literal line break in an attribute value is a space | `uss-text-wrap` (`w-pre`) | XML attribute-value normalization in both parsers |
+| an EnumField lists the values of Unity's own enum types | `ctl-enum`, `ctl-enum-open` | `BUILTIN_ENUMS` |
+| synthetic italic slants the glyphs | `uss-text` (`italic`, `bi`), `uss-text-inherit` | the transform's x axis (it sheared y by x and drew upright glyphs) |
+| a RepeatButton draws its USS box | every Scroller (`ctl-scroller`, ScrollViews, lists) | not flat (a flat Button draws no stylebox) |
+| the theme images' shapes, sizes, positions and colours | `ctl-scroller`, `ctl-foldout`, `ctl-dropdown`, `ctl-toggle`, `ctl-helpbox`, `ed-toolbar*`, `ed-curve-gradient*`, `ed-runtime*` | godot-uxml's SVGs redrawn from the measurements (design.md "Default theme"); no Unity image is used |
+| harness: `set-prop` (`ToolbarSpacer.flex`), CurveField and GradientField values, the bound stand-in's curve and gradient | `ed-toolbar*`, `ed-masks*`, `ed-curve-gradient*`, `ed-propertyfield` | `bench/pixels_render.gd` applies them as `bench/parity.gd` does |
+
 Not reproduced, with the measured size of the difference:
 
 | difference | cases | size |
 | --- | --- | --- |
-| text rasterisation: Unity's NotInter through TextCore SDF, godot-uxml's Godot default font through Godot's rasteriser | every case with text | text mask IoU 0.77 (mean over the cases with text); text bounding boxes within 1-3px per block in most cases; godot-uxml's text has 14% more ink (text pixels 1.14 times Unity's over all cases) and is slightly wider. Text widths make 1px differences in runtime rects of Labels and toolbar buttons (`ed-toolbar` 50 vs 48px) |
-| theme images: godot-uxml's SVG approximations of Unity's built-in textures (checkmarks, radio dots, dropdown and foldout arrows, Scroller arrows, the eyedropper, the object selector, HelpBox icons) | every control case | each icon differs inside its own box (169 of the 346 regions of box differences that `--explain` lists, at most 12 per case, are inside icon boxes); the boxes around them match |
-| antialiasing of straight edges at fractional positions and under rotation: Unity covers them partially, Godot draws them aliased | `px-transform`, `uss-transform`, sliders (the dragger at a fractional `translate`) | `px-transform` 97.5% exact, 99.8% within 1px |
+| text rasterisation: Unity's NotInter through TextCore SDF, godot-uxml's Inter through Godot's rasteriser (grayscale, light hinting, subpixel positioning) | every case with text | text mask IoU 0.884 (mean over the 119 cases with text); 1.021 times Unity's text pixels. Measured alternatives: no hinting 0.872, no subpixel positioning 0.855, MSDF 0.689 (1.197 times the ink); the defaults are the closest. Per text block, 576 of 726 blocks have Unity's top and bottom edges, 694 the same left edge |
+| Godot rounds glyph advances: a text 27.01px wide measures 27 (Unity: 28, the ceiling) | `ctl-button` (`One` 53 vs 54px), `ctl-togglebuttongroup`, `ctl-radio` | 7 of 375 single-line text measures 1px narrow; the Buttons sized by them are 1px narrow (`ctl-button` boxes 100% -> 99.81% exact, 100% within 1px) |
+| Button text in an odd free height: Godot floors the half pixel, Unity draws it a pixel lower | `button-border-box`, `button-row-margins`, `states-disabled`, `sel-pseudo`, `theme-class-hook` (text IoU 0.92 -> 0.84 etc.) | 21 of 66 Button text blocks 1px high |
+| lines of a multi-line text are whole pixels | `uss-text-wrap`, `uss-text`, `ctl-attrs` | three 12px lines 45px high, Unity's 44px (3 x 14.52) |
+| Godot keeps a one-line Label at least its font size high (also an empty one): `fit_label` cannot fit a smaller box | `tr-*` (`disc` 22 vs 8px), `ctl-treeview*`, `ctl-multicolumn-*`, `inventory` (`ItemCount*` 22 vs 16px), `ctl-dropdown` (empty popup text 14 vs 10px) | about 60 Label rects; the text draws where Unity draws it; a Label background draws taller (`tr-*` 255 at the `disc` box) |
+| best-fit text: the reference project draws `-unity-text-auto-size` text at its `font-size` (the advanced generator is probably off there) | `uss-text` (`auto`), `uss-text-inherit` | godot-uxml draws the fitted size (`uss-text-inherit` 92.87% boxes, design.md "Text auto size") |
+| theme images: godot-uxml's own SVGs, drawn from measurements | control cases | 172 of the 279 regions that `--explain` lists are in icon boxes (before: 197 of 346 by the same count; most in the popup arrow, HelpBox icon, checkmark and Scroller buttons), largest errors 39 (popup arrow), 50 (foldout, Scroller), 119 (toggle check), 120 (HelpBox) |
 | a missing image: the Unity editor substitutes `d_console.warnicon` at import (an editor-only placeholder) | `resource-resolution`, `inventory` | the icon box; godot-uxml draws nothing and diagnoses the missing file |
-| `all: initial` resets `-unity-font-definition`: Unity has no font, measures the text 0 and draws none | `uss-all` | godot-uxml keeps Godot's font (boxes match; the runtime rects of the text elements are 20px high) |
-| Godot floors a Label at its text: a Label narrower than its text, or shorter than its line beyond `fit_label`'s glyph floor, draws larger | `px-material` (`text`, 92 vs 80px), `tr-*` (`disc`), `ctl-treeview*`, `ctl-basic` (`label-empty`) | the runtime rect; the text itself matches |
-| a multiline TextField taller in the runtime | `ctl-textfield-multiline` | 85 vs 73px (runtime rect; the model comparison matches with Unity's text measure) |
-| an EnumField of a Unity enum type (`UnityEngine.UIElements.Align`) has no entries in the runtime, so its menu does not open | `ctl-enum-open` | the menu |
+| `all: initial` resets `-unity-font-definition`: Unity has no font, measures the text 0 and draws none | `uss-all` | godot-uxml keeps the default font (boxes match; the runtime rects of the text elements are 20px high) |
+| the corners of rotated boxes | `px-transform` (`r45`, `round-rot`) | 0.39% of the pixels; largest error 255 at a 45-degree corner pixel |
 
 ## What would close the gaps
 
-- Pixels: Unity's theme textures (godot-uxml draws its own SVG icons),
-  Unity's font and text rasteriser, antialiased straight edges under a
-  transform, and Labels that Godot floors at their text (see "Pixels").
+- Pixels: Unity's text rasteriser (TextCore SDF), fractional glyph
+  advances and line pitch, a one-line Label below its font size, and the
+  details of Unity's theme images (see "Pixels").
 
 - `ctl-numeric`: nothing on the godot-uxml side; Unity's own layout is
   1px off its final text measure, and not the same in every run.

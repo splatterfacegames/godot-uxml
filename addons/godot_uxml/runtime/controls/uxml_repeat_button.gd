@@ -12,8 +12,9 @@ var _held := false
 
 
 func _init() -> void:
-	# Unity's theme gives RepeatButton no box: plain text, no Godot chrome.
-	flat = true
+	# Not flat: a flat Button draws no stylebox, and a Scroller's arrow
+	# buttons are RepeatButtons with a USS box and image (ctl-scroller).
+	# A RepeatButton without a USS box gets an empty box from the applier.
 	focus_mode = Control.FOCUS_ALL
 	button_down.connect(_on_down)
 	button_up.connect(_stop)
