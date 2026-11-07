@@ -2575,11 +2575,17 @@ same way where `StyleBoxFlat` cannot, and `StyleBoxFlat` draws the rest
   unless its colour flags changed. The box must still be the one built
   for these margins (`_installed_as_built`); a box whose margins the
   placement changed (percentage padding, a fitted Button) is built
-  again. Unchanged colour and font size overrides are not written again,
-  and the bulk theme override opens at the first write or property
-  change (`_ov`), so an apply that changes nothing updates no theme
-  (Godot's Button shapes its text again on a theme update but not on a
-  `clip_text` change, so a property change also opens it).
+  again. Unchanged colour and font size overrides are not written again.
+  For a Button the bulk theme override opens at the first write or
+  property change (`_ov`), so an apply that changes nothing updates no
+  theme (Godot's Button shapes its text again on a theme update but not
+  on a `clip_text` change, so a property change also opens it); other
+  controls update their theme at every apply (a Label's sizes after
+  runtime text and state changes depend on it).
+- A fitted Button (`fit_button`) is placed again by every layout; the
+  native placement skips the call while its rect, insets and minimum
+  size are those of its last fit, and `fit_button` writes nothing when
+  the margins are already fitted.
 - A Button without a USS box (a RepeatButton, `all: initial`) gets an
   empty stylebox, not Godot's theme box.
 
