@@ -955,3 +955,54 @@ UXML {
 .unity-rendering-layer-mask-field {
   flex-wrap: wrap;
 }
+
+/* ---- Menus (GenericDropdownMenu: UxmlDocument.show_context_menu) ------ */
+/* Not measured: Unity's editor panels show their context menus as OS
+ * menus. The geometry is the runtime menu's at the editor font size; the
+ * skin sheets give the colours of the skin. */
+.unity-base-dropdown__container-outer {
+  border-width: 1px;
+  margin-top: 4px;
+}
+
+.unity-base-dropdown__container-inner {
+  padding: 4px 0;
+}
+
+.unity-base-dropdown__item {
+  flex-direction: row;
+  min-width: 20px;
+  min-height: 20px;
+  padding-right: 20px;
+  -unity-text-align: middle-left;
+}
+
+.unity-base-dropdown__item-content {
+  flex-direction: row;
+}
+
+.unity-base-dropdown__checkmark {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 2px 4px;
+  background-image: url("check.svg");
+  visibility: hidden;
+}
+
+.unity-base-dropdown__item:checked .unity-base-dropdown__checkmark {
+  visibility: visible;
+}
+
+.unity-base-dropdown__label {
+  -unity-text-align: middle-left;
+}
+
+.unity-base-dropdown__separator-container {
+  padding: 3px 0;
+}
+
+.unity-base-dropdown__separator-line {
+  height: 1px;
+}

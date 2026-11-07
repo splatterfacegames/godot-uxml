@@ -94,6 +94,16 @@ Typical game screens (`bench/workloads.gd`, native core):
 On these screens, a hover, selection or value update takes less than 2 ms
 with the native core.
 
+Editor-style document (507 elements, `bench/load_cost.gd`):
+
+| Operation | GDScript | Native core |
+| --- | ---: | ---: |
+| Document load | 907 ms | 369 ms |
+| First text change after the load, Label of fixed size | 4.2 ms | 1.5 ms |
+| Text change, Label of text width | 71 ms | 10.9 ms |
+| `display` change | 70 ms | 7.7 ms |
+| `display` change, next frame | 4.0 ms | 1.2 ms |
+
 Frame cost with a real renderer (Vulkan, RTX 5060 Ti, measured before the
 Unity theme):
 

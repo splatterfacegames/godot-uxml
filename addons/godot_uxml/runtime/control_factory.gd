@@ -203,6 +203,37 @@ func _plain_text_attr(el: UxmlElement) -> String:
 	return t
 
 
+## The text a Label, Button, RepeatButton or TextElement control shows for
+## the current `text` attribute of `el`, decoded as at the load: escape
+## sequences with parse-escape-sequences, and for a control that draws
+## plain text (`plain`: a Button, a TextElement) without the rich text
+## tags. Reports nothing (the load reported the attribute values). A
+## RichTextLabel takes the raw text (UxmlDocument._set_control_text parses
+## the tags).
+static func text_of(el: UxmlElement, plain: bool) -> String:
+	var v = el.get_attribute("text")
+	var t := "" if v == null else String(v)
+	if t.find("\\") >= 0 and _flag(el, "parse-escape-sequences", false):
+		t = UxmlRichText.unescape(t)
+	if plain and _flag(el, "enable-rich-text", true):
+		var pr := UxmlRichText.parse(t)
+		if pr["rich"]:
+			t = pr["plain"]
+	return t
+
+
+static func _flag(el: UxmlElement, name: String, default: bool) -> bool:
+	var v = el.get_attribute(name)
+	if v == null:
+		return default
+	match String(v).to_lower():
+		"true", "1":
+			return true
+		"false", "0":
+			return false
+	return default
+
+
 ## TextElement attributes the runtime reads later (applier elision).
 func _text_element_attrs(el: UxmlElement, c: Control) -> void:
 	if el.has_attribute("display-tooltip-when-elided"):

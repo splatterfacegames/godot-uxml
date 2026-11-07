@@ -737,6 +737,7 @@ impl<'a> Pass<'a> {
         self.warned.set(&key, true);
         let mut dd = VarDictionary::new();
         dd.set("kind", "unsupported-value");
+        dd.set("severity", crate::cascade::severity_of("unsupported-value"));
         dd.set("message", message.as_str());
         dd.set("file", &self.c.file());
         let (offset, line, column) = self.c.location(i);

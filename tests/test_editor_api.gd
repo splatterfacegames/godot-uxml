@@ -3,8 +3,9 @@ extends RefCounted
 ## a caller resolver, element handles, the source offset contract, partial
 ## reloads, cascade provenance, forced pseudo-states, transition snapshot
 ## and seek, the hit test, the element catalog, template instances, end
-## offsets on diagnostics, drag and drop of collection items, and element
-## rectangles in another element's space. Scenarios that read cascade, layout or
+## offsets and severities on diagnostics, drag and drop of collection items,
+## element rectangles in another element's space, text and display updates
+## without a needless layout, and context menus. Scenarios that read cascade, layout or
 ## runtime state run on the native and the GDScript paths, and the two
 ## traces must be equal.
 
@@ -232,7 +233,9 @@ func test_element_handles() -> void:
 		doc._restyle_now()
 		h.check(doc._states.get(anon, {}).has("hover"), "set_element_state_for sets the state")
 		h.check(doc.get_element_for(doc.get_native_for(tog)) != null, "a Toggle's native maps back")
-		h.eq(doc.get_element_for(Control.new()), null, "a control outside the document")
+		var stray := Control.new()  # freed below: an unparented Control is never freed for us
+		h.eq(doc.get_element_for(stray), null, "a control outside the document")
+		stray.free()
 		out.append(_txt(doc.get_computed_style_for(anon)))
 		out.append(doc.get_control_for(tf).size)
 		# An element of an earlier load is not of this document.
@@ -1143,3 +1146,317 @@ func test_diagnostics_have_end_offsets() -> void:
 	h.eq(UxmlDiagnostic.end_of(".a { color: red; }", 5), 15, "a USS declaration ends before `;`")
 	h.eq(UxmlDiagnostic.end_of('<ui:Label text="a>b" />x', 0), 23, "an open tag ends past `>` outside quotes")
 	h.eq(UxmlDiagnostic.end_of("", 0), 0, "no source")
+
+
+# ---------------------------------------------------------------------------
+# R11: severity
+# ---------------------------------------------------------------------------
+
+func test_diagnostics_have_a_severity() -> void:
+	var body := func():
+		var doc := _mk("r11s", '<Style src="missing.uss" /><ui:Label name="a" bogus-attr="1" text="x" />'
+			+ '<ui:VisualElement name="b" style="width: abc;" />',
+			":root { color: red; }\n.u { bogus-prop: 1; }\n.v { color: red; @media x; }\n.w { color")
+		var out: Array = []
+		var wrong: Array = []
+		var seen := {}
+		for d in doc.diagnostics:
+			var sev := String(d.get("severity", ""))
+			if sev != UxmlDiagnostic.severity_of(String(d["kind"])):
+				wrong.append(UxmlDiagnostic.format(d))
+			seen[sev] = true
+			out.append("%s|%s" % [d["kind"], sev])
+		h.eq(wrong, [], "every diagnostic has the severity of its kind")
+		h.check(seen.has("error") and seen.has("warning") and seen.has("info"),
+			"errors, warnings and information were seen: %s" % [seen.keys()])
+		_unload(doc)
+		out.sort()
+		return out
+	await _both(body, "severity")
+	h.eq(UxmlDiagnostic.severity_of("malformed"), "error", "broken syntax is an error")
+	h.eq(UxmlDiagnostic.severity_of("missing-file"), "error", "a missing file is an error")
+	h.eq(UxmlDiagnostic.severity_of("version-dependent"), "info", "version-dependent is information")
+	h.eq(UxmlDiagnostic.severity_of("unsupported-property"), "warning", "an ignored property is a warning")
+	for native in [true, false]:
+		var saved := UxmlParser.use_native
+		UxmlParser.use_native = native
+		var w: Array = UxmlParser.new().parse("<a><b></a>", "x.uxml")["warnings"]
+		UxmlParser.use_native = saved
+		h.check(not w.is_empty() and w[0].get("severity") == "error",
+			"a parser diagnostic has a severity (native %s)" % native)
+
+
+# ---------------------------------------------------------------------------
+# R15: text and display updates
+# ---------------------------------------------------------------------------
+
+## Border boxes of the named authored elements, in document space.
+static func _named_rects(doc: UxmlDocument) -> Array:
+	var out: Array = []
+	for el in doc.get_document_model().root.walk():
+		if el.part_of == null and el.get_attribute("name") != null:
+			out.append([String(el.get_attribute("name")), doc.get_element_rect(el)])
+	return out
+
+
+func test_model_text_reaches_the_control() -> void:
+	var src := ('<ui:Label name="l" text="a" /><ui:Button name="b" text="b" /><ui:TextElement name="t" text="t" />'
+		+ '<ui:Label name="e" text="x" parse-escape-sequences="true" /><ui:Button name="r" text="r" />'
+		+ '<ui:Toggle name="tg" label="L" />')
+	var final := (src.replace('text="a"', 'text="model label"').replace('text="b"', 'text="model button"')
+		.replace('text="t"', 'text="model element"').replace('text="x"', 'text="one\\ntwo"')
+		.replace('name="r" text="r"', 'name="r" text="&lt;b&gt;bold&lt;/b&gt;"').replace('label="L"', 'label="Toggle label"'))
+	var body := func():
+		var doc := _mk("r15m", src, ".x { color: red; }")
+		_settle(doc)
+		_el(doc, "l").set_attribute("text", "model label")
+		_el(doc, "b").set_attribute("text", "model button")
+		_el(doc, "t").set_attribute("text", "model element")
+		_el(doc, "e").set_attribute("text", "one\\ntwo")
+		_el(doc, "r").set_attribute("text", "<b>bold</b>")
+		_el(doc, "tg").set_attribute("label", "Toggle label")
+		_settle(doc)
+		h.eq(doc.get_native("l").text, "model label", "a Label shows its new text attribute")
+		h.eq(doc.get_native("b").text, "model button", "a Button shows its new text attribute")
+		h.eq(doc.get_native("t").text, "model element", "a TextElement shows its new text attribute")
+		h.eq(doc.get_native("e").text, "one\ntwo", "escape sequences are decoded as at the load")
+		h.eq(doc.get_native("r").text, "bold", "a Button draws the text without rich text tags")
+		var out := _named_rects(doc)
+		var fresh := _mk("r15m_f", final, ".x { color: red; }")
+		_settle(fresh)
+		_same(out, _named_rects(fresh), "model text changes lay out as a fresh load")
+		_unload(fresh)
+		_unload(doc)
+		return out
+	await _both(body, "model text")
+
+
+func test_text_changes_without_a_layout() -> void:
+	var uss := (".fixed { width: 120px; height: 20px; }\n.col { width: 200px; }\n"
+		+ ".row { flex-direction: row; width: 300px; height: 24px; }\n.grow { flex-grow: 1; }\n"
+		+ ".auto { align-self: flex-start; }\n.wrap { white-space: normal; width: 80px; }\n")
+	var src := ('<ui:Label name="fixed" class="fixed" text="a" />'
+		+ '<ui:VisualElement class="col"><ui:Label name="stretched" text="b" /></ui:VisualElement>'
+		+ '<ui:VisualElement name="row" class="row"><ui:Label name="cell" class="grow" text="c" /><ui:Button name="btn" text="d" /></ui:VisualElement>'
+		+ '<ui:Label name="auto" class="auto" text="e" />')
+	var final := (src.replace('text="a"', 'text="from the model"')
+		.replace('text="b"', 'text="a longer text in a column"').replace('text="c"', 'text="a longer cell"')
+		.replace('text="e"', 'text="a longer label of its own width"')
+		.replace('name="row" class="row"', 'name="row" class="row" style="display: none;"'))
+	var body := func():
+		var doc := _mk("r15l", src, uss, Vector2(600, 400))
+		_settle(doc)
+		var n := doc.layout_count
+		doc.set_text("fixed", "a much longer text than before")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n, "a Label of a fixed size: no layout")
+		doc.set_text("stretched", "a longer text in a column")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n, "a Label stretched in a column of a fixed width: no layout")
+		_el(doc, "fixed").set_attribute("text", "from the model")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n, "a model text change of a fixed Label: no layout")
+		doc.set_text("cell", "a longer cell")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n + 1, "a growing cell whose width follows its text lays out")
+		doc.set_text("auto", "a longer label of its own width")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n + 2, "a Label of its own width lays out")
+		# A display change of a settled document is one layout pass; the
+		# measures confirm the settling pass after it. (Layouts right after
+		# each other are a stream: test_settle_snapshot_in_a_stream_of_layouts.)
+		_settle(doc)
+		n = doc.layout_count
+		_el(doc, "row").set_attribute("style", "display: none;")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n + 1, "a display change lays out once")
+		doc._restyle_now()
+		doc._restyle_now()
+		h.eq(doc.layout_count, n + 1, "and needs no settling layout")
+		h.eq(doc.get_native("fixed").text, "from the model", "the control has the text")
+		var out := _named_rects(doc)
+		var fresh := _mk("r15l_f", final, uss, Vector2(600, 400))
+		_settle(fresh)
+		_same(out, _named_rects(fresh), "the document after the changes equals a fresh load")
+		_unload(fresh)
+		_unload(doc)
+		# Wrapping text lays out at every change. (A document with wrapping
+		# text keeps no settling snapshot: its settling pass lays out.)
+		var wd := _mk("r15w", '<ui:Label name="wrap" class="wrap" text="f" />', uss, Vector2(600, 400))
+		_settle(wd)
+		var wn := wd.layout_count
+		wd.set_text("wrap", "wrapping text lays out every time")
+		wd._restyle_now()
+		h.eq(wd.layout_count, wn + 1, "wrapping text lays out")
+		out.append(_named_rects(wd))
+		_unload(wd)
+		return out
+	await _both(body, "text without layout")
+
+
+## A stream of layouts takes no settle snapshot; the first restyle that only
+## settles ends the stream, and the rects are those of a fresh load.
+func test_settle_snapshot_in_a_stream_of_layouts() -> void:
+	var src := '<ui:VisualElement name="box" style="width: 10px; height: 10px;" /><ui:Label name="l" text="x" />'
+	var body := func():
+		var doc := _mk("r15s", src, "", Vector2(400, 300))
+		_settle(doc)
+		var n := doc.layout_count
+		var box := _el(doc, "box")
+		box.set_attribute("style", "width: 20px; height: 10px;")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n + 1, "a size change lays out")
+		h.check(not doc._settle_ms.is_empty(), "a first layout keeps a snapshot")
+		box.set_attribute("style", "width: 30px; height: 10px;")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n + 2, "the next size change lays out")
+		h.check(doc._settle_ms.is_empty(), "a layout before the snapshot was read: no snapshot")
+		box.set_attribute("style", "width: 40px; height: 10px;")
+		doc._restyle_now()
+		h.check(doc._settle_ms.is_empty(), "no snapshot while the stream runs")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n + 4, "the end of the stream settles with a layout")
+		_settle(doc)
+		n = doc.layout_count
+		box.set_attribute("style", "width: 50px; height: 10px;")
+		doc._restyle_now()
+		h.check(not doc._settle_ms.is_empty(), "after the stream a layout keeps a snapshot again")
+		doc._restyle_now()
+		h.eq(doc.layout_count, n + 1, "and the snapshot settles without a layout")
+		var rects := _named_rects(doc)
+		_unload(doc)
+		var fresh := _mk("r15s", src.replace("width: 10px", "width: 50px"), "", Vector2(400, 300))
+		_settle(fresh)
+		h.eq(rects, _named_rects(fresh), "the rects of a fresh load")
+		_unload(fresh)
+		return rects
+	await _both(body, "settle snapshot stream")
+
+
+# ---------------------------------------------------------------------------
+# R16: context menus
+# ---------------------------------------------------------------------------
+
+func _action_to(m: UxmlPopupMenu, action: String) -> void:
+	var ev := InputEventAction.new()
+	ev.action = action
+	ev.pressed = true
+	m.window_input.emit(ev)
+
+
+func _right_click(doc: UxmlDocument, pos: Vector2) -> void:
+	for pressed in [true, false]:
+		var mb := InputEventMouseButton.new()
+		mb.button_index = MOUSE_BUTTON_RIGHT
+		mb.pressed = pressed
+		mb.button_mask = MOUSE_BUTTON_MASK_RIGHT if pressed else 0
+		mb.position = pos
+		mb.global_position = pos
+		doc.get_viewport().push_input(mb)
+
+
+static func _has_cls(el: UxmlElement, c: String) -> bool:
+	var v = el.get_attribute("class")
+	return v != null and String(v).split(" ", false).has(c)
+
+
+## The label text of item `i` of a menu document.
+static func _item_text(md: UxmlDocument, i: int) -> String:
+	var it := md.get_element_model("item-%d" % i)
+	if it == null:
+		return ""
+	for el in it.walk():
+		if _has_cls(el, "unity-base-dropdown__label"):
+			return String(el.get_attribute("text"))
+	return ""
+
+
+func test_context_menu() -> void:
+	var body := func():
+		var doc := _mk("r16", '<ui:VisualElement name="area" style="width: 200px; height: 100px;">'
+			+ '<ui:Label name="inner" text="inside" /></ui:VisualElement>', "")
+		await h.process_frame
+		var chosen: Array = []
+		doc.menu_chosen.connect(func(i): chosen.append(i))
+		var m := doc.show_context_menu(Vector2(10, 12), ["Cut", {"text": "Copy", "disabled": true}, "-",
+			{"text": "Paste", "checked": true}, {"text": "Gone", "hidden": true}, "Delete"])
+		h.check(m != null and m.visible, "show_context_menu opens a menu")
+		h.eq(doc.get_context_menu(), m, "get_context_menu")
+		var out: Array = []
+		if m != null:
+			var md := m.document()
+			h.check(md.get_element("item-0") != null and md.get_element("item-5") != null, "the items keep their indices")
+			h.eq(md.get_element("item-4"), null, "a hidden item is not shown")
+			h.eq(_item_text(md, 3), "Paste", "item text")
+			h.check(md._states.get(md.get_element_model("item-3"), {}).has("checked"), "a checked item is :checked")
+			h.eq(String(md.get_computed_style("item-1").get("opacity", {}).get("value", "")), "0.5",
+				"a disabled item has Unity's disabled look")
+			var seps := 0
+			for el in md.get_document_model().root.walk():
+				if _has_cls(el, "unity-base-dropdown__separator-container"):
+					seps += 1
+			h.eq(seps, 1, "one separator")
+			h.eq(UxmlTheme.editor_skin_of(md.get_document_model()), "", "a runtime document gives the runtime look")
+			# The headless window is 64 px: the menu moves up and left to fit.
+			h.check(m.position.x <= 10 and m.position.y <= 12 and m.position.x >= 0 and m.position.y >= 0,
+				"the menu opens at the point or moves up and left to fit: %s" % m.position)
+			_action_to(m, "ui_down")
+			md._restyle_now()
+			h.eq(String(md.get_computed_style("item-0").get("background-color", {}).get("value", "")), "rgb(0, 106, 166)",
+				"the highlight has the runtime look")
+			_action_to(m, "ui_down")
+			md._restyle_now()
+			h.check(md._states.get(md.get_element_model("item-3"), {}).has("hover"),
+				"Down skips the disabled item and the separator")
+			out.append(_txt(md.get_computed_style("item-3")))
+			out.append(md.get_element("outer").size)
+			_action_to(m, "ui_accept")
+			h.eq(chosen, [3], "accept emits menu_chosen with the index of the item")
+			h.eq(doc.get_context_menu(), null, "the menu closed")
+		# The editor look follows the owner's skin.
+		var ed := UxmlDocument.new()
+		ed.editor_theme = "always"
+		ed.editor_skin = "light"
+		h.root.add_child(ed)
+		ed.size = Vector2(300, 200)
+		ed.load_source(UXML_HEAD + '<ui:Label text="e" /></ui:UXML>')
+		var em := ed.show_context_menu(Vector2(5, 5), PackedStringArray(["One", "Two"]))
+		h.check(em != null, "a PackedStringArray of items")
+		if em != null:
+			var emd := em.document()
+			h.eq(UxmlTheme.editor_skin_of(emd.get_document_model()), "light", "an editor document gives its skin to the menu")
+			_action_to(em, "ui_down")
+			emd._restyle_now()
+			h.eq(String(emd.get_computed_style("item-0").get("background-color", {}).get("value", "")), "rgb(58, 114, 176)",
+				"the highlight has the colour of the light skin")
+			out.append(_txt(emd.get_computed_style("item-0")))
+			_action_to(em, "ui_cancel")
+			h.eq(ed.get_context_menu(), null, "Escape closes the menu")
+		_unload(ed)
+		# ContextualMenuManipulator: the populate event goes from the picked
+		# element up.
+		var targets: Array = []
+		doc.set_context_menu(_el(doc, "area"), func(a):
+			targets.append([a["target"].get_attribute("name"), a["element"].get_attribute("name")])
+			return ["Area action"])
+		doc.set_context_menu(_el(doc, "inner"), func(a):
+			targets.append([a["target"].get_attribute("name"), a["element"].get_attribute("name")])
+			return [{"text": "Inner action"}])
+		var ir := doc.get_element_rect(_el(doc, "inner"))
+		_right_click(doc, doc.get_global_transform() * ir.get_center())
+		await h.process_frame
+		h.eq(targets, [["inner", "inner"], ["inner", "area"]], "the callbacks run from the target up")
+		var cm := doc.get_context_menu()
+		h.check(cm != null, "a right-click opens the menu of the manipulators")
+		if cm != null:
+			h.eq(_item_text(cm.document(), 0), "Inner action", "the target's items come first")
+			h.eq(_item_text(cm.document(), 1), "Area action", "then the ancestor's")
+			cm.hide()
+		doc.set_context_menu(_el(doc, "inner"), Callable())
+		doc.set_context_menu(_el(doc, "area"), Callable())
+		_right_click(doc, doc.get_global_transform() * ir.get_center())
+		await h.process_frame
+		h.eq(doc.get_context_menu(), null, "without manipulators a right-click opens nothing")
+		_unload(doc)
+		return out
+	await _both(body, "context menu")

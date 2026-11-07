@@ -806,3 +806,15 @@ UXML {
   background-color: rgb(128, 128, 128);
   border-color: rgb(126, 126, 126);
 }
+
+/* Separators of a context menu (GenericDropdownMenu.AddSeparator;
+ * UxmlDocument.show_context_menu). Not measured: Unity's runtime theme has
+ * the classes; the values here follow the menu's own spacing. */
+.unity-base-dropdown__separator-container {
+  padding: 3px 0;
+}
+
+.unity-base-dropdown__separator-line {
+  height: 1px;
+  background-color: rgb(153, 153, 153);
+}

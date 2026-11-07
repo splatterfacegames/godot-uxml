@@ -889,7 +889,8 @@ func _write(rec: Dictionary, v: Variant) -> int:
 						shown = pr["plain"]  # Buttons draw plain text
 				_doc._set_control_text(native, shown)
 				el.set_attribute("text", s)
-				return 2
+				# _set_control_text lays out what the text can move.
+				return 1
 			return -1
 		"value":
 			return _write_value(el, c, native, v)
