@@ -94,18 +94,22 @@ Typical game screens (`bench/workloads.gd`, native core):
 On these screens, a hover, selection or value update takes less than 2 ms
 with the native core.
 
-Editor-style document (507 elements, `bench/load_cost.gd`):
+Editor-style document (507 elements, `bench/load_cost.gd`, `bench/reload_cost.gd`
+and `bench/update_cost.gd`; the update document also has a TreeView of 300
+items and 70 TextFields):
 
 | Operation | GDScript | Native core |
 | --- | ---: | ---: |
-| Document load | 907 ms | 369 ms |
-| First text change after the load, Label of fixed size | 4.2 ms | 1.5 ms |
-| Text change, Label of text width | 71 ms | 10.9 ms |
-| `display` change | 70 ms | 7.7 ms |
-| `display` change, next frame | 4.0 ms | 1.2 ms |
-| Stylesheet reload, one colour changed | 8.8 ms | 2.1 ms |
-| Stylesheet reload, one inherited value changed | 244 ms | 29 ms |
-| Stylesheet reload, one selector changed | 591 ms | 64 ms |
+| Document load | 912 ms | 373 ms |
+| First text change after the load, Label of fixed size | 1.5 ms | 1.3 ms |
+| Text change, Label of text width | 72 ms | 10.8 ms |
+| `display` change | 70 ms | 7.6 ms |
+| `display` change, next frame | 1.4 ms | 1.0 ms |
+| Stylesheet reload, one colour changed | 9.0 ms | 2.2 ms |
+| Stylesheet reload, one inherited value changed | 254 ms | 30 ms |
+| Stylesheet reload, one selector changed | 39 ms | 2.2 ms |
+| TreeView scroll to an item (rows only, no layout of the document) | 10.2 ms | 4.1 ms |
+| Toggle value (`set_field_value`) | 1.7 ms | 0.94 ms |
 
 Frame cost with a real renderer (Vulkan, RTX 5060 Ti, measured before the
 Unity theme):
