@@ -156,8 +156,10 @@ var _cbs: Dictionary = {}              # containing-block widths (_do_local_layo
 var _layout_roots: Dictionary = {}
 ## Layout roots that the next restyle lays out (a row bound to another item).
 var _sub_req: Dictionary = {}
-## Layout roots whose last layout applied a measure change: the next restyle
-## lays them out again, as an unsettled document (see _reapply).
+## Layout roots whose last layout moved a rect or applied a measure change:
+## root -> the measures of its controls after that layout (_local_measures).
+## The next restyle lays a root out again when they differ, as an unsettled
+## document is confirmed by its snapshot (see _reapply, _settle_snapshot).
 var _local_unsettled: Dictionary = {}
 # Settling. Theme overrides reach a control's minimum size through a
 # deferred engine update, so the layout right after an apply (and anything
@@ -1292,12 +1294,16 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	# Layout roots that this pass can lay out alone (_local_root): root ->
 	# true, or "fresh" when a measure of its subtree changed.
 	var local := {}
+	_fixed_memo.clear()
+	_def_memo.clear()
 	if not _sub_req.is_empty() or not _local_unsettled.is_empty():
 		for r in _sub_req:
 			if not _add_local(local, r, r, false):
 				need_layout = true
 				settle_layout_only = []
 		for r in _local_unsettled:
+			if _local_measures(r) == _local_unsettled[r]:
+				continue
 			if not _add_local(local, r, r, false):
 				need_layout = true
 				settle_layout_only = []
@@ -1390,6 +1396,17 @@ func _restyle_now(only_transitions: bool = false) -> void:
 					text_placed.append(tel)
 	if need_layout and settle_layout_only.is_empty() and not _settle_ms.is_empty():
 		_settle_skip = true
+	if not local.is_empty() and not (need_layout and settle_layout_only.is_empty()):
+		# Roots that cover a third of the document: one layout of the document
+		# costs less than a layout of each.
+		var covered := 0
+		var cidx1: Dictionary = _cascade.index
+		for r in local:
+			var ri: int = cidx1[r]
+			covered += _cascade._end[ri] - ri
+		if covered * 3 > _cascade.els.size():
+			need_layout = true
+			settle_layout_only = []
 	if need_layout and not settle_layout_only.is_empty() and _settled_without_layout(text_placed):
 		# The pass that left the document unsettled is confirmed: the
 		# controls measure as after its layout, so a layout would give the
@@ -2089,6 +2106,12 @@ func _do_layout() -> void:
 		_settle_skip = false
 
 
+## _fixed_root per layout root, and _definite per [element, axis], for one
+## restyle (the rows of a view share their ancestors).
+var _fixed_memo: Dictionary = {}
+var _def_memo: Dictionary = {}
+
+
 ## The subtree layouts since the load (_do_local_layout): a change inside a
 ## layout root of a fixed size (a row of a collection view) lays out only that
 ## subtree. For tools and tests, beside layout_count.
@@ -2120,7 +2143,11 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 		if r == null:
 			return false
 	if not local.has(r):
-		if not _fixed_root(r):
+		var ok = _fixed_memo.get(r)
+		if ok == null:
+			ok = _fixed_root(r)
+			_fixed_memo[r] = ok
+		if not ok:
 			return false
 		local[r] = fresh
 	elif fresh:
@@ -2143,6 +2170,20 @@ func _fixed_root(r: UxmlElement) -> bool:
 		return false
 	var st: Dictionary = _styles.get(r, {})
 	return _fixed_axis(r, st, true) and _fixed_axis(r, st, false)
+
+
+## The measures that a layout of the subtree of `r` reads: the minimum size of
+## each control, and the natural size of each UxmlBox.
+func _local_measures(r: UxmlElement) -> Array:
+	var out: Array = []
+	for x in r.walk():
+		var c = _controls.get(x)
+		if c == null or not is_instance_valid(c):
+			continue
+		out.append((c as Control).get_combined_minimum_size())
+		if c is UxmlBox:
+			out.append((c as UxmlBox).natural_size)
+	return out
 
 
 ## True when `el` is strictly inside one of the roots of `local`.
@@ -2223,7 +2264,7 @@ func _do_local_layout(local: Dictionary, applied: Array) -> void:
 					placed.append(_controls[x])
 	for k in roots.size():
 		if bool(changed[k]) or bool(local[roots[k]]):
-			_local_unsettled[roots[k]] = true
+			_local_unsettled[roots[k]] = _local_measures(roots[k])
 	for b in _post_layout:
 		if _under_local(b.el, local):
 			b.after_layout()
@@ -3174,7 +3215,12 @@ func _fixed_axis(el: UxmlElement, st: Dictionary, horizontal: bool) -> bool:
 	for side in (["left", "right"] if horizontal else ["top", "bottom"]):
 		if _sv(st, "margin-" + side, "0px") == "auto":
 			return false
-	return _definite(parent, horizontal, 0)
+	var key := [parent, horizontal]
+	var m = _def_memo.get(key)
+	if m == null:
+		m = _definite(parent, horizontal, 0)
+		_def_memo[key] = m
+	return m
 
 
 ## Whether the size of container `el` on an axis does not follow its

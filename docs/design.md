@@ -1246,6 +1246,8 @@ Rules of these trees:
   2`, at most the pool. The rows show items `first .. first + rows` in
   order, so a scroll that changes the first item re-binds the rows and
   lays out again; a scroll inside the same first item is paint-only.
+  (FixedHeight rows lay out alone: see "Rows of collection views and the
+  layout".)
   When a registered height changes, the scroll offset moves so that the
   first visible item keeps its place on screen. `scroll_to_item` follows
   the registered heights until the item is in view (Unity schedules the
@@ -1639,7 +1641,9 @@ pass), via `refresh()` after mutations the runtime cannot see (e.g. code
 writing `Label.text`), and via `relayout()` — the cheap per-frame form of
 the same for content-only changes (re-lays out without re-applying
 styles). A restyle whose changes are all paint-only (colors, radii,
-`visibility`, text alignment, custom properties) skips the layout once
+`visibility`, text alignment, custom properties; on a `UxmlBox` also
+`background-image` and the `-unity-slice-*` insets, which the box draws and
+does not measure, as in Unity) skips the layout once
 the document has settled (see Style application). The layout keeps a
 validated cross-pass cache, so unchanged subtrees cost a replay of their
 measurer calls rather than a recomputation; see `docs/performance.md`.
@@ -1769,7 +1773,12 @@ change queues a deferred restyle: the cascade re-resolves with
 `element_states`/`disabled_elements`/`enabled_elements` — incrementally:
 only elements whose inputs (attributes, state bits, inherited values, or
 ancestor features some descendant/child selector tests) changed are
-recomputed — the controls whose computed style or effective
+recomputed. When the global states and the key bits stay, the update visits
+only the subtrees of the elements whose attributes, state bits, disabled
+overrides or computed overrides changed (USS has no sibling combinators, so
+nothing else can change), and the effective flags follow those subtrees; a
+Toggle value restyles the Toggle's subtree, not the document. The controls
+whose computed style or effective
 disabled/hidden state changed re-apply, and layout re-runs unless every
 change was paint-only. A `:hover` rule therefore works exactly like
 authored USS says, and native signals keep working beside them.
@@ -1991,7 +2000,7 @@ doc.set_element_state_for(el, "hover", true)   # input may clear it
 
 # Partial reload
 doc.reload_stylesheet(origin, uss_text)        # restyle, keep the controls
-doc.get_last_reload_mode()                     # "restyle" / "cascade" / "full"
+doc.get_last_reload_mode()                     # "restyle" / "rules" / "cascade" / "full"
 doc.replace_source(uxml_text)                  # in place when possible
 doc.get_last_replace_mode()                    # "in-place" / "reload"
 
@@ -2014,6 +2023,8 @@ var kinds := doc.preview_transitions(el, PackedStringArray(), PackedStringArray(
 doc.set_field_value("volume", 0.5)              # no event
 doc.set_field_value("volume", 0.7, true)        # value_changed if it changed
 var v = doc.get_field_value("volume")
+doc.set_field_placeholder("width", "12px (.row)")  # no restyle (R28)
+var ph := doc.get_field_placeholder("width")
 
 # Runtime classes of an element, with or without a name
 doc.set_author_classes(el, PackedStringArray(["a", "b"]))  # control classes stay
@@ -2046,6 +2057,7 @@ var t := doc.get_element_transform(child, parent)      # t * p, t.affine_inverse
 doc.set_text("status", "Saved")                 # fixed size: no layout
 model.root.children[0].set_attribute("text", "x")  # reaches the Label control
 print(doc.layout_count)                         # layout passes since the load
+print(doc.local_layout_count)                   # rows laid out alone (R29)
 
 # Context menus (Unity DropdownMenu, ContextualMenuManipulator)
 doc.menu_chosen.connect(func(index): print(index))
@@ -2128,8 +2140,22 @@ new items; `get_last_reload_mode()` tells which path ran:
   The controls with another computed style are applied, and a layout runs only
   for a change that is not paint-only. A style that differs only in
   `transition-*` properties applies nothing: the controls do not read them.
-- **`cascade`: selectors, rules or imports changed.** The rules compile again
-  and every element is computed in a new cascade, as for an in-place
+- **`rules`: selectors or rules changed, the imports stayed.**
+  `UssCascade.rule_diff` keeps the items before the first and after the last
+  difference; the rest changed (when the number of items changes, every item
+  after the first difference counts as changed: a computed origin names its
+  item index). The elements that the changed rules of the old text match are
+  marked first, then `recompile_rules` compiles the rules again in the same
+  cascade (the native cascade with `recompile`: per-element state, interned
+  names and the converted theme blocks stay), then the elements that the
+  changed rules of the new text match are marked. The elements whose ancestor
+  key changes (a new `X:hover Y`) are marked with their subtrees, and the
+  elements with a diagnostic (its offset can move). The update runs on the
+  forced path, as for `restyle`: only the marked subtrees are visited, and
+  inheritance carries a change down. Above `PATCH_MATCH_LIMIT` (32) changed
+  rules on either side the edit takes the `cascade` path.
+- **`cascade`: imports changed, or more than 32 rules.** The rules compile
+  again and every element is computed in a new cascade, as for an in-place
   `replace_source` (`_swap_cascade`). Only the controls with another computed
   style or other effective flags are applied. One layout runs.
 - **`full`: the reference.** With `_partial_reload` false every reload builds a
@@ -2158,8 +2184,9 @@ A partial reload keeps the result of a full one in three places:
 
 `bench/equiv_runtime.gd` runs random stylesheet edits on each fixture, with
 state changes and running transitions between them: new values, new and
-removed declarations, keywords, `var()`, values that report, selector changes,
-new and removed rules, unsupported selectors, comments. After each edit it
+removed declarations, keywords, `var()`, values that report, selector changes
+(ancestor states such as `:hover > *` included), new rules at the end and at
+the start, removed rules, unsupported selectors, comments. After each edit it
 compares every control, stylebox, font, computed style and (sorted) diagnostic:
 partial with full, on each path, and native with GDScript.
 
@@ -2269,7 +2296,30 @@ changes in turn takes its own path: `:checked` is a state change, a class of a
 part is a model change, and the shown text of a dropdown is a `set_text`
 (`_text_stable`). The signals of the document are blocked during the write,
 which covers every behavior, and `notify` emits `value_changed` once when the
-value read back differs.
+value read back differs. The model change of the attribute reaches the
+behavior as `on_quiet_change(attribute)`: a TextField has already written its
+text, so it does not configure its editor again.
+
+A Toggle value is a `:checked` change: the cascade visits the Toggle's subtree
+only (see State application), and the checkmark's `background-image` is
+paint-only on its `UxmlBox`, so the value restyles a few elements and lays out
+nothing. The cascade still computes every property of those elements; the
+rules of `:checked` set few, but a property subset would need its own path in
+both backends for about 0.03 ms (native) of a 0.7 ms restyle.
+
+`set_field_placeholder(name, text)` writes `placeholder-text` the same way:
+the cascade does not read it, so no restyle runs. The placeholder class of
+the input changes only when the placeholder starts or stops showing (a
+restyle of that part), the elision follows the new text, and a layout runs
+only when the minimum size of the `LineEdit` changes (an empty field shapes
+its placeholder; a field with text does not). After any placement without a
+layout, only the fields whose own elements were placed check their elision.
+
+The caret of a TextField that is not `is-delayed` stays where the user typed:
+each value change runs the field's model update, and
+`UxmlTextInput.configure` writes only the properties that change, because
+`LineEdit.set_max_length` sets the text again and puts the caret at 0 (R27,
+`test_typing_keeps_the_caret`, typed through `push_input`).
 
 ### Public helpers
 
@@ -2441,6 +2491,41 @@ Tests: `test_model_text_reaches_the_control` and
 `test_text_changes_without_a_layout` (both paths, against a fresh load);
 `bench/equiv_runtime.gd` drives text changes on the incremental document
 against `refresh()`.
+
+### Rows of collection views and the layout
+
+A pooled row of a ListView, TreeView or multi-column view is a layout root
+(`_layout_roots`). A rebind of rows (a scroll, a selection, a new source)
+asks for a layout of those rows (`_layout_rows`) instead of `relayout()`. In
+the restyle, a change that needs a layout (a style that is not paint-only, a
+display or disabled flip, a text whose measure moves its element) inside a
+layout root lays out only that root's subtree when the root's border box
+cannot follow its content: the root has a rect from the last layout, is shown,
+does not change its own style in the pass, and both axes are fixed by the rule
+of `_text_stable` (`_fixed_axis`: a px length, or stretched in a parent whose
+size does not follow its content, the viewport of a vertical ScrollView
+included). Then nothing outside the root can move. A FixedHeight row of a
+vertical view qualifies; a DynamicHeight row, a row of a view that scrolls
+horizontally and a change of the row element itself lay out the document as
+before.
+
+The subtree layout starts from the unrounded rect and the containing-block
+width that the last layout gave the root (`raw` and `cbs` of
+`UxmlFlexLayout.compute`; `Out.raw`, `Out.cbs` natively), and rounds to the
+pixel grid from the unrounded absolute position of the root's parent, as the
+full pass does: `UxmlFlexLayout.compute_subtree` and `layout_subtrees` give
+the same rects as a layout of the document. The controls inside the root are
+placed; the root keeps its placement (a row control is moved to its item by
+the collection: `place_rows` after every placement without a layout). The
+post-layout behaviors inside the root, the layout hooks and the elision run as
+after a layout. A root whose rects or measures changed is laid out again by
+the next restyle, as an unsettled document is. `local_layout_count` counts
+these layouts; `layout_count` does not.
+
+Tests: `test_scroll_lays_out_only_the_rows` (both paths, against a layout of
+the document after each step); `bench/equiv_runtime.gd` scrolls, selects and
+expands the views of `tests/fixtures/runtime/Assets/UI/collections.uxml`
+against a document that is refreshed before each flush.
 
 ### Context menus
 
