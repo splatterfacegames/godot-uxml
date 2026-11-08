@@ -2008,6 +2008,55 @@ call), the `get_global_rect()` reads (16) of elements that may be drawn, and the
 (28) on elements that are not interactive; its `get_native()` calls (47)
 are on fields and buttons, which keep their Controls.
 
+### Core-drawn text, built and measured (`perf/native-load`)
+
+The text half of the plan was built as `UxmlText` (branch
+`perf/core-text-wip`, not merged): a Control written in Rust
+(`native/src/text.rs`) that ports Godot 4.7.1's Label (`_shape`,
+`_update_visible`, `get_layout_data`, `_get_line_rect`, `get_minimum_size`,
+`get_line_count`, `get_line_height` and the draw) to TextServer calls, with
+a Label's properties under the same names. It stands in for an authored,
+non-rich Label outside the row pools on the native path, and an API call that
+hands out its control (`get_element`, `get_native`, `get_control_for`,
+`get_native_for`) swaps a Label in, applied and placed as the load would have
+made it (`_promote_text`). A Control rather than a bare canvas item keeps
+Godot's drawing order, clipping, modulation, visibility and tooltips.
+
+What it took to be equal to a Label:
+
+- Pixels: 144 of 144 cases exact against a Label (`bench/prof/drawn_text.gd`:
+  6 texts and the empty text, multiple paragraphs, 4 sizes, 9 alignments, both
+  wrap modes, outline, shadow, overrun, clip, LabelSettings), and the same
+  minimum sizes and line counts. The trim flags of a Label are
+  `BREAK_TRIM_START_EDGE_SPACES | BREAK_TRIM_END_EDGE_SPACES` (64 | 128), and
+  sums of line heights are taken in doubles, as Label takes them.
+- Theme items: Godot follows a theme type variation only when a theme declares
+  it, so the default theme declares `UxmlTextLabel` as a variation of `Label`
+  at the start of the main loop (a declaration later changes the default theme
+  under existing Controls, which then update their themes).
+- Timing: a Label reads its theme items when `NOTIFICATION_THEME_CHANGED`
+  arrives and keeps them until the next one, and the runtime's settling
+  (`_reapply`, `_settle_snapshot`) is built on that: right after a load some
+  Labels measure with the items of before their overrides. A port that reads
+  the items when it measures lays the documents out differently
+  (`bench/prof/ab_equiv.gd`: HUD labels 119 against 120 px, 1 to 8 px in 7 of
+  14 documents). Reading them at the theme change, and measuring again after
+  Control's own handler measured with the old items, made 42 of 42 snapshots
+  equal.
+
+The cost, measured: equal to a Label's. A Label entering the tree costs 85 to
+105 us, the port 100 to 125 us (`bench/prof/text_cost.gd`), and a big load is
+not faster (`bench/prof/ab.gd`, 1,035 against 1,163 ms, editor binary, a
+loaded machine). In a load each text is shaped about 4 times and reads its
+theme 3 times (2,135 shapes and 1,618 reads for 517 texts): the same work as a
+Label, as the equal timing requires, through calls across the extension
+boundary instead of C++ calls. The upper bound of the plan is 144 ms of 908
+(a load with each of these Labels replaced by a bare Control); what reaches it
+is text that is shaped once, after its apply, which the settling of the
+runtime does not allow today: the measures of the first layout of a load would
+differ from a Label's.
+
+
 ### Native core
 
 `native/` is a Rust crate (godot-rust `godot` 0.5, `api-4-7`). Build and

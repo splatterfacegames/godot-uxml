@@ -2139,8 +2139,11 @@ own run.
 | frame: empty scene | 0.271 | 0.247 (0.241–0.267) | 0.266 (0.257–0.280) | 1.0 | 0.9 | 0.259 | 0.280 |
 | frame: big document, idle | 0.607 | 0.528 (0.495–0.575) | 2.03 (2.02–2.03) | 0.3 | 0.3 | 0.562 | 2.03 |
 
-A third run (`perf/core-draw`, see "Settling, tab switches and the core-drawn
-plan") changed one row beyond the noise: `settings: switch tab` 4.67 ms (Unity
+A fourth run (`perf/native-load`, see "Native load pipeline"), on a more
+loaded machine: big load 731 ms against Unity's 57 (12.8 times; `main` in the
+same session: 768 against 50.5, 15.2 times). A third run (`perf/core-draw`, see
+"Settling, tab switches and the core-drawn plan") changed one row beyond the
+noise: `settings: switch tab` 4.67 ms (Unity
 1.18 ms in that run; native / Unity 3.9). The other rows of that run are within
 the noise of this table.
 
@@ -2430,3 +2433,173 @@ No op is slower than its A/A noise allows.
   validation reads every control (0.5 ms on the big document), and the
   placement moves the cards below a change (a `set_position` each). Both are
   what core-drawn elements remove.
+
+## Native load pipeline (`perf/native-load`)
+
+This round set out to cut the load of a document on the native core (the big
+document: 653 ms against Unity's 44 ms; the other loads 14 to 26 times
+Unity's), with a big load under 150 ms as the target. The target was not
+reached. What landed: a profile of the load on the release template and the
+tools for it, a cascade output that makes fewer engine calls, and the release
+build of the native core without godot-rust's per-call checks. The two larger
+plans (the load steps native with `UxmlElement` as a lazy handle, and
+core-drawn Labels) were evaluated; the text half was built in full and
+measured, and is recorded below with what blocked it (and in
+`docs/design.md`, "Core-drawn text, built and measured").
+
+### Method
+
+- `tools/prof_release.py` exports any SceneTree script of the repository with
+  the official release template, as `tools/unity-bench/run.py` exports the
+  Unity comparison, and runs it in a small window at the bottom right of the
+  work area. The release template has no script profiler: function-level
+  profiles (`tools/gdprof.py`) run on the editor binary.
+- `bench/prof/ops.gd --op=load-steps` (and `settings-steps`,
+  `inventory-steps`, `dialog-steps`) times the steps of a real
+  `load_document()` through `UxmlDocument.profile`, which `_index()` and
+  `_restyle_now()` fill. "Parse, theme attach, rest" is what the steps leave.
+- `bench/prof/ab.gd` loads a document alternately with `UxmlDocument.ab_flag`
+  off and on in one process (the switch for experiments), and
+  `bench/prof/ab_equiv.gd` compares the snapshots of `bench/equiv_runtime.gd`
+  of the two loads of 14 documents at the load, after one frame and after
+  three.
+- Regressions: interleaved A/A/B rounds against two worktrees of `main`
+  (`0102f2e`), `bench.gd --quick` and `workloads.gd --quick`, three rounds,
+  the order rotated; ops beyond the A/A spread measured again in five rounds.
+
+### Where a load goes (release template, ms, median of 15 loads; settings and inventory 30)
+
+Measured one after the other (`main`, then the branch) on a machine that other
+work loads: steps the branch did not change moved by up to 10%.
+
+| Step | big, main | big, branch | settings, main | settings, branch | inventory, main | inventory, branch |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| parse, theme attach, rest | 47.0 | 42.1 | 9.1 | 6.6 | 6.3 | 6.7 |
+| part trees | 24.8 | 24.2 | 4.9 | 4.0 | 2.2 | 2.5 |
+| index | 6.7 | 6.7 | 0.9 | 0.7 | 0.7 | 0.7 |
+| control creation | 64.2 | 64.9 | 8.8 | 7.3 | 6.0 | 5.9 |
+| first cascade | 126.2 | **97.3** | 17.5 | **11.6** | 12.6 | **10.7** |
+| add_child | 103.4 | 96.6 | 2.6 | 2.4 | 7.6 | 8.2 |
+| signal wiring | 26.7 | 26.7 | 3.4 | 3.2 | 2.6 | 2.7 |
+| behaviors | 18.1 | 17.2 | 3.7 | 3.4 | 1.5 | 1.6 |
+| attributes | 10.4 | 10.0 | 1.7 | 1.5 | 1.1 | 1.2 |
+| bindings | 9.4 | 9.1 | 1.3 | 1.1 | 0.9 | 0.8 |
+| first apply (in the tree) | 201.2 | 184.4 | 10.3 | 9.4 | 18.9 | 19.6 |
+| first layout | 65.9 | **58.9** | 6.4 | 5.1 | 4.1 | 4.1 |
+| total | 710.6 | 631.1 | 69.7 | 57.2 | 64.9 | 66.7 |
+
+- **The Controls are two thirds of the big load**: their creation, entering
+  the tree and their first apply (370 ms on `main`). The GDScript steps that
+  are not Controls (part trees, index, wiring, behaviors, attributes,
+  bindings) are 96 ms: more than Unity's whole load. The parse is about 40 ms.
+- **The first cascade** (126 ms) was about 60% the building of its output
+  Dictionaries (`c.build`, native timers): for every element a copy of the
+  inherited entries of its parent and an entry per winning declaration, and
+  per container two Dictionaries per inherited property (custom properties
+  included: 25 entries per element on the big document, 10 of them custom).
+- A settings load is mostly the cascade (its hidden pages are parked, so few
+  controls are applied); an inventory load is the apply of its 80 slots.
+
+### What changed
+
+- **Cascade output**: the items of a computed style are shared (`Rc`) with
+  their values, so the copy of the inherited items and the wrap of an
+  inherited value copy no Variant through the engine; `initial`, `unset` and
+  percentages are found once per expanded value, not by a Variant comparison
+  per element; the font-size percentage and `display: none` checks read the
+  element's items, not its Dictionary; the `{value, origin}` entries of
+  `var()` declarations are shared by the elements, as those of static
+  declarations were. The output is the same (`bench/equiv.gd`,
+  `bench/equiv_runtime.gd`, parity). `c.build` of the big document: 75 to
+  55 ms (editor binary, timers on).
+- **godot-rust `safeguards-release-disengaged`**: the release core makes
+  engine calls without godot-rust's validity checks. Measured alone (editor
+  binary, 3 interleaved runs each): the first cascade 134 to 117 ms, the first
+  layout 85 to 78 ms. The checks never fired in the suites; a misuse would now
+  be undefined behaviour instead of a panic.
+
+### Results
+
+Fourth run of `python tools/unity-bench/run.py` (5 rounds, 60 iterations, arms
+godot-release and unity-il2cpp; the Unity player of the third run, whose
+documents are the same), the branch and then `main`, on a machine that other
+work loaded more than in the runs before (Unity's big load: 57 and 50 ms in the
+two runs, 41 to 44 ms before). Each ratio uses the Unity value of its own run.
+
+| Operation | main | branch | Unity (branch run) | Native / Unity, main | Native / Unity, branch |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| big: load | 768 (683–803) | 731 (686–823) | 57.1 | 15.2 | 12.8 |
+| big: load + first frame | 781 | 763 | 87.2 | 10.1 | 8.7 |
+| settings: load | 61.6 | 66.0 | 6.01 | 12.4 | 11.0 |
+| inventory: load | 64.1 | 65.7 | 3.44 | 19.1 | 19.1 |
+| dialog: load | 9.23 | 8.97 | 0.401 | 22.2 | 22.4 |
+| listview: load, 10,000 items | 97.8 | 97.2 | 4.77 | 21.9 | 20.4 |
+| big: class change (card) | 5.32 | 4.82 | 2.23 | 3.0 | 2.2 |
+| big: label text change + layout | 3.30 | 2.96 | 1.91 | 1.8 | 1.5 |
+| big: resize | 7.16 | 6.58 | 4.83 | 1.7 | 1.4 |
+
+The other rows are within the noise of the two runs.
+
+### Other benchmarks (geomean of the medians, branch / main, A/A in brackets)
+
+| Suite | Native |
+| --- | ---: |
+| `bench.gd --quick` (25 ops) | 1.008 (1.023) |
+| `workloads.gd --quick` (17 ops) | 0.967 (1.014) |
+
+| Op | main | branch | branch / main (A/A) |
+| --- | ---: | ---: | ---: |
+| `bench.gd`: cascade resolve(big) | 95.8 | 77.8 | 0.81 (1.06) |
+| `bench.gd`: set_class churn (card) | 6.85 | 6.11 | 0.89 (0.99) |
+| `bench.gd`: hover toggle (button) | 0.735 | 0.669 | 0.91 (0.99) |
+| `workloads.gd`: list1k update one row + relayout | 10.6 | 8.47 | 0.80 (1.23) |
+| `workloads.gd`: listview10k scroll 3 rows | 2.75 | 2.50 | 0.91 (1.12) |
+
+Five ops were above their A/A spread in the three rounds and were measured
+again in five interleaved rounds (medians, `main` / `main` again / branch, ms):
+`load_document(runtime.uxml)` 23.9 / 23.9 / 25.4 (rounds of 22.4 to 31.7),
+`load_document(review.uxml)` 36.9 / 38.0 / 38.6, `loader(big)` 44.6 / 46.7 /
+44.1, inventory select slot 1.15 / 1.24 / 1.22, dialog typewriter 0.506 /
+0.537 / 0.509. No op is slower than the noise allows.
+
+### Evaluated and not merged
+
+- **The first apply off the tree** (apply the built controls, then add them):
+  a theme override of a control in the tree updates its theme at once, one
+  off the tree waits for the entry. It saved 85 of 1,014 ms on the big load
+  (`bench/prof/ab.gd`, editor binary), but the first layout then read stale
+  measures (a TextField 39 against 45 px, a Label 14 against 17 px:
+  `bench/prof/ab_equiv.gd`, 7 failures). Updating the theme of the entered
+  text controls before the layout fixed nothing and took the gain.
+- **Core-drawn text** (`UxmlText`, branch `perf/core-text-wip`): a Rust port
+  of Label's measure and draw, pixel-exact in 144 of 144 cases, with the same
+  results as a Label in 42 of 42 snapshots. It costs as much as a Label:
+  matching a Label's timing (theme items read at a theme change and kept until
+  the next one; the runtime's settling depends on that) means shaping each
+  text about 4 times and reading its theme 3 times in a load, through calls
+  across the extension boundary. The upper bound of core-drawn Labels on the
+  big load is 144 of 908 ms (each such Label replaced by a bare Control);
+  reaching it needs text that is shaped once, after its apply, and a settling
+  that does not depend on a Label's stale measures.
+- **The load steps native, with lazy `UxmlElement` handles**: not started.
+  Every structure of the runtime keys on the element objects (`_controls`,
+  `_natives`, `_parents`, `_states`, the behaviors, the applier's memos,
+  `UxmlBinding`, the collection pools: 28,600 lines of GDScript), and the
+  steps it would move are 96 ms of the big load and 15 of a settings load.
+  The Controls (370 ms) and the cascade (97 ms) are the larger part, so the
+  order of the work is: fewer Controls first (core-drawn boxes and text), then
+  the model.
+- **Template copies of the inherited wraps** (`duplicate_shallow` of
+  `{kind, from, origin}` per container): no faster than building them.
+
+### What remains
+
+- Loads (13 to 22 times Unity in this run): the Controls. A drawn element must
+  not be a Control that redoes a Label's work; the settling must allow text
+  measured once after its apply, and plain boxes must become canvas items
+  under their nearest Control, with the core's hit test for hover.
+- The cascade output (55 ms of the big load, timers on): the wrap of every
+  inherited property per container is part of the output (`origin` with
+  `from`), which `bench/equiv.gd` compares with the reference. A lazy output
+  (Dictionaries built for the elements whose style is read) would remove it.
+- Signal wiring (27 ms): about 9,000 connections, five per control.
