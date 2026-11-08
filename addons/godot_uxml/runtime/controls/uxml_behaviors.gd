@@ -85,6 +85,11 @@ class Behavior extends RefCounted:
 	func on_model_changed() -> void:
 		pass
 
+	## A change of attribute `n` that the document keeps out of the cascade
+	## (set_field_value, set_field_placeholder), after bind_write made it.
+	func on_quiet_change(_n: String) -> void:
+		on_model_changed()
+
 	## The control the document's get_native() returns.
 	func native() -> Control:
 		return doc._controls.get(el)

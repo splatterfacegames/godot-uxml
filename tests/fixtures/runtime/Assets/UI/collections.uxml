@@ -1,0 +1,21 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="collections.uss" />
+  <ui:VisualElement name="side" class="side">
+    <ui:TreeView name="tree" class="tree" fixed-item-height="20" />
+    <ui:ListView name="items" class="items" fixed-item-height="24" item-template="list_row.uxml" show-alternating-row-backgrounds="ContentOnly" />
+    <ui:ListView name="plain" class="items" fixed-item-height="18" />
+    <ui:MultiColumnListView name="cols" class="items" fixed-item-height="18">
+      <ui:Columns>
+        <ui:Column name="a" title="A" width="80" />
+        <ui:Column name="b" title="B" width="120" />
+      </ui:Columns>
+    </ui:MultiColumnListView>
+  </ui:VisualElement>
+  <ui:ScrollView name="insp" class="insp">
+    <ui:TextField name="f0" label="Width" placeholder-text="auto" />
+    <ui:TextField name="f1" label="Height" value="12px" placeholder-text="computed" />
+    <ui:FloatField name="f2" label="Grow" placeholder-text="0" />
+    <ui:Toggle name="t0" label="Wrap" />
+    <ui:Toggle name="t1" label="Clip" class="clip" />
+  </ui:ScrollView>
+</ui:UXML>

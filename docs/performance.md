@@ -1911,3 +1911,124 @@ two flag checks (`_reload_pass`, the placeholder list).
 - The `cascade` path computes every element: a selector edit could patch the
   buckets and mark the elements that the old or the new selector matches.
 - A Toggle value costs its `:checked` restyle and layout (R17).
+
+## Scrolls, field updates and selector reloads (`feat/editor-apis-5`)
+
+Requests R27, R29, R17, R28 and the selector part of R25 of the uxml-editor.
+Documents: `bench/update_cost.gd` (the 507-element document of
+`bench/load_cost.gd` with a hierarchy TreeView of 300 items in a 300 px
+view, an inspector of 70 TextFields and two Toggles) and
+`bench/reload_cost.gd`.
+
+### Method
+
+Interleaved A/A/B rounds: `main` (`1167eb1`), the same `main` worktree run
+again (the noise floor) and the branch, three rounds, each of
+`bench/bench.gd --quick`, `bench/workloads.gd --quick`, `bench/load_cost.gd`,
+`bench/reload_cost.gd` and `bench/update_cost.gd`, native and GDScript. Values
+are the medians of the rounds; the A/A ratio is in brackets. Three runs:
+
+- run 1 at `aa25434`: all five suites. The load and reload figures below come
+  from this run (the later commits change only the layout of collection rows).
+- run 2 at `6278b76`: `bench.gd`, `workloads.gd`, `update_cost.gd`.
+- run 3 at `497c71d` (the head): the same three suites. Another process
+  disturbed round 0 (every arm 2 to 4 times slower) and part of round 1, so
+  only `update_cost.gd` (A/A 0.97 native, 1.04 GDScript) is taken from it;
+  the `bench.gd` and `workloads.gd` figures come from run 2.
+
+### Updates at selection rate (ms, run 3)
+
+Each sample is the call and the restyles it queues. "Layouts" counts the
+layout passes of the document in 18 samples.
+
+| Update | Native main | Native branch | ratio (A/A) | GDScript main | GDScript branch | ratio (A/A) | Layouts main / branch |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `scroll_to_item` of the TreeView, far and back | 13.3 | 4.1 | 0.31 (0.97) | 117 | 10.2 | 0.087 (1.05) | 18 / 0 |
+| scroll offset of one row | 13.2 | 3.8 | 0.29 (0.97) | 115 | 8.8 | 0.077 (1.02) | 18 / 0 |
+| a selection and its `scroll_to_item` | 13.8 | 4.4 | 0.32 (0.98) | 123 | 11.5 | 0.093 (0.99) | 18 / 0 |
+| `set_field_value` of a Toggle | 13.8 | 0.94 | 0.068 (0.96) | 111 | 1.7 | 0.015 (1.03) | 18 / 0 |
+| the `value` attribute of a Toggle | 13.8 | 1.07 | 0.078 (1.00) | 112 | 1.6 | 0.014 (1.03) | 18 / 0 |
+| `set_forced_states(["hover"])` of a panel, and clear | 1.9 | 0.81 | 0.42 (1.00) | 7.9 | 1.4 | 0.17 (1.08) | 0 / 0 |
+| 70 `set_field_value` of TextFields | 14.7 | 7.1 | 0.48 (0.94) | 15.6 | 7.0 | 0.45 (1.04) | 0 / 0 |
+| 70 placeholders (`set_field_placeholder`; main: the attribute) | 19.5 | 13.6 | 0.70 (0.98) | 25.6 | 13.2 | 0.52 (1.06) | 0 / 0 |
+
+- A scroll lays out the rows alone (R29): the cost is the rebind, the
+  restyle of the rows and the subtree layouts. On GDScript a layout of this
+  document is about 100 ms; the scroll no longer pays it.
+- A Toggle value (R17) restyles the Toggle's subtree and lays out nothing:
+  the checkmark's `background-image` is paint-only on a `UxmlBox`, and the
+  cascade visits only the subtrees of changed inputs (on GDScript it scanned
+  every element: 3.8 ms of 7 ms after the layout was gone).
+- A text value costs about 0.1 ms per field (0.02 ms for a direct
+  `LineEdit` write in the editor's measure). The rest is the `value` model
+  change, the editor text and the elision memo of the placeholder.
+- A placeholder costs about 0.19 ms per field, most of it the elision of a
+  long text (R18), which shapes the text.
+
+### Reload (ms, run 1)
+
+| Edit | Native main | Native branch | ratio (A/A) | GDScript main | GDScript branch | ratio (A/A) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| one selector (`rules` path; main: `cascade`) | 66.1 | 2.2 | 0.033 (0.98) | 594 | 38.8 | 0.065 (1.00) |
+| next state change | 1.15 | 0.75 | 0.65 (0.98) | 4.2 | 1.2 | 0.29 (1.00) |
+| one rule added at the end | 65.9 | 1.8 | 0.027 (1.00) | 602 | 33.2 | 0.055 (1.03) |
+| next state change | 1.15 | 0.71 | 0.62 (1.02) | 4.2 | 1.3 | 0.31 (1.00) |
+| one colour of `.panel` | 2.27 | 2.19 | 0.97 (1.01) | 8.9 | 9.0 | 1.02 (1.03) |
+| one inherited value of `.panel` | 30.7 | 30.1 | 0.98 (0.98) | 248 | 254 | 1.02 (1.01) |
+| one length of `.row` (a layout) | 18.2 | 18.4 | 1.01 (1.01) | 336 | 341 | 1.02 (1.00) |
+| `set_field_value` of the Toggle (R17) | 7.8 | 0.64 | 0.082 (1.00) | 70.7 | 1.3 | 0.018 (1.01) |
+
+A selector or rule edit compiles the rules in place and computes only the
+elements that the changed rules match: 30 to 50 times faster on native, 15 to
+18 times on GDScript, where the rest is the compile of every author rule
+(`_compile_rules`) and the matching of the changed rules against every
+element. The declaration edits are unchanged.
+
+### Other benchmarks (geomean of the medians, branch / main, A/A in brackets)
+
+| Suite | Native | GDScript | run |
+| --- | ---: | ---: | --- |
+| `load_cost.gd` (14 ops) | 0.862 (1.008) | 0.561 (0.977) | 1 |
+| `bench.gd --quick` (25 ops) | 0.864 (0.973) | 0.896 (0.971) | 2 |
+| `workloads.gd --quick` (17 ops) | 1.020 (1.092) | 0.928 (0.955) | 2 |
+
+- Loads are unchanged (0.98 to 1.02). The small updates after a load are
+  faster, most on GDScript: a text change of a fixed Label 4.2 -> 1.5 ms, a
+  model text 3.1 -> 0.48 ms (the cascade visits only the changed subtrees and
+  the placeholder fields that were placed).
+- `bench.gd`: hover, focus and idle restyles are 0.3 to 0.8 times main on both
+  paths, for the same reasons. One op is slower beyond its A/A noise:
+  `hud frame (8 labels, no refresh)` 1.06 on both paths (0.035 -> 0.037 ms),
+  the memo resets and the layout-root checks of each restyle.
+- `workloads.gd` run 2: the native ops beyond their noise (settings and
+  dialog loads, the typewriter, a dialog hover) were disturbed in two of the
+  three branch rounds (205 and 84 ms against 68 ms for the settings load); the
+  third round equals main, and run 1 shows none of them. `refresh_list` of
+  the 10,000-item ListView was 2.3 -> 3.1 ms in runs 1 and 2: the rebind laid
+  out its rows one by one. A layout of the document now runs when the rows
+  cover a third of the document, and the check of each row is skipped then:
+  2.47 -> 2.42 ms native, 2.52 -> 2.53 ms GDScript in run 3.
+
+### Build cost per control (R15), measured again
+
+`bench/load_cost.gd --profile` (native, runtime theme): of a 380 ms load,
+the first apply is 115 ms, `add_child` of the built controls 55 ms, control
+creation 50 ms, the first cascade 40 ms and the first layout 60 ms. A
+scratch measure of 300 Labels: `Label.new()` 18 us, `add_child` 80 to 100 us,
+a bulk theme override (font, size, colour, stylebox) 45 us in the tree and
+23 us out of it. The applier already writes its overrides in one bulk
+(`begin_bulk_theme_override`), so one theme notification per control
+remains. Applying before `add_child` would save about 25 us per Label (about
+3 ms of this load), but the apply reads the theme of the document
+(`get_theme_*`), which a control out of the tree cannot reach. Not changed.
+
+### What remains
+
+- R15: the build cost per control is unchanged (see above).
+- R17: a state change computes every property of the elements it reaches;
+  the `:checked` rules set few. The cascade of a Toggle value is now 0.03 ms
+  native and 0.05 ms GDScript of a 0.9 to 1.7 ms update.
+- R29: a DynamicHeight row, a row of a view that scrolls horizontally and a
+  change of the row element itself (its own padding, display) still lay out
+  the document.
+- Selector reloads: the GDScript path compiles every author rule again.

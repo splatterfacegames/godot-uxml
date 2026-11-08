@@ -96,6 +96,7 @@ var _measurer: Callable
 var _warnings: Array = []
 var _warned: Dictionary = {}
 var _rects: Dictionary = {}
+var _cbs: Dictionary = {}     # el -> the containing-block width it was laid out with
 var _content_sizes: Dictionary = {}
 var _insets: Dictionary = {}
 var _source: String = ""
@@ -172,7 +173,9 @@ static var _no_ids := PackedInt64Array()
 ## Returns {"rects": {element: Rect2}, "content_sizes": {element: Vector2},
 ## "insets": {element: [Vector2 start, Vector2 end]}} — start/end are the
 ## resolved padding+border edges (the content-box insets) the runtime uses
-## to inset wrapped natives the flex pass does not position itself.
+## to inset wrapped natives the flex pass does not position itself. Also
+## "raw" (the rects before the pixel-grid rounding) and "cbs" (the
+## containing-block width of each element), which compute_subtree takes.
 static func compute(
 	root: UxmlElement,
 	styles: Dictionary,
@@ -181,6 +184,52 @@ static func compute(
 	warnings: Array,
 	options: Dictionary = {}
 ) -> Dictionary:
+	var l := _make(styles, measurer, warnings, options)
+	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
+	var rects: Dictionary = l._rects
+	if bool(options.get("pixel_grid", false)):
+		rects = round_to_pixel_grid(root, rects)
+	return {
+		"rects": rects,
+		"content_sizes": l._content_sizes,
+		"insets": l._insets,
+		"raw": l._rects,
+		"cbs": l._cbs,
+	}
+
+
+## Lay out only the subtree of `root`, as a full compute reached it: `rect`
+## and `cb_width` are its unrounded rect and containing-block width ("raw"
+## and "cbs" of the last compute), `origin` the unrounded absolute position
+## of its parent (the pixel grid rounds from it). The caller makes sure that
+## nothing outside the subtree can move (UxmlDocument._local_root). Returns
+## the entries of compute for the elements of the subtree.
+static func compute_subtree(
+	root: UxmlElement,
+	rect: Rect2,
+	cb_width: float,
+	origin: Vector2,
+	styles: Dictionary,
+	measurer: Callable,
+	warnings: Array,
+	options: Dictionary = {}
+) -> Dictionary:
+	var l := _make(styles, measurer, warnings, options)
+	l._layout(root, rect, cb_width)
+	var rects: Dictionary = l._rects
+	if bool(options.get("pixel_grid", false)):
+		rects = {}
+		_round_node(root, origin.x, origin.y, l._rects, rects)
+	return {
+		"rects": rects,
+		"content_sizes": l._content_sizes,
+		"insets": l._insets,
+		"raw": l._rects,
+		"cbs": l._cbs,
+	}
+
+
+static func _make(styles: Dictionary, measurer: Callable, warnings: Array, options: Dictionary) -> UxmlFlexLayout:
 	var l := UxmlFlexLayout.new()
 	l._styles = styles
 	l._measurer = measurer
@@ -199,15 +248,7 @@ static func compute(
 	l._grid = bool(options.get("pixel_grid", false))
 	if options.has("warned"):
 		l._warned = options["warned"]
-	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
-	var rects: Dictionary = l._rects
-	if bool(options.get("pixel_grid", false)):
-		rects = round_to_pixel_grid(root, rects)
-	return {
-		"rects": rects,
-		"content_sizes": l._content_sizes,
-		"insets": l._insets,
-	}
+	return l
 
 
 ## Yoga's RoundToPixelGrid at one pixel per point, as Unity rounds every
@@ -1248,12 +1289,15 @@ func _layout(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 				var rs: Array = e[11]
 				var ins: Array = e[12]
 				var cs: Array = e[13]
+				var cbs: Array = e[14]
 				_rects[el] = rect
+				_cbs[el] = cb_width
 				_insets[el] = ins[0]
 				_content_sizes[el] = cs[0]
 				for k in range(1, sub.size()):
 					var x: UxmlElement = sub[k]
 					_rects[x] = rs[k]
+					_cbs[x] = cbs[k]
 					_insets[x] = ins[k]
 					_content_sizes[x] = cs[k]
 				_laid.append_array(sub)
@@ -1275,11 +1319,14 @@ func _layout(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 	ins2.resize(n)
 	var cs2: Array = []
 	cs2.resize(n)
+	var cbs2: Array = []
+	cbs2.resize(n)
 	for k in n:
 		var x2: UxmlElement = sub2[k]
 		rs2[k] = _rects[x2]
 		ins2[k] = _insets[x2]
 		cs2[k] = _content_sizes.get(x2, Vector2.ZERO)
+		cbs2[k] = _cbs[x2]
 	if xe == null:
 		xe = [[], []]
 		_xc[el] = xe
@@ -1289,7 +1336,7 @@ func _layout(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 	_eid_seq += 1
 	var ent := [rect.size, cb_width, _scroll_bar_width, entry,
 		_vstate(vl) if not vl.is_empty() else _no_state, sub2,
-		fr[0], fr[1], _ids_of(el), _eid_seq, el, rs2, ins2, cs2]
+		fr[0], fr[1], _ids_of(el), _eid_seq, el, rs2, ins2, cs2, cbs2]
 	_ok_m[_eid_seq] = true
 	lst.append(ent)
 	if not _frames.is_empty():
@@ -1298,6 +1345,7 @@ func _layout(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 
 func _layout_body(el: UxmlElement, rect: Rect2, cb_width: float) -> void:
 	_rects[el] = rect
+	_cbs[el] = cb_width
 	if _xc != null:
 		_laid.append(el)
 	var pad := _padding(el, cb_width)

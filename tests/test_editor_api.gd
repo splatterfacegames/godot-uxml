@@ -1577,11 +1577,19 @@ func test_reload_restyles_only_the_edit() -> void:
 		# A selector, a new rule, a removed rule.
 		var t8 := t7.replace(".other {", ".other, .cell {")
 		apply_all.call(t8)
-		h.eq(a.get_last_reload_mode(), "cascade", "a selector change compiles the rules")
+		h.eq(a.get_last_reload_mode(), "rules", "a selector change compiles the rules in place")
 		_r25_same(a, b, "selector")
+		# A state of an ancestor in a new first rule: the ancestor keys change,
+		# and every later item moves.
+		var t8b := "#in:hover > * { padding-left: 1px; }\n" + t8
+		apply_all.call(t8b)
+		h.eq(a.get_last_reload_mode(), "rules", "a rule added first")
+		_r25_same(a, b, "ancestor state")
+		apply_all.call(t8)
+		_r25_same(a, b, "first rule removed")
 		var t9 := t8 + "#in { color: rgb(9, 9, 9); }\n"
 		apply_all.call(t9)
-		h.eq(a.get_last_reload_mode(), "cascade", "a new rule compiles the rules")
+		h.eq(a.get_last_reload_mode(), "rules", "a new rule compiles the rules in place")
 		h.eq(String(a.get_computed_style("in")["color"]["value"]), "rgb(9, 9, 9)", "the new rule applies")
 		_r25_same(a, b, "added rule")
 		apply_all.call(t8)
@@ -1720,6 +1728,50 @@ func test_set_field_value() -> void:
 		_unload(ref)
 		return out
 	await _both(body, "field value")
+
+
+## R27: a key press as the OS delivers it, to the focused control.
+func _type(doc: UxmlDocument, ch: String) -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = OS.find_keycode_from_string(ch.to_upper())
+	ev.unicode = ch.unicode_at(0)
+	ev.pressed = true
+	doc.get_viewport().push_input(ev)
+	var rel := InputEventKey.new()
+	rel.keycode = ev.keycode
+	rel.pressed = false
+	doc.get_viewport().push_input(rel)
+
+
+func test_typing_keeps_the_caret() -> void:
+	var fields := '<ui:TextField name="live" /><ui:TextField name="late" is-delayed="true" />'\
+		+ '<ui:TextField name="capped" max-length="8" password="true" />'\
+		+ '<uie:ToolbarSearchField name="search" />'
+	var uss := ".unity-text-field { width: 200px; }"
+	var body := func():
+		var doc := _mk("r27", fields, uss)
+		await h.process_frame
+		doc._restyle_now()
+		var out: Array = []
+		for n in ["live", "late", "capped", "search"]:
+			var le: LineEdit = doc.get_native(n) if n != "search" else null
+			if le == null:
+				for c in doc.get_control_for(_el(doc, n)).find_children("*", "LineEdit", true, false):
+					le = c
+			le.grab_focus()
+			await h.process_frame
+			for ch in "slid":
+				_type(doc, ch)
+				await h.process_frame
+				await h.process_frame
+			h.eq(le.text, "slid", "%s: typing keeps the order" % n)
+			h.eq(le.caret_column, 4, "%s: the caret follows the text" % n)
+			out.append([n, le.text, le.caret_column])
+			le.release_focus()
+			await h.process_frame
+		_unload(doc)
+		return out
+	await _both(body, "typing")
 
 
 # ---------------------------------------------------------------------------
@@ -2091,3 +2143,130 @@ func test_selected_row_in_the_editor_skins() -> void:
 		doc._restyle_now()
 		h.eq(String(doc.get_computed_style("r")["background-color"]["value"]), "rgb(58, 114, 176)", "%s: a focused view" % skin)
 		_unload(doc)
+# ---------------------------------------------------------------------------
+# R29: a scroll of a collection view lays out only its rows
+# ---------------------------------------------------------------------------
+
+const R29_BODY := '<ui:VisualElement name="side" class="side">'\
+	+ '<ui:TreeView name="tree" class="tree" fixed-item-height="20" />'\
+	+ '<ui:ListView name="list" class="list" fixed-item-height="18" show-alternating-row-backgrounds="All" />'\
+	+ '<ui:MultiColumnListView name="cols" class="list" fixed-item-height="18">'\
+	+ '<ui:Columns><ui:Column name="a" title="A" width="80" /><ui:Column name="b" title="B" width="120" /></ui:Columns>'\
+	+ '</ui:MultiColumnListView></ui:VisualElement><ui:Label name="after" text="after" />'
+const R29_USS := '.side { width: 220px; flex-direction: column; } .tree { height: 120px; } .list { height: 90px; }'\
+	+ ' .unity-collection-view__item--selected { padding-left: 3px; }'
+
+
+static func _r29_roots(n: int, depth: int) -> Array:
+	var out: Array = []
+	for i in n:
+		var kids: Array = _r29_roots(3, depth - 1) if depth > 0 and i % 3 == 0 else []
+		out.append({"id": "%d-%d" % [depth, i] + ("x".repeat(i % 7)), "data": "Item %d %s" % [i, "long text ".repeat(i % 4)],
+			"children": kids})
+	return out
+
+
+func test_scroll_lays_out_only_the_rows() -> void:
+	var body := func():
+		var doc := _mk("r29", R29_BODY, R29_USS)
+		var ref := _mk("r29", R29_BODY, R29_USS)
+		await h.process_frame
+		var items: Array = []
+		for i in 200:
+			items.append("Row %d %s" % [i, "wide ".repeat(i % 5)])
+		var cells := func(c: Control, i: int):
+			if c is Label:
+				(c as Label).text = "cell %d" % i
+		for d in [doc, ref]:
+			d.set_tree_source("tree", _r29_roots(40, 2))
+			d.set_tree_item_expanded("tree", "2-0", true, true)
+			d.set_items_source("list", items)
+			d.set_items_source("cols", items)
+			d.set_column_cell_bind("cols", "a", cells)
+			_settle(d)
+		var tp = load("res://tests/test_parking.gd")
+		var out: Array = []
+		var l0 := doc.layout_count
+		var s0 := doc.local_layout_count
+		var steps := [
+			func(d): d.scroll_to_item("tree", 30),
+			func(d): d.set_scroll_offset("tree", Vector2(0, 47)),
+			func(d): d.set_selection("tree", [4]),
+			func(d): d.scroll_to_item("tree", 4),
+			func(d): d.set_scroll_offset("list", Vector2(0, 18 * 37 + 5)),
+			func(d): d.set_selection("list", [40]),
+			func(d): d.scroll_to_item("list", 150),
+			func(d): d.set_tree_item_expanded("tree", "2-3", true),
+			func(d): d.set_scroll_offset("tree", Vector2(0, 9)),
+			func(d): d.set_scroll_offset("cols", Vector2(0, 18 * 20)),
+			func(d): d.scroll_to_item("list", 0),
+		]
+		for k in steps.size():
+			for d in [doc, ref]:
+				(steps[k] as Callable).call(d)
+				d._restyle_now()
+				d._restyle_now()
+			ref.relayout()
+			_settle(ref)
+			_same(tp.snapshot(doc, true), tp.snapshot(ref, true), "step %d: the controls equal a layout of the document" % k)
+			out.append(_named_rects(doc))
+		h.check(doc.local_layout_count > s0, "the scrolls lay out rows alone")
+		out.append(doc.layout_count - l0)
+		_unload(doc)
+		_unload(ref)
+		return out
+	var tr := await _both(body, "scroll")
+	# Expanding a tree item changes the content height (a layout); the
+	# multi-column view scrolls horizontally (its rows follow their content).
+	h.check(int(tr[-1]) <= 3, "scrolls run no layout of the document (%d layouts)" % int(tr[-1]))
+
+
+# ---------------------------------------------------------------------------
+# R28: a placeholder without a restyle
+# ---------------------------------------------------------------------------
+
+func test_set_field_placeholder() -> void:
+	var fields := '<ui:TextField name="a" placeholder-text="start" /><ui:TextField name="b" />'\
+		+ '<ui:FloatField name="num" placeholder-text="0" /><ui:Toggle name="tog" />'
+	var uss := '.unity-text-field { width: 120px; text-overflow: ellipsis; }'
+	var body := func():
+		var doc := _mk("r28", fields, uss)
+		var ref := _mk("r28", fields, uss)
+		await h.process_frame
+		_settle(doc)
+		_settle(ref)
+		var out: Array = []
+		var l0 := doc.layout_count
+		h.eq(doc.set_field_placeholder("tog", "x"), false, "a toggle has no placeholder")
+		h.eq(doc.set_field_placeholder("missing", "x"), false, "an unknown name")
+		var long := "computed 12.5px from .inspector-row:hover (theme)"
+		h.eq(doc.set_field_placeholder("a", long), true, "a text field")
+		h.eq(doc._restyle_queued, false, "a new placeholder queues no restyle")
+		h.eq(doc._attr_dirty.size(), 0, "and marks nothing for the cascade")
+		h.eq(doc.get_field_placeholder("a"), long, "get_field_placeholder")
+		var le: LineEdit = doc.get_native("a")
+		h.check(le.placeholder_text != long and le.placeholder_text.ends_with("..."), "the placeholder is elided (R18)")
+		h.eq(le.tooltip_text, long, "the whole text is the tooltip")
+		ref.get_element_model("a").set_attribute("placeholder-text", long)
+		# Empty to a placeholder: the input gets the placeholder class.
+		h.eq(doc.set_field_placeholder("b", "none"), true, "a field without a placeholder")
+		ref.get_element_model("b").set_attribute("placeholder-text", "none")
+		h.eq(doc.set_field_placeholder("num", "mixed"), true, "a numeric field")
+		ref.get_element_model("num").set_attribute("placeholder-text", "mixed")
+		_settle(ref)
+		doc._restyle_now()
+		doc._restyle_now()
+		h.eq(doc.layout_count - l0, 0, "no layout")
+		ref.relayout()
+		_settle(ref)
+		var tp = load("res://tests/test_parking.gd")
+		_same(tp.snapshot(doc, true), tp.snapshot(ref, true), "the controls equal an attribute write with a restyle")
+		var input_b := UxmlParts.find_part(doc.get_element_model("b"), "input")
+		h.check(UxmlParts.control_classes(input_b).has("unity-base-text-field__input--placeholder"), "the placeholder class")
+		out.append([le.placeholder_text, doc.get_native("b").placeholder_text])
+		_unload(doc)
+		_unload(ref)
+		return out
+	await _both(body, "placeholder")
+
+

@@ -549,6 +549,11 @@ pub struct Out {
     pub rects: Vec<Option<Rect2>>,
     pub content: Vec<Option<Vector2>>,
     pub insets: Vec<Option<(Vector2, Vector2)>>,
+    /// The rects before the pixel-grid rounding (a later subtree layout
+    /// starts from them), and the containing-block width each element was
+    /// laid out with.
+    pub raw: Vec<Option<Rect2>>,
+    pub cbs: Vec<f64>,
 }
 
 impl Out {
@@ -679,7 +684,13 @@ impl<'a> Pass<'a> {
             kinds,
             warned,
             warnings,
-            out: Out { rects: vec![None; n], content: vec![None; n], insets: vec![None; n] },
+            out: Out {
+                rects: vec![None; n],
+                content: vec![None; n],
+                insets: vec![None; n],
+                raw: vec![],
+                cbs: vec![0.0; n],
+            },
             pad_m: vec![None; n],
             mar_m: vec![None; n],
             bor_m: vec![None; n],
@@ -719,9 +730,29 @@ impl<'a> Pass<'a> {
 
     pub fn run(mut self, host: Vector2) -> Out {
         self.layout(0, Rect2::new(Vector2::ZERO, host), d(host.x));
+        self.out.raw = self.out.rects.clone();
         if self.io.pixel_grid {
             let mut rounded = self.out.rects.clone();
-            round_node(self.c, 0, 0.0, 0.0, &self.out.rects, &mut rounded);
+            round_node(self.c, 0, 0.0, 0.0, &self.out.raw, &mut rounded);
+            self.out.rects = rounded;
+        }
+        self.out
+    }
+
+    /// Lays out only the subtrees `roots`: (preorder index, unrounded rect,
+    /// containing-block width, unrounded absolute position of the parent),
+    /// each as the full pass reached it. The entries of the other elements
+    /// stay None (UxmlDocument._do_local_layout).
+    pub fn run_subtrees(mut self, roots: &[(usize, Rect2, f64, f64, f64)]) -> Out {
+        for &(i, rect, cb, _, _) in roots {
+            self.layout(i, rect, cb);
+        }
+        self.out.raw = self.out.rects.clone();
+        if self.io.pixel_grid {
+            let mut rounded = self.out.rects.clone();
+            for &(i, _, _, al, at) in roots {
+                round_node(self.c, i, al, at, &self.out.raw, &mut rounded);
+            }
             self.out.rects = rounded;
         }
         self.out
@@ -1659,6 +1690,7 @@ impl<'a> Pass<'a> {
 
     fn layout(&mut self, i: usize, rect: Rect2, cb: f64) {
         self.out.rects[i] = Some(rect);
+        self.out.cbs[i] = cb;
         let pad = self.padding(i, cb);
         let bor = self.borders(i);
         let start = Vector2::new(f(bor[L] + pad[L]), f(bor[T] + pad[T]));

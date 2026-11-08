@@ -118,6 +118,17 @@ var _warn: Array = []                  # per element warnings
 var _arefs: Array = []                 # per element attribute refs (see _attr_refs)
 var _sig_en: Array = []                # per element `enabled` attribute value (or null)
 var _last_changed := PackedInt32Array()
+# The state inputs of the last update (index -> bits, index -> override,
+# the global bits, the key bits): an update that changes only some of them
+# visits the subtrees of those elements (see update).
+var _prev_es := {}
+var _prev_dis := {}
+var _prev_global := 0
+var _prev_kb := PackedInt32Array()
+# The subtrees that the updates since the last effective_flags() visited
+# ([lo, hi) pairs), or every element.
+var _flag_all := true
+var _flag_ranges := PackedInt32Array()
 var _own_none := PackedByteArray()
 var _eff_dis := PackedByteArray()
 var _eff_gone := PackedByteArray()
@@ -879,6 +890,28 @@ func patch_rules(si: int, patch: Dictionary) -> void:
 			sels.append(s)
 	if _native != null:
 		return
+	_force_gd(rs, sels)
+
+
+## Mark for recompute the elements that the rules `rs` match now (every
+## element above PATCH_MATCH_LIMIT rules).
+func force_matching(rs: PackedInt32Array) -> void:
+	if rs.is_empty():
+		return
+	if _native != null:
+		_native.call("force_rules", rs, PATCH_MATCH_LIMIT)
+		return
+	var hit := {}
+	for r in rs:
+		hit[r] = true
+	var sels := PackedInt32Array()
+	for s in _sel_rule.size():
+		if hit.has(_sel_rule[s]):
+			sels.append(s)
+	_force_gd(rs, sels)
+
+
+func _force_gd(rs: PackedInt32Array, sels: PackedInt32Array) -> void:
 	var n := els.size()
 	if rs.size() > PATCH_MATCH_LIMIT:
 		for i in n:
@@ -897,6 +930,120 @@ func patch_rules(si: int, patch: Dictionary) -> void:
 			if _match_from(parts, parts.size() - 1, i, _rule_scope_idx[r]):
 				_ov_force.append(i)
 				break
+
+
+## The rule items of a sheet that a structural edit changed, when its imports
+## stay: [old item indices, new item indices] (Dictionaries index -> true), or
+## null. The items before the first and after the last difference are kept;
+## when the number of items changes, the items after the first difference
+## move to another index (a computed origin names its item), so they count
+## as changed too.
+static func rule_diff(old: Array, new: Array):
+	var a: Array = []
+	var b: Array = []
+	var ia: Array = []
+	var ib: Array = []
+	for it in old:
+		a.append(_item_sig(it))
+		if it["kind"] != "rule":
+			ia.append(a[-1])
+	for it in new:
+		b.append(_item_sig(it))
+		if it["kind"] != "rule":
+			ib.append(b[-1])
+	if ia != ib:
+		return null
+	var m := mini(a.size(), b.size())
+	var p := 0
+	while p < m and a[p] == b[p]:
+		p += 1
+	var q := 0
+	if a.size() == b.size():
+		while q < m - p and a[a.size() - 1 - q] == b[b.size() - 1 - q]:
+			q += 1
+	var out := [{}, {}]
+	for k in range(p, a.size() - q):
+		out[0][k] = true
+	for k in range(p, b.size() - q):
+		out[1][k] = true
+	return out
+
+
+static func _item_sig(it: Dictionary) -> Array:
+	var kind: String = it["kind"]
+	if kind == "import":
+		return [kind, it["url"], it.get("resolved_sheet", -1)]
+	if kind != "rule":
+		return [kind, str(it)]
+	var rule: Dictionary = it["rule"]
+	var sels: Array = []
+	for sel in rule["selectors"]:
+		sels.append(sel["parts"])
+	var decls: Array = []
+	for dcl in rule["declarations"]:
+		decls.append([dcl["property"], dcl["value"]])
+	return [kind, sels, decls]
+
+
+## The compiled rules of the sheets in `items` (sheet -> {item: true}).
+func rules_of(items: Dictionary) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for r in _rule_sheet.size():
+		var d = items.get(_rule_sheet[r])
+		if d != null and (d as Dictionary).has(_rule_item[r]):
+			out.append(r)
+	return out
+
+
+## Compile the rules again from the sheets of the document, in place: every
+## per-element state stays, so only the elements that a later force_matching
+## marks are computed (UxmlDocument.reload_stylesheet, "rules"). Elements
+## whose ancestor key changes are marked with their subtrees, and elements
+## with diagnostics (their offsets can move). False when the native cascade
+## cannot keep its theme blocks: the caller builds a new cascade.
+func recompile_rules() -> bool:
+	_rule_scope_idx = PackedInt32Array()
+	_rule_scope_lo = PackedInt32Array()
+	_rule_scope_hi = PackedInt32Array()
+	_rule_sheet = PackedInt32Array()
+	_rule_item = PackedInt32Array()
+	_rule_file = PackedStringArray()
+	_rule_dprop = []
+	_rule_dval = []
+	_rule_dflag = []
+	_rule_dexp = []
+	_sel_rule = PackedInt32Array()
+	_sel_spec = PackedInt64Array()
+	_sel_parts = []
+	_sel_states = []
+	_sel_origins = []
+	_sel_need = PackedInt64Array()
+	_sel_entries = []
+	_b_name = {}
+	_b_class = {}
+	_b_type = {}
+	_b_any = PackedInt32Array()
+	_anc_classes = {}
+	_anc_names = {}
+	_anc_states = 0
+	_anc_state_reqs = []
+	_anc_state_seen = {}
+	_rule_warnings = []
+	_blocks = []
+	_compile_rules()
+	if _native != null:
+		return bool(_native.call("recompile", self))
+	if _computed_once:
+		for i in els.size():
+			var ak := _anc_key_of(i)
+			if ak != _anc_key[i]:
+				_anc_key[i] = ak
+				for j in range(i, _end[i]):
+					_ov_force.append(j)
+			var w = _warn[i]
+			if w != null and not (w as Array).is_empty():
+				_ov_force.append(i)
+	return true
 
 
 ## Move the rule diagnostics of a patched sheet: `moved` maps the old selector
@@ -1074,6 +1221,43 @@ func update(options: Dictionary = {}, force: bool = false, dirty = null, only_fo
 					continue  # inside the previous subtree
 				ranges.append(fi)
 				ranges.append(_end[fi])
+	if not full and not scan_all and not use_ranges and global == _prev_global and key_bits == _prev_kb:
+		# Only the inputs of some elements changed (attributes, states,
+		# disabled overrides, computed overrides): nothing outside their
+		# subtrees can change (USS has no sibling combinators), so only those
+		# subtrees are visited.
+		var touch := PackedInt32Array(dirty)
+		for i2 in es_bits:
+			if int(_prev_es.get(i2, 0)) != int(es_bits[i2]):
+				touch.append(i2)
+		for i2 in _prev_es:
+			if not es_bits.has(i2):
+				touch.append(i2)
+		for i2 in dis_ov:
+			if int(_prev_dis.get(i2, 0)) != int(dis_ov[i2]):
+				touch.append(i2)
+		for i2 in _prev_dis:
+			if not dis_ov.has(i2):
+				touch.append(i2)
+		if has_forced:
+			for fi in range(n):
+				if forced[fi] == 1:
+					touch.append(fi)
+		touch.sort()
+		use_ranges = true
+		for fi in touch:
+			if fi < 0 or fi >= n or (not ranges.is_empty() and fi < ranges[ranges.size() - 1]):
+				continue
+			ranges.append(fi)
+			ranges.append(_end[fi])
+	_prev_es = es_bits
+	_prev_dis = dis_ov
+	_prev_global = global
+	_prev_kb = key_bits
+	if use_ranges:
+		_flag_ranges.append_array(ranges)
+	else:
+		_flag_all = true
 	var nr := ranges.size() / 2
 	var ri := 0
 	var changed := PackedInt32Array()
@@ -1240,14 +1424,34 @@ func effective_flags() -> Array:
 		_own_none[ci] = 1 if disp != null and String(disp["value"]) == "none" else 0
 	_last_changed = PackedInt32Array()
 	var flipped := PackedInt32Array()
-	for i in n:
-		var d := 1 if (_sig_bits[i] & BIT_DISABLED) != 0 else 0
-		var p := _parent[i]
-		var g := 1 if _own_none[i] == 1 or (p >= 0 and _eff_gone[p] == 1) else 0
-		if d != _eff_dis[i] or g != _eff_gone[i]:
-			_eff_dis[i] = d
-			_eff_gone[i] = g
-			flipped.append(i)
+	# Only the visited subtrees can flip: the bits and the display of the
+	# other elements and of their ancestors did not change.
+	var rs := PackedInt32Array([0, n])
+	if not _flag_all:
+		# Ranges of several updates: in preorder (subtrees nest or are apart).
+		var pairs: Array = []
+		for r in _flag_ranges.size() / 2:
+			pairs.append(Vector2i(_flag_ranges[r * 2], _flag_ranges[r * 2 + 1]))
+		pairs.sort()
+		rs = PackedInt32Array()
+		for v in pairs:
+			rs.append(v.x)
+			rs.append(v.y)
+	_flag_all = false
+	_flag_ranges = PackedInt32Array()
+	var done := -1
+	for r in rs.size() / 2:
+		var lo: int = maxi(rs[r * 2], done)
+		var hi: int = rs[r * 2 + 1]
+		for i in range(lo, hi):
+			var d := 1 if (_sig_bits[i] & BIT_DISABLED) != 0 else 0
+			var p := _parent[i]
+			var g := 1 if _own_none[i] == 1 or (p >= 0 and _eff_gone[p] == 1) else 0
+			if d != _eff_dis[i] or g != _eff_gone[i]:
+				_eff_dis[i] = d
+				_eff_gone[i] = g
+				flipped.append(i)
+		done = maxi(done, hi)
 	return [flipped, _eff_dis, _eff_gone]
 
 
