@@ -15,7 +15,7 @@ Unity ground truth: the cases in `bench/parity/cases/` are dumped in Unity
 6000.3.24f1 (`tools/unity-dump`) and compared with every resolved style
 value, geometry through transforms, structure and import diagnostics
 (`bench/parity.gd`, docs/parity.md). The "Unity cases" column names the
-dumps that check a row; 176 of 177 cases match exactly. `bench/pixels.py`
+dumps that check a row; 177 of 178 cases match exactly. `bench/pixels.py`
 also compares what Unity and godot-uxml draw for every case (docs/parity.md,
 "Pixels"); the `px-*` cases cover the paint properties.
 
