@@ -77,19 +77,25 @@ func _init(
 ## Build the control subtree for `el` and register it in `controls`.
 ## Children are created recursively and parented to the control that hosts
 ## them (the element itself).
-func build(el: UxmlElement) -> Control:
+##
+## Top-down: a control joins its parent before its children are built, so
+## that the engine's parent notifications (theme owner) reach one node per
+## add_child, not the whole built subtree at every level.
+func build(el: UxmlElement, parent: Control = null) -> Control:
 	var c := _create(el)
 	if el.part_of != null:
 		_part_input(el, c)
 	controls[el] = c
 	if not natives.has(el):
 		natives[el] = c
+	if parent != null:
+		parent.add_child(c)
 
 	var host: Control = c
 	for child in el.children:
 		if UssControls.is_non_visual(child.local):
 			continue
-		host.add_child(build(child))
+		build(child, host)
 	# A text field's interactive control is the editor of its text element
 	# part (get_native, focus and hover wiring).
 	if NUMERIC_OR_TEXT.has(el.local):

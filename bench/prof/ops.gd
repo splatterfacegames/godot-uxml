@@ -37,6 +37,15 @@ func _initialize() -> void:
 		"inventory-load": await _load("Assets/UI/wl_inventory.uxml", Vector2(1280, 720))
 		"dialog-load": await _load("Assets/UI/wl_dialog.uxml", Vector2(1280, 720))
 		"lv-load": await _load("Assets/UI/wl_listview.uxml", Vector2(1280, 720), true)
+		"big-steps":
+			var steps := {}
+			for i in _n:
+				_profile_load("Assets/UI/big.uxml", steps)
+				await process_frame
+			for k in steps:
+				var a: Array = steps[k]
+				a.sort()
+				print("  step %-40s %8.2f ms" % [k, a[a.size() / 2]])
 		_:
 			await _op(op)
 	print("PROF_DONE %.1f ms" % ((Time.get_ticks_usec() - t0) / 1000.0))
@@ -127,3 +136,107 @@ func _op(op: String) -> void:
 	_mark(false)
 	s.sort()
 	print("median %.3f ms" % s[s.size() / 2])
+
+
+func _profile_load(path: String, steps: Dictionary) -> void:
+	var d := UxmlDocument.new()
+	root.add_child(d)
+	d.size = Vector2(1280, 800)
+	var t := Time.get_ticks_usec()
+	d._clear()
+	var res := d._resolver_for("user://godot_uxml_ucmp", null)
+	d._resolver = res
+	d._doc = UxmlLoader.load_file_with_resolver(path, res)
+	d._last_text = null
+	t = _add(steps, "parse (uxml, uss, imports)", t)
+	d._loader_warnings = d._doc.warnings.size()
+	UxmlTheme.attach(d._doc, d.theme_path, d.editor_theme, d.editor_skin)
+	t = _add(steps, "theme attach", t)
+	var collections := d._prepare_collections()
+	UxmlParts.expand(d._doc)
+	if collections:
+		d._rt_warnings.append_array(UxmlBindings.extract(d._doc))
+	t = _add(steps, "part trees", t)
+	var stack: Array = [d._doc.root]
+	while not stack.is_empty():
+		var el: UxmlElement = stack.pop_back()
+		for child in el.children:
+			d._parents[child] = el
+			stack.append(child)
+	for el in d._doc.root.walk():
+		if el.part_of != null:
+			continue
+		var n = el.get_attribute("name")
+		if n != null and not d._by_name.has(String(n)):
+			d._by_name[String(n)] = el
+			d._el_names[el] = String(n)
+	t = _add(steps, "index (parents, names)", t)
+	var factory := UxmlControlFactory.new(d._resolver, d._doc.path, d._doc.source, d._rt_warnings)
+	factory.element_paths = d._doc.element_paths
+	var built: Array = []
+	for child in d._doc.root.children:
+		if UssControls.is_non_visual(child.local):
+			continue
+		built.append(factory.build(child))
+	d._controls = factory.controls
+	d._natives = factory.natives
+	d._controls[d._doc.root] = d._root_box
+	for el in d._controls:
+		d._el_of[d._controls[el]] = el
+	t = _add(steps, "control creation", t)
+	d._park_hidden()
+	t = _add(steps, "cascade (first resolve)", t)
+	for c in built:
+		if not c.has_meta(&"uxml_parked"):
+			d._root_box.add_child(c)
+	if "_first_pass" in d:
+		d.set("_first_pass", true)
+	t = _add(steps, "add_child (built controls)", t)
+	var on_changed := d._on_model_changed
+	for el in d._doc.root.walk():
+		el.changed = on_changed
+	for el in d._controls:
+		if el == d._doc.root:
+			continue
+		d._wire(el, d._controls[el])
+	t = _add(steps, "signal wiring", t)
+	d._behaviors = UxmlBehaviors.attach_all(d)
+	d._attrs.setup()
+	d._binding.setup()
+	t = _add(steps, "behaviors, attributes, bindings", t)
+	var sc: GDScript = d.get_script()
+	var has_profile := "profile" in sc
+	if has_profile:
+		sc.set("profile", {})
+	d._restyle_now()
+	if has_profile:
+		var p: Dictionary = sc.get("profile")
+		sc.set("profile", null)
+		var rest := (Time.get_ticks_usec() - t) / 1000.0
+		for k in ["apply", "layout"]:
+			if not steps.has("first restyle: " + k):
+				steps["first restyle: " + k] = []
+			steps["first restyle: " + k].append(float(p.get(k, 0.0)))
+			rest -= float(p.get(k, 0.0))
+		if not steps.has("first restyle: cascade update, rest"):
+			steps["first restyle: cascade update, rest"] = []
+		steps["first restyle: cascade update, rest"].append(rest)
+		t = Time.get_ticks_usec()
+	else:
+		t = _add(steps, "first restyle (apply + layout)", t)
+	d._attrs.restore_view_data()
+	d._force_layout = true
+	d._placed_force = d._controls.keys()
+	d._do_layout()
+	d._placed_force = []
+	_add(steps, "(a second full layout)", t)
+	root.remove_child(d)
+	d.free()
+
+
+static func _add(steps: Dictionary, k: String, t0: int) -> int:
+	var t := Time.get_ticks_usec()
+	if not steps.has(k):
+		steps[k] = []
+	(steps[k] as Array).append((t - t0) / 1000.0)
+	return t

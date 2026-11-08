@@ -2077,7 +2077,39 @@ impl<'a> Pass<'a> {
         }
     }
 
+    /// Yoga's single flex child (Unity's layout, measured: lay-shrink-wrap):
+    /// in a container laid out at its size, the one child that grows and
+    /// shrinks, when no flexible sibling follows it, has a flex basis of 0.
+    /// Every child counts (display: none ones too); an absolute child is not
+    /// flexible. Read from the records without diagnostics.
+    fn single_flex(&self, i: usize) -> Option<usize> {
+        let mut single: Option<usize> = None;
+        let num = |ch: usize, pid: usize, dflt: f64| -> f64 {
+            if self.recs[ch].kinds[pid] == K::Num { self.recs[ch].vals[pid] } else { dflt }
+        };
+        let mut ch = i + 1;
+        let e = self.c.subtree_end(i);
+        while ch < e {
+            let next = self.c.subtree_end(ch);
+            if !self.c.non_visual(ch) {
+                let grow = num(ch, P_GROW, 0.0);
+                let shrink = num(ch, P_SHRINK, 1.0);
+                if single.is_some() {
+                    let abs = self.recs[ch].enums[E_POSITION - NP].as_deref().map(str::trim) == Some("absolute");
+                    if !abs && (grow != 0.0 || shrink != 0.0) {
+                        return None;
+                    }
+                } else if grow > 0.0 && shrink > 0.0 {
+                    single = Some(ch);
+                }
+            }
+            ch = next;
+        }
+        single
+    }
+
     fn place(&mut self, i: usize, area: Rect2, kids: &[usize]) -> Vector2 {
+        let single = self.single_flex(i);
         let row = self.is_row(i);
         let wrap_mode = self.enum_(i, E_WRAP, &WRAPS, "nowrap");
         let justify = self.enum_(i, E_JUSTIFY, &JUSTIFY, "flex-start");
@@ -2134,7 +2166,9 @@ impl<'a> Pass<'a> {
             let (bxc, byc) = bnd(&m);
             let nat = self.measure_b(ch, area.size, sh, bxc, byc).0;
             let basis = self.lenr(ch, P_BASIS, am);
-            let hyp = if !basis.is_nan() {
+            let hyp = if single == Some(ch) {
+                0.0
+            } else if !basis.is_nan() {
                 basis
             } else {
                 let explicit = self.dim(ch, size_prop, am);

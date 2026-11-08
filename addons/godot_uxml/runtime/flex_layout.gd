@@ -641,6 +641,28 @@ func _warn_once(el: UxmlElement, prop: String, message: String) -> void:
 
 ## Children that participate in flex layout: visual elements that are not
 ## display:none. UXML/Style are document structure, never boxes.
+## Yoga's single flex child (Unity's layout, measured: lay-shrink-wrap): in
+## a container laid out at its size, the one child that grows and shrinks,
+## when no flexible sibling follows it, has a flex basis of 0. Every child
+## counts (display: none ones too); an absolute child is not flexible. Read
+## from the records without diagnostics (layout.rs single_flex).
+func _single_flex(el: UxmlElement):
+	var single = null
+	for child in el.children:
+		var local: String = child.local
+		if local == "UXML" or local == "Style":
+			continue
+		var rec := _rec(child)
+		var grow: float = rec[2][P_GROW] if rec[1][P_GROW] == K_NUM else 0.0
+		var shrink: float = rec[2][P_SHRINK] if rec[1][P_SHRINK] == K_NUM else 1.0
+		if single != null:
+			if _str(child, "position", "relative").strip_edges() != "absolute" and (grow != 0.0 or shrink != 0.0):
+				return null
+		elif grow > 0.0 and shrink > 0.0:
+			single = child
+	return single
+
+
 func _flex_children(el: UxmlElement) -> Array:
 	var hit = _kids_m.get(el)
 	if hit != null:
@@ -1506,6 +1528,7 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 
 	# Hypothetical main sizes, with min/max already applied. Items are
 	# parallel arrays indexed by kid position.
+	var single = _single_flex(el)
 	var n := kids.size()
 	var it_m: Array = []
 	it_m.resize(n)
@@ -1543,7 +1566,9 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 			-1.0 if bnd_y < 0.0 else maxf(0.0, bnd_y - m[T] - m[B]))
 		var hyp: float
 		var basis := _len(child, P_BASIS, am)
-		if not is_nan(basis):
+		if child == single:
+			hyp = 0.0
+		elif not is_nan(basis):
 			hyp = basis
 		else:
 			var explicit := _dim(child, size_prop, am)

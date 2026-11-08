@@ -1237,7 +1237,10 @@ impl Cascade {
             let old = styles.get(&el_var);
             let old_fc = self.fc_dict[i].clone();
             let old_t = if self.tgt.is_empty() { None } else { self.tgt.get(&i).cloned() };
+            let pc = crate::prof::scope("cu.compute");
             let new_dict = self.compute(i);
+            drop(pc);
+            let _pc2 = crate::prof::scope("cu.store");
             match old {
                 Some(ov) if !full => {
                     let od = ov.to::<VarDictionary>();
@@ -1344,6 +1347,7 @@ impl Cascade {
     fn compute(&mut self, i: usize) -> VarDictionary {
         let p = self.parent[i];
         let mut warns: Vec<Variant> = vec![];
+        let s_match = crate::prof::scope("c.match");
 
         // Candidate selectors from the buckets this element can hit.
         let mut cand: Vec<u32> = vec![];
@@ -1421,6 +1425,8 @@ impl Cascade {
             }
         }
 
+        drop(s_match);
+        let s_inl = crate::prof::scope("c.inline");
         let st = self.sig_style[i].clone();
         if !st.is_nil() {
             let inl = self.inline(&gs(&st));
@@ -1438,6 +1444,8 @@ impl Cascade {
             }
         }
 
+        drop(s_inl);
+        let s_sub = crate::prof::scope("c.subst");
         let ncand = c_d.len();
         // Custom properties: inherited values, then the winning declarations.
         let cpair = if p >= 0 { self.fc_customs[p as usize].clone() } else { self.empty_customs.clone() };
@@ -1553,6 +1561,8 @@ impl Cascade {
             c_pairs[j] = Some(pairs);
         }
 
+        drop(s_sub);
+        let _s_build = crate::prof::scope("c.build");
         let (mut computed, mut comp): (VarDictionary, Vec<Item>) = if p >= 0 {
             (self.fc_dict[p as usize].duplicate_shallow(), (*self.fc[p as usize]).clone())
         } else {
