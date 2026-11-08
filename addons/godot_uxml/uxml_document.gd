@@ -175,6 +175,13 @@ var _local_unsettled: Dictionary = {}
 # point the full re-apply/re-layout reaches — before paint-only restyles
 # are allowed to skip the layout.
 var _reapply: Array = []
+## Control -> [the style Dictionary and the disabled/gone flags of its last
+## apply]: a settling re-apply of an unchanged control updates its theme only.
+var _applied_as: Dictionary = {}
+## Control -> [the style and disabled flag of its last apply that styled it
+## (not gone)].
+var _styled_as: Dictionary = {}
+static var settle_bump := true
 ## Measures of the controls after the last layout that left the document
 ## unsettled ([minimum sizes, natural sizes], in the order of _snap_cs, see
 ## _settle_snapshot), or [] when the next settling layout must run.
@@ -1015,6 +1022,9 @@ func _clear() -> void:
 	_local_unsettled = {}
 	_reapply = []
 	_settle_ms = []
+	_applied_as = {}
+	_styled_as = {}
+	_memo_layout = -1
 	_settle_skip = false
 	_snap_of = null
 	_snap_cs = []
@@ -1313,9 +1323,27 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	# Layout roots that this pass can lay out alone (_local_root): root ->
 	# true, or "fresh" when a measure of its subtree changed.
 	var local := {}
-	_fixed_memo.clear()
-	_def_memo.clear()
+	# _fixed_root and _definite read the layout styles of the roots and their
+	# ancestors, the display flags and whether the last layout laid a root
+	# out: their memos stay across restyles that change none of those (a
+	# scroll changes a translate and paint-only row styles).
+	var po := PackedByteArray()
+	var memo_ok := not _full_apply and not _force_layout and flipped.is_empty() and _inject.is_empty() and _memo_layout == layout_count
+	if not _full_apply:
+		var els0: Array = _cascade.els
+		po.resize(changed.size())
+		for k in changed.size():
+			var el0: UxmlElement = els0[changed[k]]
+			if _paint_only(olds[k], _styles[el0], _controls.get(el0) is UxmlBox):
+				po[k] = 1
+			else:
+				memo_ok = false
+	if not memo_ok:
+		_fixed_memo.clear()
+		_def_memo.clear()
+		_memo_layout = layout_count
 	_local_covered = 0
+	_shown_memo.clear()
 	if not _sub_req.is_empty() or not _local_unsettled.is_empty():
 		if not (need_layout and settle_layout_only.is_empty()):
 			# The requested rows alone can cover a third of the document.
@@ -1323,7 +1351,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			for r in _sub_req:
 				var ri = _cascade.index.get(r)
 				if ri != null:
-					req += _cascade._end[ri] - ri
+					req += _shown_in(ri)
 			if req * 3 > _cascade.els.size():
 				need_layout = true
 				settle_layout_only = []
@@ -1342,6 +1370,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 					break
 		_sub_req = {}
 		_local_unsettled = {}
+	var settle_set := {}  # the settling re-applies of this pass
 	var load_pass := _first_pass
 	_first_pass = false
 	if _full_apply:
@@ -1355,13 +1384,13 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			if _reload_pass and _transition_only(olds[k], _styles[el]):
 				continue
 			seen[el] = true
-			if not _paint_only(olds[k], _styles[el], _controls.get(el) is UxmlBox):
+			if po[k] == 0:
 				measure_fresh = true
 				if need_layout and settle_layout_only.is_empty():
 					continue
 				# R31: a text style change of an element whose border box does
 				# not follow its content lays out its subtree alone.
-				if _paint_only(olds[k], _styles[el], _controls.get(el) is UxmlBox, TEXT_MEASURE) \
+				if _paint_only(olds[k], _styles[el], _controls.get(el) is UxmlBox, OWN_MEASURE) \
 						and _add_local(local, el, el, true):
 					continue
 				if not _add_local(local, el, null, true) and not _add_local_view(local, el, true):
@@ -1393,6 +1422,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			if not seen.has(el) and _controls.has(el):
 				seen[el] = true
 				applied.append(el)
+				settle_set[el] = true
 		for c in _applier.drifting:
 			var del = _el_of.get(c)
 			if del != null:
@@ -1406,14 +1436,53 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	_reload_pass = false
 	var cindex: Dictionary = _cascade.index
 	var pt := Time.get_ticks_usec() if profile != null else 0
+	var bumped := {}
+	var flip_set := {}  # elements whose effective flags flipped (a shown page)
+	for fel in flipped:
+		flip_set[fel] = true
 	for el in applied:
 		var c: Control = _controls[el]
 		var st: Dictionary = _styles.get(el, {})
 		var ci: int = cindex[el]
+		var flags := _dis[ci] * 2 + _gone[ci]
+		if settle_bump and not settle_set.is_empty() and settle_set.has(el):
+			var last = _applied_as.get(c)
+			if last != null and is_same(last[0], st) and last[1] == flags and not c is UxmlField and not _applier.drifting.has(c):
+				# A settling re-apply of a control whose style and flags are
+				# those of its last apply: the apply would write what is there.
+				# What it changes is the theme update of a text control (a
+				# Label shapes its text again): only that runs.
+				if not c is UxmlBox:
+					var nat: Control = _natives.get(el, c)
+					nat.begin_bulk_theme_override()
+					nat.end_bulk_theme_override()
+				bumped[el] = true
+				continue
+		if not flip_set.is_empty() and flags == _dis[ci] * 2 and flip_set.has(el) and not settle_set.has(el) and _shown_again(c, st, _dis[ci]):
+			# Shown again (a page behind a tab) with the style and disabled
+			# state of its last styled apply: only the flags change back.
+			# No theme update here: the settling restyle that follows gives the
+			# text controls theirs, and its snapshot check lays out again when
+			# a measure changed.
+			_applier.apply_flags(el, c, _natives.get(el, c), st, _dis[ci] == 1, false)
+			_applied_as[c] = [st, flags]
+			if c is UxmlToggle:
+				(c as UxmlToggle).disabled = _dis[ci] == 1
+			continue
 		_applier.apply(el, c, _natives.get(el, c), st,
 			_dis[ci] == 1, _gone[ci] == 1)
+		_applied_as[c] = [st, flags]
+		if _gone[ci] == 0:
+			_styled_as[c] = [st, _dis[ci]]
 		if c is UxmlToggle:
 			(c as UxmlToggle).disabled = _dis[ci] == 1 or _gone[ci] == 1
+	if not bumped.is_empty():
+		# Not re-applied: their boxes, fits and caches stay.
+		var kept: Array = []
+		for el in applied:
+			if not bumped.has(el):
+				kept.append(el)
+		applied = kept
 	if profile != null:
 		pt = _profile_add("apply", pt)
 	_full_apply = false
@@ -1435,6 +1504,13 @@ func _restyle_now(only_transitions: bool = false) -> void:
 					text_placed.append(tel)
 	if need_layout and settle_layout_only.is_empty() and not _settle_ms.is_empty():
 		_settle_skip = true
+	var pre_placed := false
+	if need_layout and not settle_layout_only.is_empty() and not applied.is_empty():
+		# The re-applied controls got fresh styleboxes: place them at the
+		# rects of the last layout first (a fitted Button measures as fitted
+		# only after its fit), then compare their measures with the snapshot.
+		_place_elements(applied, cindex)
+		pre_placed = true
 	if need_layout and not settle_layout_only.is_empty() and _settled_without_layout(text_placed):
 		# The pass that left the document unsettled is confirmed: the
 		# controls measure as after its layout, so a layout would give the
@@ -1471,14 +1547,7 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		# Text leaves of a stable size are placed again too (their fit and
 		# elision follow the text).
 		var placed: Array = applied + text_placed if not text_placed.is_empty() else applied
-		if _native_layout():
-			var idx := PackedInt32Array()
-			for el in placed:
-				idx.append(cindex[el])
-			_cascade._native.call("place_only", _applier, idx)
-		else:
-			for el in placed:
-				_place_control(el)
+		_place_elements(text_placed if pre_placed else placed, cindex)
 		# No layout: only the re-applied controls can elide differently.
 		if _applier != null and not _applier.elide.is_empty() and not placed.is_empty():
 			var cs: Array = []
@@ -1507,6 +1576,32 @@ func _restyle_now(only_transitions: bool = false) -> void:
 		set_process(_transitions.active() and not transitions_manual)
 		_transitions.flush_events(_emit_transition_event)
 	_clean_key = [_opt_rev, _cascade, _cascade.touched, _doc]
+
+
+## True when the last apply of `c` was a gone one (display: none here or
+## above) and the apply before it styled it with `st` and `dis`.
+func _shown_again(c: Control, st: Dictionary, dis: int) -> bool:
+	var was = _applied_as.get(c)
+	if was == null or int(was[1]) & 1 == 0:
+		return false
+	var styled = _styled_as.get(c)
+	return (styled != null and is_same(styled[0], st) and styled[1] == dis
+		and not c is UxmlField and not _applier.drifting.has(c))
+
+
+## Place `els` at the rects of the last layout (inset hooks and Button fits
+## included), without a layout.
+func _place_elements(els: Array, cindex: Dictionary) -> void:
+	if els.is_empty():
+		return
+	if _native_layout():
+		var idx := PackedInt32Array()
+		for el in els:
+			idx.append(cindex[el])
+		_cascade._native.call("place_only", _applier, idx)
+	else:
+		for el in els:
+			_place_control(el)
 
 
 ## True when nothing that a restyle reads changed since the last restyle:
@@ -1907,6 +2002,20 @@ const TEXT_MEASURE := {
 }
 
 
+## TEXT_MEASURE and the background image of a themed control (R34: the
+## cancel button of a search field): its stylebox can change the control's
+## minimum size, so on an element whose border box does not follow its
+## content it lays out the element's subtree alone, as a text change does.
+const OWN_MEASURE := {
+	"-unity-font-style": true, "-unity-font": true, "-unity-font-definition": true,
+	"font-size": true, "letter-spacing": true, "word-spacing": true,
+	"-unity-paragraph-spacing": true,
+	"background-image": true,
+	"-unity-slice-left": true, "-unity-slice-right": true,
+	"-unity-slice-top": true, "-unity-slice-bottom": true,
+}
+
+
 ## Paint-only on a UxmlBox: the background image and its slicing. Unity
 ## does not measure a background image either (an Image measures
 ## --unity-image, which the applier reads into natural_size; the settle
@@ -2169,6 +2278,7 @@ func _do_layout() -> void:
 ## restyle (the rows of a view share their ancestors).
 var _fixed_memo: Dictionary = {}
 var _def_memo: Dictionary = {}
+var _memo_layout := -1  # layout_count when the memos above were cleared
 var _local_covered := 0  # elements under the roots of the restyle
 
 
@@ -2222,8 +2332,8 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 		var qi = _cascade.index.get(q)
 		if qi != null and qi > ri and qi < end:
 			inner.append(q)
-			inner_n += _cascade._end[qi] - qi
-	var covered: int = _local_covered - inner_n + end - ri
+			inner_n += _shown_in(qi)
+	var covered: int = _local_covered - inner_n + _shown_in(ri)
 	if covered * 3 > _cascade.els.size():
 		return false
 	var ok = _fixed_memo.get(r)
@@ -2242,6 +2352,29 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 	return true
 
 
+## The elements of the subtree at preorder index `i` that show (not
+## display: none here or above; R33: the hidden rows of a collection's pool
+## do not count toward the third of the document). Memo per restyle.
+func _shown_in(i: int) -> int:
+	var m = _shown_memo.get(i)
+	if m != null:
+		return m
+	var end: int = _cascade._end[i]
+	var n := 0
+	var k := i
+	while k < end:
+		if _gone.size() > k and _gone[k] == 1:
+			k = _cascade._end[k]  # a gone element hides its subtree
+			continue
+		n += 1
+		k += 1
+	_shown_memo[i] = n
+	return n
+
+
+var _shown_memo: Dictionary = {}
+
+
 ## R32: _add_local with the nearest collection view above `x` as the root,
 ## when that view has a fixed size: a new item source or an expand changes
 ## the content height and the rows, and lays out the view alone.
@@ -2249,7 +2382,10 @@ func _add_local_view(local: Dictionary, x: UxmlElement, fresh: bool) -> bool:
 	var v = _parents.get(x)
 	while v != null and not (UxmlContainerParts.is_collection(v.local) and v.part_of == null):
 		v = _parents.get(v)
-	return v != null and _add_local(local, x, v, fresh)
+	# A multi-column view sizes its header columns after the layout of the
+	# document (update_columns): it is not laid out alone (seen once R33 let
+	# a view with a large hidden pool take the subtree layout).
+	return v != null and not UxmlContainerParts.is_multi_column(v) and _add_local(local, x, v, fresh)
 
 
 ## A layout root that the last layout laid out, shown, whose border box

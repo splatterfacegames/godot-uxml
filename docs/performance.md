@@ -2139,6 +2139,11 @@ own run.
 | frame: empty scene | 0.271 | 0.247 (0.241–0.267) | 0.266 (0.257–0.280) | 1.0 | 0.9 | 0.259 | 0.280 |
 | frame: big document, idle | 0.607 | 0.528 (0.495–0.575) | 2.03 (2.02–2.03) | 0.3 | 0.3 | 0.562 | 2.03 |
 
+A third run (`perf/core-draw`, see "Settling, tab switches and the core-drawn
+plan") changed one row beyond the noise: `settings: switch tab` 4.67 ms (Unity
+1.18 ms in that run; native / Unity 3.9). The other rows of that run are within
+the noise of this table.
+
 Samples per value: 75 loads, 300 operations (HUD 900, typewriter and
 scroll 600), 1,500 frames. None of the 20 runs of the second run failed.
 The Unity players are those of the first run (the documents are the same).
@@ -2286,3 +2291,142 @@ resolve are unchanged (0.97 to 1.02). `load_document(Menu.uxml)` is 1.14
 - The validation of the cache reads every control once per layout pass
   (0.7 ms on the big document); an engine signal for a changed minimum size
   is deferred, so it cannot replace the read.
+
+## Settling, tab switches and the core-drawn plan (`perf/core-draw`)
+
+This round set out to replace one themed Godot Control per element with
+elements that the native core draws (see `docs/design.md`, "Core-drawn
+elements: what Slint does, and the plan"). What landed are the settling and
+tab-switch changes, and R33 and R34 of the uxml-editor. For the core-drawn
+path, the text port is measured (pixel-exact against Godot's Label, 108 of
+108 cases) but not integrated; the GDScript steps of a load alone are about
+three times Unity's whole load.
+
+### What changed
+
+- **The settling restyle does not apply unchanged controls again**
+  (`docs/design.md`, "Settling without a second apply"): a control with the
+  style Dictionary and flags of its last apply gets only the theme update.
+- **The settle check places first**: a fitted Button measured 39 px with
+  its fresh box and 32 px in the snapshot, so the settling restyle of a tab
+  switch always ran a full layout (the cause found for request 3 of this
+  round, the "double apply" of `_reapply`).
+- **A page shown again** gets the flags part of `apply()` only.
+- **Layout-root memos** are kept across restyles that change no layout
+  style (a ListView scroll).
+- `UxmlElement.class_list()` splits with `String.split` (it was a loop over
+  characters).
+- **R33**: the "third of the document" check counts only the elements that
+  show (a collection's pool of hidden rows does not count), and a subtree
+  layout reads the controls of its subtrees only (it read every control of
+  the document).
+- **R34**: a `background-image` (or slice) change of a control whose border
+  box cannot follow its content lays out that control alone, as a font
+  change does (R31).
+
+### Results (ms)
+
+Third run of `python tools/unity-bench/run.py` (5 rounds, 60 iterations,
+release builds, arms godot-release and unity-il2cpp): `main` (`5a51b92`)
+first, then the branch, one after the other. Unity's own values moved by up
+to 13% between the two runs (machine load), so a row is a change only well
+outside that.
+
+| Operation | Native core, main | Native core, branch | Unity, IL2CPP (branch run) | Native / Unity |
+| --- | ---: | ---: | ---: | ---: |
+| settings: switch tab | 7.17 | 4.67 (4.41–5.29) | 1.18 | 6.1 → 3.9 |
+| big: load | 653 | 684 (637–770) | 43.6 | 15 |
+| settings: load | 60.1 | 64.6 | 4.32 | 14 → 15 |
+| big: class change (card) | 5.14 | 5.42 | 1.68 | 3.1 → 3.2 |
+| big: label text change + layout | 3.24 | 3.32 | 1.42 | 2.3 |
+| dialog: typewriter character + layout | 0.337 | 0.351 | 0.106 | 3.2 → 3.3 |
+| listview: scroll 3 rows | 2.48 | 2.35 | 0.066 | 33 → 36 |
+| listview: rebind visible items | 2.72 | 2.45 | 0.388 | 7.2 → 6.3 |
+| hud: hover toggle | 0.162 | 0.205 | 0.079 | 2.0 → 2.6 (see below) |
+
+Every other row is within the noise of the two runs. The timed region ends
+at the restyle that the operation forces; the settling restyle of the next
+frame is not in it. That restyle is where most of this round's gains are
+(editor binary, `bench/prof/split.gd`, medians of 60, interleaved):
+
+| Settling restyle of the next frame | main | branch |
+| --- | ---: | ---: |
+| settings: switch tab | 7.9 (with a full layout) | 2.1 (no layout) |
+| listview: scroll 3 rows | 0.48 | 0.12 |
+| hud: hover toggle | 0.077 | 0.045 |
+| big: class change, text change | 3.4, 2.5 | 3.1, 2.4 (a layout: the document has wrapping text, so it keeps no snapshot) |
+
+The HUD hover is 3% slower in its own restyle (0.318 to 0.327 ms, 300
+iterations, interleaved): the flags part of `apply()` is a call of its own,
+and every apply records its style for the settle. With the settling
+restyle the hover costs less per frame (0.395 to 0.372 ms). The 0.205 ms of
+the table is the noisier sequential run.
+
+### Other benchmarks (geomean of the medians, branch / main, A/A in brackets)
+
+Three interleaved rounds against two worktrees of `main` (`5a51b92`).
+
+| Suite | Native |
+| --- | ---: |
+| `bench.gd --quick` (25 ops) | 0.982 (0.990) |
+| `workloads.gd --quick` (17 ops) | 0.993 (1.111) |
+
+| Op | main | branch | branch / main (A/A) |
+| --- | ---: | ---: | ---: |
+| `workloads.gd`: settings switch tab | 9.42 | 5.46 | 0.58 (1.44) |
+| `workloads.gd`: listview scroll 3 rows | 2.79 | 2.61 | 0.94 (1.23) |
+| `bench.gd`: set_class churn (card) | 6.84 | 6.09 | 0.89 (0.98) |
+| `bench.gd`: load_document(big) | 713 | 691 | 0.97 (0.97) |
+
+No op is slower than its A/A noise allows.
+
+### Where a load goes, and what was evaluated
+
+- Engine cost of a Label (`bench/prof/label_cost.gd`, editor binary):
+  `Label.new()` about 20 us, entering the tree 80 to 100 us (a plain Control
+  20 us), a theme override in the tree about 65 us. The big document has
+  517 Labels and 305 Buttons.
+- Steps of a big load (editor binary, `bench/prof/ops.gd --op=big-steps`,
+  median of 8): parse 38, part trees 30, index 8, control creation 78, first
+  cascade 116, `add_child` 118, signal wiring 28, behaviors and bindings
+  51, first apply 208, first layout 72 ms. The GDScript steps that are not
+  Controls (part trees, index, wiring, behaviors) are about 117 ms: three
+  times Unity's whole load.
+- A parse cache by content hash: the native UXML scan is a small part of the
+  parse; most of it is building the `UxmlElement` objects (18 to 28 ms of the
+  UXML parse, `bench/prof/parse_split.gd`), which a cached tree would have to
+  clone. Not built.
+- The cascade's output Dictionaries (about 65 ms of the first cascade): the
+  wrap of each inherited property per container is part of the output
+  (`origin` with `from`), which `bench/equiv.gd` compares with the reference.
+  Not changed.
+
+- Drawn text (`bench/prof/drawn_label.gd`): a port of Godot's Label to
+  TextServer calls draws the same pixels in 108 of 108 cases; 78 us per text
+  in GDScript against 180 to 200 us for a Label, of which shaping about 25 us
+  (`bench/prof/shape_cost.gd`). The 517 Labels of the big document would
+  save about 70 ms of a load drawn natively, before the apply.
+
+### Tried and dropped
+
+- **No settling re-apply at all**: `bench/equiv_runtime.gd` fails 32
+  checks (Label sizes after stylesheet reloads, 24 against 25 px, 42 against
+  48 px). The theme update of the text controls is what the re-apply was
+  for; the change keeps it and drops the rest.
+- **A layout that changed nothing returns at once** (no element changed
+  since the last pass, the same host size): it never triggered on the big
+  document (the fits of the last placement mark their controls), and it can
+  skip a needed fixed-point pass (the widths of the wrapping Labels are not
+  in the changed set).
+
+### What remains
+
+- Loads (14 to 26 times Unity): the core-drawn elements of the plan, and the
+  load steps in GDScript (part trees, wiring, behaviors) moved native.
+- The ListView scroll (33 to 36 times): the scroll still goes through the
+  content's inline translate and the cascade; the plan makes the scroll
+  offset a placement-only value of the content.
+- Class change, text change and typewriter (2 to 3 times): the layout's
+  validation reads every control (0.5 ms on the big document), and the
+  placement moves the cards below a change (a `set_position` each). Both are
+  what core-drawn elements remove.

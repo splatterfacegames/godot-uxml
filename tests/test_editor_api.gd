@@ -2222,6 +2222,52 @@ func test_scroll_lays_out_only_the_rows() -> void:
 
 
 # ---------------------------------------------------------------------------
+# R33: the hidden rows of a pool do not count; R34: a background image of a
+# fixed control lays out the control alone
+# ---------------------------------------------------------------------------
+
+const R33_BODY := '<ui:VisualElement name="pane" class="pane"><ui:TreeView name="tree" class="tree" fixed-item-height="20" /><uie:ToolbarSearchField name="search" class="search" /></ui:VisualElement><ui:Label name="after" text="after" />'
+const R33_USS := '.pane { width: 220px; height: 200px; flex-direction: column; } .tree { height: 100px; } .search { width: 160px; }'
+
+
+func test_new_source_counts_only_shown_rows() -> void:
+	var body := func():
+		var doc := _mk("r33", R33_BODY, R33_USS)
+		var ref := _mk("r33", R33_BODY, R33_USS)
+		await h.process_frame
+		for d in [doc, ref]:
+			d.set_tree_source("tree", _r29_roots(30, 1))
+			_settle(d)
+		var tp = load("res://tests/test_parking.gd")
+		var out: Array = []
+		var l0 := doc.layout_count
+		var s0 := doc.local_layout_count
+		var steps := [
+			func(d): d.set_tree_source("tree", _r29_roots(12, 0)),
+			func(d): d.set_tree_source("tree", _r29_roots(40, 1)),
+			func(d): d.set_field_value("search", "a"),
+			func(d): d.set_field_value("search", "ab"),
+			func(d): d.set_field_value("search", ""),
+		]
+		for k in steps.size():
+			for d in [doc, ref]:
+				(steps[k] as Callable).call(d)
+				d._restyle_now()
+				d._restyle_now()
+			ref.relayout()
+			_settle(ref)
+			_same(tp.snapshot(doc, true), tp.snapshot(ref, true), "step %d: the controls equal a layout of the document" % k)
+			out.append(_named_rects(doc))
+		h.check(doc.local_layout_count > s0, "the new sources lay out the view alone")
+		out.append(doc.layout_count - l0)
+		_unload(doc)
+		_unload(ref)
+		return out
+	var tr := await _both(body, "pool")
+	h.check(int(tr[-1]) == 0, "new sources and the cancel button run no layout of the document (%d layouts)" % int(tr[-1]))
+
+
+# ---------------------------------------------------------------------------
 # R28: a placeholder without a restyle
 # ---------------------------------------------------------------------------
 

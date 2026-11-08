@@ -108,20 +108,10 @@ func class_list() -> Array:
 	var raw = get_attribute("class")
 	if raw == null:
 		return []
-	var out := []
-	var current := ""
 	var text := String(raw)
-	for i in text.length():
-		var c := text.unicode_at(i)
-		if c == 32 or c == 9 or c == 10 or c == 13:
-			if not current.is_empty():
-				out.append(current)
-				current = ""
-		else:
-			current += text.substr(i, 1)
-	if not current.is_empty():
-		out.append(current)
-	return out
+	if text.contains("\t") or text.contains("\n") or text.contains("\r"):
+		text = text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+	return Array(text.split(" ", false))
 
 
 ## Depth-first search for the first element whose `name` attribute matches.
