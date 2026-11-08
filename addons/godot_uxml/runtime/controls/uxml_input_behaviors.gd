@@ -1022,11 +1022,19 @@ class TextBehavior extends InputBehavior:
 		if input != null:
 			UxmlParts.toggle_control_class(input, "unity-base-text-field__input--placeholder", show)
 		if _ed != null:
-			_ed.set("placeholder_text", "" if hide_now else ph)
-			_ph_shown = ""
 			if not _ph_listed and not ph.is_empty() and _ed is LineEdit:
 				_ph_listed = true
 				doc._placeholder_fields.append(self)
+			if _ph_listed and not hide_now and not ph.is_empty() and doc._applier != null \
+					and not _ph_position().is_empty():
+				# R30: the elided text is written once (each write of the
+				# LineEdit's placeholder shapes it).
+				_ph_shown = ""
+				_ph_memo = []
+				elide_placeholder(true)
+				return
+			_ed.set("placeholder_text", "" if hide_now else ph)
+			_ph_shown = ""
 			if _ph_listed:
 				elide_placeholder()
 
@@ -1040,13 +1048,16 @@ class TextBehavior extends InputBehavior:
 	## `-unity-text-overflow-position` of that element, and the whole text is
 	## the tooltip while it shows (TextElement.ElideText of a Label). Runs after
 	## every placement and placeholder change (UxmlDocument._update_elision).
-	func elide_placeholder() -> void:
+	##
+	## `fresh`: the placeholder changed and the LineEdit still shows the old
+	## one (_placeholder writes the elided text only).
+	func elide_placeholder(fresh := false) -> void:
 		var le := _ed as LineEdit
 		if le == null or doc._applier == null:
 			return
 		var ph := attr("placeholder-text")
 		var pos := _ph_position()
-		if pos.is_empty() or le.placeholder_text.is_empty():
+		if pos.is_empty() or (le.placeholder_text.is_empty() and not fresh):
 			if not _ph_shown.is_empty():
 				_ph_shown = ""
 				_ph_memo = []

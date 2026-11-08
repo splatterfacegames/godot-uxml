@@ -2013,6 +2013,7 @@ pub struct UxmlNativeCascade {
     layout_in: Option<crate::layout::LayoutIn>,
     recs: crate::layout::RecCache,
     placement: crate::layout::Placement,
+    xcache: crate::layout::XCache,
 }
 
 #[godot_api]
@@ -2039,6 +2040,7 @@ impl UxmlNativeCascade {
         dirty: PackedInt32Array,
         only_forced: bool,
     ) -> PackedInt32Array {
+        let _p = crate::prof::scope("cascade.update");
         match self.inner.as_mut() {
             Some(c) => c.update(&options, force, &key_bits, &mut styles, scan_all, &dirty, only_forced),
             None => PackedInt32Array::new(),
@@ -2047,7 +2049,8 @@ impl UxmlNativeCascade {
 
     /// The runtime controls per preorder index (null for non-visual), and
     /// whether each is a UxmlBox (measured by natural_size). Once per load.
-    /// `kinds`: bit 1 UxmlBox (natural_size measure), bit 2 UxmlField;
+    /// `kinds`: bit 1 UxmlBox (natural_size measure), bit 2 UxmlField,
+    /// bit 4 an element of a pooled row (LayoutIn::ext);
     /// `natives`: the interactive inner control per index (or null).
     #[func]
     fn set_controls(&mut self, controls: VarArray, kinds: PackedByteArray, natives: VarArray) {
@@ -2082,8 +2085,11 @@ impl UxmlNativeCascade {
             unfit: std::cell::RefCell::new(vec![None; ks.len()]),
             margins: std::cell::RefCell::new(vec![None; ks.len()]),
             cliptext: std::cell::RefCell::new(vec![None; ks.len()]),
+            touched: std::cell::RefCell::new(vec![false; ks.len()]),
+            ext: ks.iter().map(|&b| b & 4 != 0).collect(),
         });
         self.placement = crate::layout::Placement::default();
+        self.xcache.clear();
     }
 
     /// The style applier while best-fit text is active, else null (see
@@ -2093,6 +2099,13 @@ impl UxmlNativeCascade {
         if let Some(io) = self.layout_in.as_mut() {
             io.auto_size = applier.try_to::<Gd<godot::classes::Object>>().ok();
         }
+    }
+
+    /// UxmlBox.natural_epoch: the natural sizes changed since the last
+    /// placing pass when it moved (XCache::validate).
+    #[func]
+    fn set_natural_epoch(&mut self, e: i64) {
+        self.xcache.nat_epoch = e;
     }
 
     /// Round the layout output to the pixel grid (LayoutIn::pixel_grid).
@@ -2129,7 +2142,11 @@ impl UxmlNativeCascade {
         let (Some(c), Some(io)) = (self.inner.as_ref(), self.layout_in.as_ref()) else {
             return VarArray::new();
         };
+        let _p = crate::prof::scope("layout_place");
+        let p0 = crate::prof::scope("lp.refresh");
         self.recs.refresh(c);
+        let rec_changed = self.recs.take_changed();
+        drop(p0);
         // Re-applied controls may have a new font, size or stylebox: their
         // max-content widths are measured again.
         {
@@ -2153,15 +2170,6 @@ impl UxmlNativeCascade {
                 }
             }
         }
-        io.maxc_on.set(true);
-        let out = crate::layout::Pass::new(c, io, &self.recs.recs, scroll_bar_width, warned, warnings).run(host);
-        io.maxc_on.set(false);
-        let changed = match &self.placement.last {
-            Some(prev) => prev.rects != out.rects,
-            None => true,
-        };
-        self.placement.last = Some(out);
-        let applier = applier.try_to::<Gd<Object>>().ok();
         let n = c.len();
         let mut forced = vec![force_all; n];
         for &k in force.as_slice() {
@@ -2169,8 +2177,28 @@ impl UxmlNativeCascade {
                 forced[k as usize] = true;
             }
         }
+        let _ = scroll_bar_width;
+        io.maxc_on.set(true);
+        let (chg, sub) = self.xcache.validate(c, io, &forced, &rec_changed);
+        let carry = self.xcache.carry.take().unwrap_or_default();
+        let p1 = crate::prof::scope("lp.pass_new");
+        let cached = crate::layout::Cached { chg: chg.clone(), sub, prev: self.placement.last.as_ref(), carry };
+        let pass = crate::layout::Pass::new_cached(c, io, &self.recs.recs, warned, warnings, cached);
+        drop(p1);
+        let p1 = crate::prof::scope("lp.run");
+        let (out, carry) = pass.run_cached(host);
+        drop(p1);
+        self.xcache.carry = Some(carry);
+        io.maxc_on.set(false);
+        let changed = match &self.placement.last {
+            Some(prev) => prev.rects != out.rects,
+            None => true,
+        };
+        self.placement.last = Some(out);
+        let applier = applier.try_to::<Gd<Object>>().ok();
+        let _p2 = crate::prof::scope("lp.place");
         for i in 0..n {
-            self.placement.place(io, i, &applier, forced[i]);
+            self.placement.place_clean(io, i, &applier, forced[i], !chg[i]);
         }
         args(&[changed.to_variant()])
     }
@@ -2237,6 +2265,18 @@ impl UxmlNativeCascade {
             subs.push((r, rect, prev.cbs.get(r).copied().unwrap_or(0.0), al, at));
         }
         io.maxc_on.set(true);
+        let _p = crate::prof::scope("layout_subtrees");
+        let roots_u: Vec<usize> = subs.iter().map(|s| s.0).collect();
+        self.xcache.drop_layouts(c, &roots_u);
+        {
+            // Re-applied here: the next placing pass sees them as changed.
+            let mut t = io.touched.borrow_mut();
+            for k in 0..n.min(t.len()) {
+                if forced[k] {
+                    t[k] = true;
+                }
+            }
+        }
         let out = crate::layout::Pass::new(c, io, &self.recs.recs, 0.0, warned, warnings).run_subtrees(&subs);
         io.maxc_on.set(false);
         let mut result = VarArray::new();
@@ -2273,10 +2313,14 @@ impl UxmlNativeCascade {
     /// styleboxes but no layout ran.
     #[func]
     fn place_only(&mut self, applier: Variant, indices: PackedInt32Array) {
+        let _p = crate::prof::scope("place_only");
         let Some(io) = self.layout_in.as_ref() else { return };
         let applier = applier.try_to::<Gd<Object>>().ok();
         for &k in indices.as_slice() {
             if k >= 0 {
+                if let Some(t) = io.touched.borrow_mut().get_mut(k as usize) {
+                    *t = true;
+                }
                 // Re-applied: apply() may have set or removed `uxml_clip_text`.
                 if let Some(e) = io.cliptext.borrow_mut().get_mut(k as usize) {
                     *e = None;
@@ -2284,6 +2328,35 @@ impl UxmlNativeCascade {
                 self.placement.place(io, k as usize, &applier, true);
             }
         }
+    }
+
+    /// Per element: 1 when the last layout_place placed some element of its
+    /// subtree (a rect, insets or control that changed), 0 when it skipped
+    /// the whole subtree as clean. Empty before a layout_place. The layout
+    /// hooks of the behaviors run for the subtrees that changed
+    /// (UxmlDocument._run_layout_hooks).
+    #[func]
+    fn placed_subtrees(&self) -> PackedByteArray {
+        let mut out = PackedByteArray::new();
+        let (Some(c), r) = (self.inner.as_ref(), &self.placement.replaced) else { return out };
+        let n = c.len();
+        if r.len() != n {
+            return out;
+        }
+        out.resize(n);
+        let s = out.as_mut_slice();
+        for i in (0..n).rev() {
+            if r[i] {
+                s[i] = 1;
+            }
+            if s[i] == 1 && i > 0 {
+                let p = c.parent_of(i);
+                if p >= 0 {
+                    s[p as usize] = 1;
+                }
+            }
+        }
+        out
     }
 
     /// The content-box insets [start, end] (border + padding) of preorder
@@ -2385,6 +2458,7 @@ impl UxmlNativeCascade {
     /// [flipped indices, disabled flags, gone flags] — see Cascade::effective_flags.
     #[func]
     fn effective_flags(&mut self) -> VarArray {
+        let _p = crate::prof::scope("effective_flags");
         match self.inner.as_mut() {
             Some(c) => {
                 let (f, d, g) = c.effective_flags();

@@ -760,6 +760,11 @@ func _queue_cancel(i: int, prop: String, an: Dictionary) -> void:
 	_ev_queue[key] = q
 
 
+## Events wait for flush_events.
+func has_events() -> bool:
+	return not _ev_queue.is_empty()
+
+
 ## Hand the queued events to `emit(kind: Event, index, property, elapsed_s)`
 ## in queue order and clear the frame state.
 func flush_events(emit: Callable) -> void:
