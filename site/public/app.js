@@ -18,3 +18,12 @@ loadButton?.addEventListener("click", () => {
   demoStage.append(frame);
   frame.focus();
 });
+
+// The reel plays only when motion is welcome; else it shows its poster
+// and the controls.
+const reel = document.querySelector(".reel-video");
+if (reel && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  reel.removeAttribute("autoplay");
+  reel.pause();
+  reel.controls = true;
+}

@@ -190,6 +190,10 @@ Run the example:
 godot --path . --script res://examples/minimal/minimal.gd
 ```
 
+`examples/reel` is the announcement video on the site: a fixed timeline
+recorded with Godot's Movie Maker at 60 fps, 1920x1080
+(`GODOT=<godot> tools/record_reel.sh <out dir>`).
+
 ### Editor APIs
 
 Tools such as a UXML editor use these calls. The calls take a
