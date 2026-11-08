@@ -227,6 +227,9 @@ var _native_bound: UssCascade = null  # cascade whose native layout has the cont
 ## the scene tree until they are shown (see _park_hidden). False keeps
 ## every control in the tree from the load on.
 static var park_hidden := true
+## A switch for experiments: bench/prof/ab.gd and bench/prof/ab_equiv.gd
+## load with it off and on (no code reads it on main).
+static var ab_flag := true
 var _transitions: UssTransitions = null  # running USS transitions (per load)
 
 ## Round the layout to the pixel grid as Unity does (Yoga's
@@ -1056,6 +1059,7 @@ func _clear() -> void:
 ## Parent map, name index (first wins, duplicates diagnosed), runtime
 ## control tree, and signal wiring — everything keyed off the element tree.
 func _index() -> void:
+	var pt := Time.get_ticks_usec() if profile != null else 0
 	var collections := _prepare_collections()
 	# Control part trees (Toggle label/input/checkmark, Foldout content, ...)
 	# become real model elements before anything indexes the tree.
@@ -1068,6 +1072,8 @@ func _index() -> void:
 					for sub in row.walk():
 						if sub.part_of == null:
 							_pooled[sub] = true
+	if profile != null:
+		pt = _profile_add("load: part trees", pt)
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
@@ -1090,6 +1096,8 @@ func _index() -> void:
 			continue
 		_by_name[ns] = el
 		_el_names[el] = ns
+	if profile != null:
+		pt = _profile_add("load: index", pt)
 
 	var factory := UxmlControlFactory.new(_resolver, _doc.path, _doc.source, _rt_warnings)
 	factory.element_paths = _doc.element_paths
@@ -1103,11 +1111,17 @@ func _index() -> void:
 	_controls[_doc.root] = _root_box
 	for el in _controls:
 		_el_of[_controls[el]] = el
+	if profile != null:
+		pt = _profile_add("load: control creation", pt)
 	# The controls were built off the tree; hidden subtrees stay off it.
 	_park_hidden()
+	if profile != null:
+		pt = _profile_add("load: first cascade", pt)
 	for c in built:
 		if not c.has_meta(&"uxml_parked"):
 			_root_box.add_child(c)
+	if profile != null:
+		pt = _profile_add("load: add_child", pt)
 	_first_pass = true
 	# Observable model: set_attribute() on any element restyles just it.
 	var on_changed := _on_model_changed
@@ -1117,9 +1131,17 @@ func _index() -> void:
 		if el == _doc.root:
 			continue
 		_wire(el, _controls[el])
+	if profile != null:
+		pt = _profile_add("load: signal wiring", pt)
 	_behaviors = UxmlBehaviors.attach_all(self)
+	if profile != null:
+		pt = _profile_add("load: behaviors", pt)
 	_attrs.setup()
+	if profile != null:
+		pt = _profile_add("load: attributes", pt)
 	_binding.setup()
+	if profile != null:
+		pt = _profile_add("load: bindings", pt)
 
 
 # ---------------------------------------------------------------------------

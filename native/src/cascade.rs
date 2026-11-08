@@ -128,7 +128,7 @@ struct Decl {
     val: GString,
     flags: i32,
     /// Static shorthand expansion (None when the value contains var()).
-    exp: Option<Rc<Vec<(u32, Variant)>>>,
+    exp: Option<Rc<Vec<Pair>>>,
 }
 
 #[derive(Clone)]
@@ -188,11 +188,21 @@ struct Inline {
 #[derive(Clone)]
 struct Item {
     pid: u32,
-    value: Variant,
+    /// Shared (Rc): the wrap of an inherited item keeps the value without an
+    /// engine copy of the Variant.
+    value: Rc<Variant>,
     origin: Variant,
-    #[allow(dead_code)]
-    entry: Variant,
 }
+
+/// An expanded longhand: (property id, value, KW_INITIAL / KW_UNSET / 0).
+/// The keyword is found once, where the pair is made: a Variant comparison
+/// is an engine call.
+type Pair = (u32, Variant, u8);
+const KW_INITIAL: u8 = 1;
+const KW_UNSET: u8 = 2;
+/// A percentage (ends with `%`): a font-size of the element is then computed
+/// from the inherited size.
+const KW_PCT: u8 = 4;
 
 struct Customs {
     id: i64,
@@ -242,7 +252,13 @@ pub struct Cascade {
     cb_subst: Callable,
     cb_expand: Callable,
     cb_inline: Callable,
-    exp_cache: HashMap<(u32, String), Rc<Vec<(u32, Variant)>>>,
+    exp_cache: HashMap<(u32, String), Rc<Vec<Pair>>>,
+    /// {value, origin} entries of substituted (var()) declarations of rules,
+    /// by (expansion, longhand, origins of the selector, declaration): one
+    /// entry per value and origin, shared by the elements, as the entries of
+    /// static declarations are (entries_for). The key's Rcs are kept in the
+    /// value, so their addresses stay theirs.
+    var_ent: HashMap<(usize, usize, usize, usize), (Rc<Vec<Pair>>, Rc<Vec<Variant>>, Variant)>,
     inline_cache: HashMap<String, Rc<Inline>>,
     subst_memo: HashMap<(i64, String), Option<GString>>,
     // compiled rules
@@ -281,13 +297,12 @@ pub struct Cascade {
     own_none: Vec<u8>,
     eff_dis: Vec<u8>,
     eff_gone: Vec<u8>,
-    display_key: Variant,
     none_val: Variant,
     sig_valid: Vec<bool>,
     anc_key: Vec<AncKey>,
     bloom: Vec<u64>,
     own_bloom: Vec<u64>,
-    fc: Vec<Rc<Vec<Item>>>,
+    fc: Vec<Rc<Vec<Rc<Item>>>>,
     fc_dict: Vec<VarDictionary>,
     fc_customs: Vec<Rc<Customs>>,
     warn: Vec<Vec<Variant>>,
@@ -322,7 +337,7 @@ pub struct Cascade {
     v_initial: Variant,
     v_unset: Variant,
     sn_attributes: StringName,
-    empty_fc: Rc<Vec<Item>>,
+    empty_fc: Rc<Vec<Rc<Item>>>,
     empty_customs: Rc<Customs>,
     pub last_old: VarArray,
 }
@@ -407,7 +422,7 @@ impl Cascade {
         a.as_slice().iter().map(|x| self.intern(&x.to_string())).collect()
     }
 
-    fn expand(&mut self, pid: u32, raw: &GString) -> Rc<Vec<(u32, Variant)>> {
+    fn expand(&mut self, pid: u32, raw: &GString) -> Rc<Vec<Pair>> {
         let key = (pid, raw.to_string());
         if let Some(e) = self.exp_cache.get(&key) {
             return e.clone();
@@ -420,7 +435,9 @@ impl Cascade {
             let pa = pair.to::<VarArray>();
             let lh = gs(&pa.at(0));
             let lid = self.pid(&lh);
-            out.push((lid, pa.at(1)));
+            let v = pa.at(1);
+            let kw = self.kw(&v);
+            out.push((lid, v, kw));
         }
         let rc = Rc::new(out);
         if self.exp_cache.len() > 16384 {
@@ -428,6 +445,18 @@ impl Cascade {
         }
         self.exp_cache.insert(key, rc.clone());
         rc
+    }
+
+    fn kw(&self, v: &Variant) -> u8 {
+        if *v == self.v_initial {
+            KW_INITIAL
+        } else if *v == self.v_unset {
+            KW_UNSET
+        } else if gs(v).to_string().trim_end().ends_with('%') {
+            KW_PCT
+        } else {
+            0
+        }
     }
 
     fn make_decl(&mut self, prop: GString, val: GString, flags: i32, static_exp: &Variant) -> Decl {
@@ -441,7 +470,9 @@ impl Cascade {
                 let pa = pair.to::<VarArray>();
                 let lh = gs(&pa.at(0));
                 let lid = self.pid(&lh);
-                out.push((lid, pa.at(1)));
+                let v = pa.at(1);
+                let kw = self.kw(&v);
+                out.push((lid, v, kw));
             }
             Some(Rc::new(out))
         };
@@ -529,7 +560,7 @@ impl Cascade {
                 None => out.push(None),
                 Some(pairs) => {
                     let mut lst = Vec::with_capacity(pairs.len());
-                    for (_, v) in pairs.iter() {
+                    for (_, v, _) in pairs.iter() {
                         let mut e = VarDictionary::new();
                         e.set(&self.k_value, v);
                         e.set(&self.k_origin, &origins[d]);
@@ -580,6 +611,7 @@ impl Cascade {
             cb_expand: cb.get("expand")?.try_to().ok()?,
             cb_inline: cb.get("inline")?.try_to().ok()?,
             exp_cache: HashMap::new(),
+            var_ent: HashMap::new(),
             inline_cache: HashMap::new(),
             subst_memo: HashMap::new(),
             rules: vec![],
@@ -610,7 +642,6 @@ impl Cascade {
             own_none: vec![],
             eff_dis: vec![],
             eff_gone: vec![],
-            display_key: "display".to_variant(),
             none_val: "none".to_variant(),
             sig_valid: vec![],
             anc_key: vec![],
@@ -1487,14 +1518,14 @@ impl Cascade {
         }
         let mut best: Vec<Best> = vec![];
         let mut best_ix: HashMap<u32, usize> = HashMap::new();
-        let mut c_pairs: Vec<Option<Rc<Vec<(u32, Variant)>>>> = vec![None; ncand];
+        let mut c_pairs: Vec<Option<Rc<Vec<Pair>>>> = vec![None; ncand];
         let mut c_shared = vec![false; ncand];
         for j in 0..ncand {
             let decl = &c_decls[j][c_d[j]];
             let flags = decl.flags;
             let pid = decl.pid;
             let mut failed = false;
-            let pairs: Rc<Vec<(u32, Variant)>>;
+            let pairs: Rc<Vec<Pair>>;
             if flags & F_VAR != 0 {
                 let val = decl.val.clone();
                 let sub: Option<GString> = if flags & F_CUSTOM != 0 {
@@ -1541,7 +1572,7 @@ impl Cascade {
                 c_shared[j] = true;
             }
             let sp = if flags & F_ALL != 0 { ALL_SPEC } else { c_spec[j] };
-            for (pk, (lh, _)) in pairs.iter().enumerate() {
+            for (pk, (lh, _, _)) in pairs.iter().enumerate() {
                 match best_ix.get(lh) {
                     None => {
                         best_ix.insert(*lh, best.len());
@@ -1563,7 +1594,9 @@ impl Cascade {
 
         drop(s_sub);
         let _s_build = crate::prof::scope("c.build");
-        let (mut computed, mut comp): (VarDictionary, Vec<Item>) = if p >= 0 {
+        let fpid = self.props.index.get("font-size").copied();
+        let mut own_pct = false;
+        let (mut computed, mut comp): (VarDictionary, Vec<Rc<Item>>) = if p >= 0 {
             (self.fc_dict[p as usize].duplicate_shallow(), (*self.fc[p as usize]).clone())
         } else {
             (VarDictionary::new(), vec![])
@@ -1575,7 +1608,12 @@ impl Cascade {
                 warns.push(self.diag(i, "unresolved-var", m));
                 continue;
             }
-            let val = &c_pairs[b.j].as_ref().unwrap()[b.pk].1;
+            let pair = &c_pairs[b.j].as_ref().unwrap()[b.pk];
+            let val = &pair.1;
+            let kw = pair.2;
+            if Some(b.pid) == fpid {
+                own_pct = kw & KW_PCT != 0;
+            }
             let origin = match &c_org[b.j] {
                 Some(o) => &o[c_d[b.j]],
                 None => &self.inline_origins[c_d[b.j]],
@@ -1586,10 +1624,25 @@ impl Cascade {
             let entry = match shared {
                 Some(e) => e,
                 None => {
-                    let mut e = VarDictionary::new();
-                    e.set(&self.k_value, val);
-                    e.set(&self.k_origin, origin);
-                    e.to_variant()
+                    let key = c_org[b.j].as_ref().map(|o| {
+                        (Rc::as_ptr(c_pairs[b.j].as_ref().unwrap()) as usize, b.pk, Rc::as_ptr(o) as usize, c_d[b.j])
+                    });
+                    match key.and_then(|k| self.var_ent.get(&k).map(|e| e.2.clone())) {
+                        Some(e) => e,
+                        None => {
+                            let mut e = VarDictionary::new();
+                            e.set(&self.k_value, val);
+                            e.set(&self.k_origin, origin);
+                            let ev = e.to_variant();
+                            if let (Some(k), Some(o)) = (key, c_org[b.j].as_ref()) {
+                                if self.var_ent.len() > 65536 {
+                                    self.var_ent.clear();
+                                }
+                                self.var_ent.insert(k, (c_pairs[b.j].clone().unwrap(), o.clone(), ev.clone()));
+                            }
+                            ev
+                        }
+                    }
                 }
             };
             if !self.props.supported[pidx] {
@@ -1601,14 +1654,14 @@ impl Cascade {
             }
             // `initial` (also what `all: initial` expands to): the property
             // is dropped, inherited value included (uss_cascade.gd _compute).
-            if *val == self.v_initial {
+            if kw == KW_INITIAL {
                 computed.remove(&self.props.keys[pidx]);
                 comp.retain(|it| it.pid != b.pid);
                 continue;
             }
             // `unset`: an inherited property keeps the inherited value, any
             // other one takes its initial value.
-            if *val == self.v_unset {
+            if kw == KW_UNSET {
                 if !self.props.inherited[pidx] {
                     computed.remove(&self.props.keys[pidx]);
                     comp.retain(|it| it.pid != b.pid);
@@ -1616,7 +1669,7 @@ impl Cascade {
                 continue;
             }
             computed.set(&self.props.keys[pidx], &entry);
-            let item = Item { pid: b.pid, value: val.clone(), origin: origin.clone(), entry };
+            let item = Rc::new(Item { pid: b.pid, value: Rc::new(val.clone()), origin: origin.clone() });
             match comp.iter_mut().find(|it| it.pid == b.pid) {
                 Some(it) => *it = item,
                 None => comp.push(item),
@@ -1625,7 +1678,9 @@ impl Cascade {
 
         // font-size: a percentage of the inherited size, computed here as
         // Unity computes it (uss_cascade.gd _font_percent).
-        if let Some(fpid) = self.props.index.get("font-size").copied() {
+        // Only the element's own winner can be a percentage (the inherited
+        // size is computed): the check reads no Dictionary otherwise.
+        if let (Some(fpid), true) = (fpid, own_pct) {
             let fkey = self.props.keys[fpid as usize].clone();
             if let Some(e) = computed.get(&fkey) {
                 let ed = e.try_to::<VarDictionary>().unwrap_or_default();
@@ -1643,7 +1698,7 @@ impl Cascade {
                         ne.set(&self.k_origin, &origin);
                         let nev = ne.to_variant();
                         computed.set(&fkey, &nev);
-                        let item = Item { pid: fpid, value: val, origin, entry: nev };
+                        let item = Rc::new(Item { pid: fpid, value: Rc::new(val), origin });
                         match comp.iter_mut().find(|it| it.pid == fpid) {
                             Some(it) => *it = item,
                             None => comp.push(item),
@@ -1664,12 +1719,11 @@ impl Cascade {
                     computed.set(&k, &e);
                     let pid = self.pid(&gs(&k));
                     let ed = e.try_to::<VarDictionary>().unwrap_or_default();
-                    let item = Item {
+                    let item = Rc::new(Item {
                         pid,
-                        value: ed.get(&self.k_value).unwrap_or_default(),
+                        value: Rc::new(ed.get(&self.k_value).unwrap_or_default()),
                         origin: ed.get(&self.k_origin).unwrap_or_default(),
-                        entry: e.clone(),
-                    };
+                    });
                     match comp.iter_mut().find(|it| it.pid == pid) {
                         Some(it) => *it = item,
                         None => comp.push(item),
@@ -1694,10 +1748,10 @@ impl Cascade {
             self.lay_ver[i] += 1;
         }
         // display:none on the element itself (for effective_flags).
-        self.own_none[i] = match computed.get(&self.display_key) {
-            Some(e) => {
-                let v = e.try_to::<VarDictionary>().ok().and_then(|d| d.get(&self.k_value)).unwrap_or_default();
-                if v == self.none_val { 1 } else { 0 }
+        let dpid = self.props.index.get("display").copied();
+        self.own_none[i] = match comp.iter().find(|it| Some(it.pid) == dpid) {
+            Some(it) => {
+                if *it.value == self.none_val { 1 } else { 0 }
             }
             None => 0,
         };
@@ -1708,7 +1762,7 @@ impl Cascade {
             return computed;
         }
         let node = self.els[i].var.clone();
-        let mut fc_list: Vec<Item> = Vec::with_capacity(comp.len());
+        let mut fc_list: Vec<Rc<Item>> = Vec::with_capacity(comp.len());
         let mut fc_dict = VarDictionary::new();
         for it in &comp {
             if !self.props.inherited[it.pid as usize] {
@@ -1720,11 +1774,11 @@ impl Cascade {
             wrap.set(&self.k_origin, &it.origin);
             let wrap_v = wrap.to_variant();
             let mut e = VarDictionary::new();
-            e.set(&self.k_value, &it.value);
+            e.set(&self.k_value, &*it.value);
             e.set(&self.k_origin, &wrap_v);
             let ev = e.to_variant();
             fc_dict.set(&self.props.keys[it.pid as usize], &ev);
-            fc_list.push(Item { pid: it.pid, value: it.value.clone(), origin: wrap_v, entry: ev });
+            fc_list.push(Rc::new(Item { pid: it.pid, value: it.value.clone(), origin: wrap_v }));
         }
         if !any_custom {
             self.fc_customs[i] = cpair;
@@ -1732,7 +1786,7 @@ impl Cascade {
             let mut fcc = VarDictionary::new();
             for it in &fc_list {
                 if self.props.custom[it.pid as usize] {
-                    fcc.set(&self.props.keys[it.pid as usize], &it.value);
+                    fcc.set(&self.props.keys[it.pid as usize], &*it.value);
                 }
             }
             self.fc_customs[i] = Rc::new(Customs { id: self.next_cid, dict: fcc });
