@@ -164,6 +164,32 @@ func apply(
 		_capture_base_font(native)
 	if control is UxmlField:
 		_capture_base_font(control.caption_node())
+	if not apply_flags(el, control, native, style, disabled, gone_ancestor):
+		return
+
+	if control is UxmlField:
+		# The wrapper owns the element's background; the inner native gets
+		# text styling only, so a Slider/TextField background paints the
+		# whole field box instead of doubling up inside it.
+		_apply_box(control, el, style)
+		_apply_caption(control, style, el)
+		_apply_themed(native, style, el, false)
+	elif control is UxmlBox:
+		_apply_box(control, el, style)
+		if native is TextureRect and el.local == "Image":
+			_apply_image(control, native, style, el)
+	else:
+		_apply_themed(native, style, el, true)
+	_apply_visual(el, control, native, style)
+
+
+## The part of apply() that follows the display, visibility and disabled
+## flags: visible, mouse filters, focus modes and the disabled state. False
+## when the element is gone (display: none here or above): apply() styles
+## nothing more. UxmlDocument calls it alone for a subtree shown again with
+## the style of its last apply.
+func apply_flags(el: UxmlElement, control: Control, native: Control, style: Dictionary,
+		disabled: bool, gone_ancestor: bool = false) -> bool:
 	var display := _str(style, "display")
 	var visibility := _str(style, "visibility")
 	var gone := display == "none" or gone_ancestor
@@ -183,7 +209,7 @@ func apply(
 			native.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			native.focus_mode = Control.FOCUS_NONE
 		_set_disabled(native, true)
-		return
+		return false
 
 	if hidden:
 		control.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -204,21 +230,7 @@ func apply(
 			native.focus_mode = Control.FOCUS_NONE
 	elif not hidden:
 		native.focus_mode = int(native.get_meta("uxml_focus", native.focus_mode))
-
-	if control is UxmlField:
-		# The wrapper owns the element's background; the inner native gets
-		# text styling only, so a Slider/TextField background paints the
-		# whole field box instead of doubling up inside it.
-		_apply_box(control, el, style)
-		_apply_caption(control, style, el)
-		_apply_themed(native, style, el, false)
-	elif control is UxmlBox:
-		_apply_box(control, el, style)
-		if native is TextureRect and el.local == "Image":
-			_apply_image(control, native, style, el)
-	else:
-		_apply_themed(native, style, el, true)
-	_apply_visual(el, control, native, style)
+	return true
 
 
 ## Unity's Image reads its image, scale mode and tint from the custom

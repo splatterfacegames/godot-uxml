@@ -1880,6 +1880,134 @@ are borrowed — no Slint code is included.
   collection views instantiate only enough rows to cover the viewport and
   recycle them while scrolling.
 
+### Core-drawn elements: what Slint does, and the plan (`perf/core-draw`)
+
+The loads are 14 to 26 times Unity's (docs/performance.md, "Native core vs
+Unity UI Toolkit") because every element is a Godot Control. Slint
+(slint-ui/slint, `internal/core`, studied at its main branch in November
+2026; ideas only, no code) draws its items itself. What it does, and what
+each idea becomes here:
+
+- **A flat item tree** (`item_tree.rs`): a component is a static array of
+  `ItemTreeNode::Item { children_index, children_count, parent_index,
+  item_array_index }`; repeaters are `DynamicTree` nodes that point to
+  instances of their own item tree. An item is an index, not a heap object
+  or a widget. godot-uxml's native cascade and layout already work on such
+  arrays (preorder index, subtree end, parent), but the model is one
+  GDScript `UxmlElement` object per element and the view one Control per
+  element. Measured on the big document: the native UXML scan is a small
+  part of the 18 to 28 ms UXML parse; building the `UxmlElement` objects
+  is the rest, so a parse cache by content hash would save nothing while
+  the model is objects (a cached tree must be cloned into the same
+  objects; measured with `bench/prof/parse_split.gd`, not built). The plan: the core
+  keeps the element table, and `UxmlElement` becomes a handle (document,
+  index) made when code asks for one.
+- **Per-item rendering caches** (`item_rendering.rs`,
+  `partial_renderer.rs`): every item has a `CachedRenderingData` (a cache
+  index and a generation) into the renderer's `ItemCache`; the
+  `ItemRenderer` trait draws rectangles, borders, images and text without
+  native widgets. Here: a core-drawn element is one `RenderingServer`
+  canvas item under its nearest Control, with the draw index of its
+  sibling position, so z-order and drawing order with the Controls that
+  stay are Godot's own. Its cache entry is the canvas item and the
+  generation of its box and text geometry; the boxes reuse the
+  `UxmlBoxStyle` meshes (already drawn with `canvas_item_add_mesh`),
+  clipping reuses `UxmlClip`'s clipping items, opacity is the canvas
+  item's modulate.
+- **Dirty regions** (`partial_renderer.rs`): Slint tracks the bounding rect
+  of each item per frame and redraws the region that changed. Godot redraws
+  the canvas every frame from retained command lists, so the equivalent is
+  to record again only the canvas items whose geometry or colours changed
+  (a recolour changes a modulate, a move a transform) and to keep the
+  cached rects for culling and the hit test.
+- **Lazy, dependency-tracked properties** (`properties.rs`,
+  `PropertyTracker`): a binding is evaluated only when read while dirty. The
+  incremental cascade is that idea for styles. What a text or class change
+  still pays is the layout's validation: it reads the minimum size and the
+  text of every control (about 0.5 ms on the big document), because code
+  can write a Control (`Label.text`) without the document knowing. A
+  core-drawn text is a core property: its writes mark it dirty, and the
+  validation of those elements goes away.
+- **Shaped text per item** (`textlayout/sharedparley/cache.rs`): shaped
+  paragraphs are cached per item, keyed by text, font, wrap mode and line
+  height; the width is applied later, by line breaking, so one entry serves
+  measuring, hit testing and drawing. Here: a TextServer shaped text per
+  element, keyed the same way, measured by the layout without a Label (no
+  minimum-size read and no `set_size` of a wrapping Label in a measure).
+- **Repeaters and the ListView** (`model/repeater.rs`): instances for the
+  visible rows only, `RepeaterLayoutState { offset, anchor_y,
+  cached_item_height }`, and `ensure_updated(instance, row)` binds only the
+  instances whose row changed. The row pool of the collection views
+  already reuses rows this way. What differs is the scroll itself: here
+  the content's translate is an inline style that goes through the
+  cascade, the applier and the scrollers' styles; in Slint the
+  `Flickable` viewport position is a property that moves the content. The
+  plan: the scroll offset as a placement-only value of the content (the
+  computed style still reports the translate).
+- **Focus, input and accessibility on drawn items** (`window.rs`
+  `focus_item`, `set_focus_item`; `input.rs`; `accessibility.rs`): the
+  window keeps a weak reference to the focused item, dispatches pointer
+  events by walking the item tree with each item's geometry, and builds the
+  accessibility tree from accessible properties of the items. Here: the
+  elements that take focus, keys, text input or scrolling keep their Godot
+  Controls (focus, IME and accessibility stay Godot's). Hover, tooltips and
+  picking of core-drawn elements come from the core's hit test
+  (`element_at`) on the mouse motion of the host Control.
+
+What was measured for the plan (Godot 4.7.1, editor binary, other agents
+loading the CPU, `bench/prof/label_cost*.gd`): `Label.new()` about 20 us,
+entering the tree 80 to 100 us (a plain Control 20 us), a theme override
+in the tree about 65 us. On the big document (1,952 elements, 517 Labels,
+305 Buttons) the Labels alone are about 60 ms of entering the tree and as
+much again of first apply. But the GDScript steps of a load that are not
+Controls (part trees 30 ms, signal wiring 28 ms, behaviors and bindings
+51 ms, index 8 ms) are already about three times Unity's whole load (41
+ms): loads within twice Unity's need those steps native as well, not only
+the drawing. The 305 Buttons, 60 Toggles, 38 Sliders and 30 TextFields
+stay Controls under this plan.
+
+Text, measured (`bench/prof/drawn_label.gd`, windowed): Godot 4.7.1's
+Label (`scene/gui/label.cpp`: `_shape`, `_update_visible`,
+`get_layout_data`, the draw of `NOTIFICATION_DRAW`) ported to TextServer
+calls for the cases godot-uxml uses (left to right, no visible-character
+limit, no overrun, autowrap off or word-smart, the horizontal and vertical
+alignments, stylebox margins, outline, shadow with its outline) draws the
+same pixels as a Label: 108 of 108 cases exact (6 texts, 4 sizes, 9
+alignments, both wrap modes, 3 box widths), the largest channel error 0,
+with the glyph loop of `label.cpp` and with `TextServer.shaped_text_draw`
+(the same loop in the engine). Two details the port must keep: the default
+theme's `shadow_outline_size` of 1 (the shadow is drawn twice), and a Label
+never smaller than its minimum size (the alignment uses the grown size).
+Time per text: a Label (new, theme overrides, entering the tree, measure)
+180 to 200 us; the port in GDScript with `shaped_text_draw` 78 us, of which
+the shaping about 25 us (`bench/prof/shape_cost.gd`). A native port would be
+near the shaping cost.
+
+Not landed: the integration. A drawn Label must take the applier's output
+(fonts, font variations, colours, outline, shadow, alignment, wrap, clip),
+be measured by both layouts, placed, elided and fitted
+(`fit_label`, `fit_label_width`, `uxml_clip_full`), and appear in every
+place that reads a Control today: `get_native` / `get_element` (the
+benchmarks and the tests write `Label.text` on the control they return),
+the snapshots of `bench/equiv_runtime.gd` and `tests/test_parking.gd`, and
+`bench/pixels_render.gd`'s runtime rects. The plan for the API is the one
+of parked subtrees: a drawn Label becomes a Label when the API hands out its
+control (or an ancestor's). Of the 2,042 controls of the big document
+(`bench/prof/census.gd`), 517 are Labels that ignore the mouse and take no
+focus, so they need no input path.
+
+API effect when it lands: `get_control_for(element)`, `get_element(name)`
+and `get_element_by_name(name)` return null for a core-drawn element (an
+element that is not focusable, interactive, a text input or a scroll
+container, and has no picking callback); `get_element_rect`,
+`get_element_transform`, `element_at`, `get_computed_style_for` and
+`set_text` work for every element. The uxml-editor would adopt
+`get_element_rect(element)` and `element_at` where it reads a Control's
+rect today: `render_host.gd` `control_of()` (the one `get_control_for`
+call), the `get_global_rect()` reads (16) of elements that may be drawn, and the `get_element()` calls
+(28) on elements that are not interactive; its `get_native()` calls (47)
+are on fields and buttons, which keep their Controls.
+
 ### Native core
 
 `native/` is a Rust crate (godot-rust `godot` 0.5, `api-4-7`). Build and
@@ -1948,6 +2076,59 @@ element, settling pass, running transition, pending event or override
 of 0.2 ms on the big document. A caller that changes runtime state without
 `_queue_restyle()` (a state set on the document's dictionaries directly) is
 not seen by such a restyle.
+
+#### Settling without a second apply (`perf/core-draw`)
+
+The settling restyle (see "Settling") applied again every control that the
+pass before applied. Three changes keep its result and drop most of its cost:
+
+- **Unchanged controls are not applied again.** A control whose computed
+  style (the same Dictionary: the cascade did not recompute it) and
+  disabled/display flags are those of its last apply only gets the theme
+  update an apply ends with (`begin_bulk_theme_override` and
+  `end_bulk_theme_override` on its inner control), which is what can change
+  a Label's measure. A UxmlBox gets nothing. A UxmlField and a control whose
+  apply reads its size (`UxmlStyleApplier.drifting`) are applied in full.
+  These controls are not forced in the next layout: their boxes, fits and
+  measure caches stay.
+- **Placement before the snapshot check.** The fully re-applied controls are
+  placed at the rects of the last layout before their measures are compared
+  with the snapshot: a fitted Button (`fit_button`) measures as fitted only
+  after its fit. Before, a tab Button of the settings page measured 39 px
+  high with its fresh box and 32 px in the snapshot, the check failed and
+  the settling restyle ran a full layout (the cause of the double layout of a
+  tab switch).
+- **Shown again.** An element that a restyle shows (its effective
+  `display` flips back from `none`) with the style Dictionary and disabled
+  flag of its last styling apply gets `UxmlStyleApplier.apply_flags`
+  (visibility, mouse filters, focus modes, disabled state: the head of
+  `apply()`, shared code) and the theme update, not a full apply: the
+  settings page that a tab shows again.
+
+Two requests of the uxml-editor about subtree layouts:
+
+- **R33**: the check that sends a subtree layout to a layout of the document
+  when its roots cover a third of the document counts only the elements that
+  show (`_shown_in`: not `display: none` here or above). The pool of a
+  collection view (56 rows for a 1080 px viewport, most of them hidden) no
+  longer makes a new source of a view in a fixed pane lay out the document.
+  A subtree layout (`layout_subtrees`) reads the controls of its subtrees
+  only (`Pass::new_sub`); it read every control of the document.
+  A multi-column view is not laid out alone through `_add_local_view`: its
+  header columns follow the layout of the document (`update_columns`).
+  `bench/equiv_runtime.gd` found this once R33 let such a view, with a large
+  hidden pool, take the subtree layout.
+- **R34**: a change of `background-image` or its slices on a themed control
+  (a Button: the image is in its stylebox, which can change its minimum
+  size) is handled as a font change (R31): on an element whose border box
+  cannot follow its content it lays out the element's subtree alone. The
+  cancel button of a search field no longer lays out the document.
+
+The memos of `_fixed_root` and `_definite` (which layout roots can be laid
+out alone) are kept across restyles that change no layout style, flip no
+display flag and run no document layout: a ListView scroll changes a
+translate and paint-only row classes, so its row layouts no longer read the
+styles of every ancestor again.
 
 ## Public API (runtime)
 

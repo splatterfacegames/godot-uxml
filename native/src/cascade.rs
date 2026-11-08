@@ -2287,7 +2287,7 @@ impl UxmlNativeCascade {
                 }
             }
         }
-        let out = crate::layout::Pass::new(c, io, &self.recs.recs, 0.0, warned, warnings).run_subtrees(&subs);
+        let out = crate::layout::Pass::new_sub(c, io, &self.recs.recs, warned, warnings, &roots_u).run_subtrees(&subs);
         io.maxc_on.set(false);
         let mut result = VarArray::new();
         let last = self.placement.last.as_mut().unwrap();

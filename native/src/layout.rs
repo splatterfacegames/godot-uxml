@@ -880,13 +880,25 @@ pub struct Pass<'a> {
 
 impl<'a> Pass<'a> {
     pub fn new(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], _sbw: f64, warned: VarDictionary, warnings: VarArray) -> Self {
-        Self::new_with(c, io, recs, warned, warnings, None)
+        Self::new_with(c, io, recs, warned, warnings, None, None)
+    }
+
+    /// A pass that lays out only the subtrees of `roots` (run_subtrees):
+    /// the controls outside them are not read.
+    pub fn new_sub(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], warned: VarDictionary, warnings: VarArray, roots: &[usize]) -> Self {
+        let mut only = vec![false; c.len()];
+        for &r in roots {
+            for j in r..c.subtree_end(r) {
+                only[j] = true;
+            }
+        }
+        Self::new_with(c, io, recs, warned, warnings, None, Some(&only))
     }
 
     /// `keep`: the elements that changed since the last placing pass and
     /// its volatile flags, which unchanged elements keep (only an apply
     /// changes the autowrap mode or the best-fit meta).
-    fn new_with(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], warned: VarDictionary, warnings: VarArray, keep: Option<(&Vec<bool>, &mut Vec<bool>)>) -> Self {
+    fn new_with(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], warned: VarDictionary, warnings: VarArray, keep: Option<(&Vec<bool>, &mut Vec<bool>)>, only: Option<&[bool]>) -> Self {
         let n = c.len();
         let keep = keep.filter(|(_, v)| v.len() == n);
         let mut kinds = vec![CtlKind::None; n];
@@ -896,6 +908,9 @@ impl<'a> Pass<'a> {
         let sn_normal = StringName::from("normal");
         let sn_margins = StringName::from("uxml_margins");
         for i in 0..n {
+            if only.is_some_and(|o| !o[i]) {
+                continue;
+            }
             if let Some(ctl) = &io.controls[i] {
                 kinds[i] = if io.boxed[i] { CtlKind::Boxed } else { CtlKind::Plain };
                 if let Some((chg, vol)) = &keep {
@@ -979,7 +994,7 @@ impl<'a> Pass<'a> {
     /// A placing pass with the cross-pass cache (see XCache).
     pub fn new_cached(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], warned: VarDictionary, warnings: VarArray, cached: Cached<'a>) -> Self {
         let Cached { chg, sub, prev, mut carry } = cached;
-        let mut p = Self::new_with(c, io, recs, warned, warnings, Some((&chg, &mut carry.volatile)));
+        let mut p = Self::new_with(c, io, recs, warned, warnings, Some((&chg, &mut carry.volatile)), None);
         let n = c.len();
         let ok = carry.meas.len() == n && prev.is_some_and(|o| o.raw.len() == n);
         if ok {
