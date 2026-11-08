@@ -2037,7 +2037,8 @@ remains. Applying before `add_child` would save about 25 us per Label (about
 
 The same documents and the same operations in godot-uxml (native core,
 Rust GDExtension, Godot 4.7.1) and in Unity UI Toolkit (Unity
-6000.3.24f1), each in a release build. godot-uxml at `f4ffe6e`.
+6000.3.24f1), each in a release build. godot-uxml at `f4ffe6e` (the first run) and on `perf/unity-gap` (the second run, see
+below).
 
 ### Method
 
@@ -2105,68 +2106,74 @@ Rust GDExtension, Godot 4.7.1) and in Unity UI Toolkit (Unity
 
 ### Results (ms)
 
-| Operation | Native core, release | Unity, IL2CPP | Native / Unity | Native core, editor binary | Unity, Mono |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| big: load | 662 (635–841) | 44.3 (41.4–69.3) | 15 | 836 (797–1,207) | 80.6 (62.4–106) |
-| big: load + first frame | 712 (689–1,072) | 68.8 (65.1–95.1) | 10 | 969 (878–1,399) | 116 (101–147) |
-| big: hover toggle (button) | 0.457 (0.399–0.619) | 0.959 (0.897–1.39) | 0.5 | 0.546 (0.447–0.778) | 1.16 (0.973–1.60) |
-| big: hover toggle (card, descendant selector) | 1.39 (1.23–1.87) | 1.03 (0.951–1.63) | 1.3 | 1.65 (1.35–2.16) | 1.24 (1.05–1.71) |
-| big: restyle, no change | 0.197 (0.166–0.249) | 0.014 (0.010–0.021) | 14 | 0.259 (0.165–0.358) | 0.012 (0.009–0.014) |
-| big: class change (card) | 12.2 (11.8–18.6) | 1.67 (1.51–1.98) | 7.3 | 15.3 (14.0–24.3) | 2.03 (1.67–2.64) |
-| big: label text change + layout | 10.6 (10.1–16.2) | 1.40 (1.32–1.54) | 7.6 | 13.1 (12.0–21.2) | 1.62 (1.38–2.29) |
-| big: resize | 20.4 (19.2–33.4) | 3.67 (3.43–4.56) | 5.6 | 27.4 (24.3–42.4) | 4.17 (3.24–6.13) |
-| hud: frame, 8 labels + layout | 0.448 (0.408–0.580) | 0.257 (0.233–0.290) | 1.7 | 0.581 (0.440–0.744) | 0.324 (0.269–0.446) |
-| hud: hover toggle | 0.164 (0.145–0.216) | 0.072 (0.061–0.081) | 2.3 | 0.218 (0.178–0.260) | 0.084 (0.070–0.097) |
-| settings: load | 58.8 (57.0–88.0) | 4.31 (3.80–4.56) | 14 | 79.5 (71.2–123) | 6.98 (6.13–8.70) |
-| settings: switch tab | 7.17 (6.88–11.7) | 1.18 (1.10–1.29) | 6.1 | 10.1 (8.93–15.8) | 2.06 (1.54–2.56) |
-| settings: hover row | 0.198 (0.159–0.243) | 0.014 (0.012–0.017) | 14 | 0.193 (0.152–0.248) | 0.015 (0.013–0.017) |
-| inventory: load | 62.0 (58.0–91.7) | 2.97 (2.71–3.05) | 21 | 84.9 (74.1–129) | 5.06 (3.75–6.50) |
-| inventory: hover slot | 0.440 (0.357–0.551) | 0.317 (0.295–0.469) | 1.4 | 0.573 (0.460–0.678) | 0.472 (0.325–0.518) |
-| inventory: select slot | 1.17 (1.06–1.68) | 0.325 (0.288–0.445) | 3.6 | 1.68 (1.30–2.15) | 0.468 (0.339–0.558) |
-| inventory: count change + layout | 0.899 (0.759–1.21) | 0.294 (0.264–0.368) | 3.1 | 1.22 (0.921–1.58) | 0.408 (0.281–0.474) |
-| dialog: load | 8.49 (7.91–13.2) | 0.307 (0.289–0.410) | 28 | 11.3 (10.2–17.8) | 0.483 (0.321–0.588) |
-| dialog: typewriter character + layout | 0.379 (0.314–0.510) | 0.093 (0.089–0.108) | 4.1 | 0.466 (0.397–0.526) | 0.167 (0.136–0.211) |
-| dialog: hover choice | 0.062 (0.053–0.075) | 0.014 (0.013–0.016) | 4.5 | 0.079 (0.059–0.090) | 0.015 (0.013–0.017) |
-| listview: load, 10,000 items | 90.3 (87.5–139) | 3.67 (3.56–4.07) | 25 | 138 (113–196) | 6.92 (5.58–8.46) |
-| listview: scroll 3 rows | 2.47 (2.31–3.08) | 0.059 (0.050–0.072) | 42 | 3.71 (2.60–4.11) | 0.070 (0.056–0.083) |
-| listview: rebind visible items | 2.48 (2.20–3.29) | 0.356 (0.314–0.533) | 7.0 | 3.71 (2.84–4.60) | 0.552 (0.384–0.603) |
-| frame: empty scene | 0.271 (0.245–0.354) | 0.279 (0.267–0.326) | 1.0 | 0.295 (0.256–0.354) | 0.272 (0.251–0.302) |
-| frame: big document, idle | 0.607 (0.518–0.826) | 2.03 (2.03–2.04) | 0.3 | 0.851 (0.558–0.903) | 2.04 (2.03–2.05) |
+Second run, `perf/unity-gap`, release builds. "Before" is the first run
+(`f4ffe6e`, the same harness and machine); Unity's figures of the two runs
+differ by up to 12% (machine load), so each ratio uses the Unity value of its
+own run.
+
+| Operation | Native core, before | Native core, after | Unity, IL2CPP | Native / Unity, before | Native / Unity, after | Native core, editor binary | Unity, Mono |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| big: load | 662 | 614 (606–645) | 41.0 (40.6–43.3) | 15 | 15 | 781 | 64.1 |
+| big: load + first frame | 712 | 668 (658–865) | 65.3 (61.6–69.2) | 10 | 10 | 835 | 102 |
+| big: hover toggle (button) | 0.457 | 0.425 (0.404–0.756) | 0.898 (0.834–1.03) | 0.5 | 0.5 | 0.486 | 1.04 |
+| big: hover toggle (card, descendant selector) | 1.39 | 1.25 (1.18–2.39) | 1.04 (0.969–1.11) | 1.3 | 1.2 | 1.42 | 1.10 |
+| big: restyle, no change | 0.197 | 0.008 (0.007–0.025) | 0.012 (0.008–0.014) | 14 | **0.7** | 0.010 | 0.009 |
+| big: class change (card) | 12.2 | 4.61 (4.49–9.44) | 1.51 (1.45–1.56) | 7.3 | 3.0 | 6.07 | 1.72 |
+| big: label text change + layout | 10.6 | 2.78 (2.62–4.89) | 1.27 (1.22–1.30) | 7.6 | 2.2 | 3.80 | 1.40 |
+| big: resize | 20.4 | 6.02 (5.74–8.20) | 3.41 (3.27–3.67) | 5.6 | 1.8 | 7.97 | 3.66 |
+| hud: frame, 8 labels + layout | 0.448 | 0.390 (0.356–0.645) | 0.248 (0.232–0.298) | 1.7 | 1.6 | 0.415 | 0.274 |
+| hud: hover toggle | 0.164 | 0.176 (0.151–0.247) | 0.073 (0.065–0.103) | 2.3 | 2.4 | 0.176 | 0.070 |
+| settings: load | 58.8 | 56.2 (55.2–111) | 4.03 (3.73–4.75) | 14 | 14 | 70.8 | 5.91 |
+| settings: switch tab | 7.17 | 6.81 (6.52–13.5) | 1.13 (1.05–1.36) | 6.1 | 6.0 | 8.52 | 1.69 |
+| settings: hover row | 0.198 | 0.019 (0.013–0.059) | 0.014 (0.013–0.016) | 14 | 1.4 | 0.018 | 0.014 |
+| inventory: load | 62.0 | 56.0 (55.1–111) | 2.72 (2.64–2.85) | 21 | 21 | 72.6 | 4.18 |
+| inventory: hover slot | 0.440 | 0.391 (0.354–0.453) | 0.314 (0.287–0.381) | 1.4 | 1.2 | 0.441 | 0.357 |
+| inventory: select slot | 1.17 | 0.784 (0.674–0.927) | 0.315 (0.285–0.452) | 3.6 | 2.5 | 0.914 | 0.340 |
+| inventory: count change + layout | 0.899 | 0.465 (0.398–0.915) | 0.287 (0.251–0.345) | 3.1 | 1.6 | 0.514 | 0.307 |
+| dialog: load | 8.49 | 7.93 (7.55–18.3) | 0.311 (0.267–0.343) | 28 | 26 | 9.91 | 0.366 |
+| dialog: typewriter character + layout | 0.379 | 0.338 (0.296–0.681) | 0.100 (0.084–0.115) | 4.1 | 3.4 | 0.358 | 0.140 |
+| dialog: hover choice | 0.062 | 0.016 (0.014–0.056) | 0.016 (0.013–0.018) | 4.5 | **1.0** | 0.018 | 0.014 |
+| listview: load, 10,000 items | 90.3 | 85.4 (84.0–95.3) | 3.68 (3.29–4.18) | 25 | 23 | 110 | 5.34 |
+| listview: scroll 3 rows | 2.47 | 2.25 (2.05–2.46) | 0.059 (0.049–0.065) | 42 | 38 | 2.66 | 0.065 |
+| listview: rebind visible items | 2.48 | 2.47 (2.43–2.63) | 0.323 (0.284–0.344) | 7.0 | 7.6 | 3.21 | 0.440 |
+| frame: empty scene | 0.271 | 0.247 (0.241–0.267) | 0.266 (0.257–0.280) | 1.0 | 0.9 | 0.259 | 0.280 |
+| frame: big document, idle | 0.607 | 0.528 (0.495–0.575) | 2.03 (2.02–2.03) | 0.3 | 0.3 | 0.562 | 2.03 |
 
 Samples per value: 75 loads, 300 operations (HUD 900, typewriter and
-scroll 600), 1,500 frames. None of these 20 runs failed.
+scroll 600), 1,500 frames. None of the 20 runs of the second run failed.
+The Unity players are those of the first run (the documents are the same).
 
 ### What the numbers say
 
-- **Unity is faster on most operations.** On the big document, a class
-  change, a text change or a resize is 6 to 8 times faster in Unity. A
-  load is 10 to 28 times faster. Unity tracks what is dirty: a restyle
-  with no change costs 0.014 ms, against 0.20 ms in godot-uxml.
-- **A hover is on par or faster in godot-uxml.** On the big document, a
-  button hover is 0.46 ms in godot-uxml and 0.96 ms in Unity. A card
-  hover with a descendant selector is 1.39 ms and 1.03 ms. On the small
-  screens Unity is faster (HUD 0.16 and 0.07 ms).
-- **An idle frame is cheaper in Godot.** With the big document on screen
-  and no change, a Godot frame is 0.61 ms and a Unity frame 2.03 ms
-  (empty scene: 0.27 ms and 0.28 ms).
-- **A scroll of the `ListView` is 42 times faster in Unity** (0.059 ms
-  against 2.5 ms): Unity moves the rows and rebinds the rows that come
-  into view; godot-uxml rebinds, restyles and lays out the rows.
-- **A load does not compare the same work.** godot-uxml parses text in
-  each load, and Unity does not. On a document of 507 elements, the parse
-  is about 11 ms of a load of about 370 ms ("Where a load goes", above).
-  Most of the difference is the build of the Controls and the first
-  restyle, not the parse.
-- The release template is 10 to 35% faster than the editor binary on
-  most operations. IL2CPP is 10 to 45% faster than Mono.
-- Other agents loaded the machine. The arms run interleaved, so the load
-  falls on the two sides alike; the brackets show how much one round
-  moved. A first run at `782a951` (before `feat/editor-apis-5`), on a
-  more loaded machine, gave most ratios within 15% of these. The
-  exceptions: the big document hovers (button 0.9, card 1.5), the restyle
-  with no change (58), the settings row hover (22) and the `ListView`
-  scroll (55), which the later commits made faster, and the `ListView`
-  rebind (5.6, now 7.0).
+- **The updates got closer to Unity; the loads did not.** A no-change
+  restyle is now cheaper than Unity's (0.008 against 0.012 ms), and so is a
+  hover that changes nothing (the settings row, the dialog choice). A text
+  change, a class change and a resize of the big document are 2 to 3 times
+  Unity (they were 6 to 8 times). A load is still 14 to 26 times Unity.
+- **What the big-document updates cost now.** A layout pass of a text
+  change, with the native timers on (editor binary, `bench/prof/ops.gd
+  --op=text`): 2.7 ms, of which the validation of the 1,952 controls 0.7 ms,
+  the placement 1.1 ms (most of it the cards below the changed one, which
+  move: a `set_position` each), the flex pass of the changed path 0.7 ms and
+  the setup of the pass 0.2 ms; before, 10 ms (a flex pass of 6.8 ms and a
+  placement of 2.5 ms). A resize lays out every element whose size changes,
+  which is most of the document.
+- **Loads are the build of the Controls.** On the big document (editor
+  binary, `bench/prof/ops.gd --op=big-steps`): the first apply of every
+  control 200 ms, the first native cascade 120 ms (of which about 65 ms is
+  building the output Dictionaries: each container wraps every inherited
+  property in a new origin Dictionary), entering the tree 115 ms, control
+  creation 80 ms, the first layout 70 ms, behaviors and bindings 50 ms, the
+  parse 37 ms. Unity's load clones an imported asset into retained elements;
+  a godot-uxml load makes and themes one Godot Control per element.
+- **A scroll of the `ListView` is still 38 times Unity**: a scroll restyles
+  and lays out the rebound rows (two restyles: the second settles them),
+  parses the content's inline translate and updates the scrollers; Unity
+  moves the content and rebinds the new rows.
+- **A tab switch** applies the 148 controls of the shown page twice (the
+  settling restyle applies them again, as a Label's measure after a theme
+  update can change); the applies are the cost.
+- The release template is 15 to 30% faster than the editor binary.
 
 ### Not compared
 
@@ -2181,13 +2188,101 @@ scroll 600), 1,500 frames. None of these 20 runs failed.
 
 ### Notes
 
-- The layout of the big document is not the same on the two sides. The
-  first card is at x = 198 in godot-uxml and at x = 228 in Unity: the
-  sidebar is 30 px narrower in godot-uxml. The cards have the same size
-  (200x194) and the same 30 rows of 5. This is a parity gap, not a cost.
-  The case is not in `bench/parity`.
+- The layout of the big document was not the same on the two sides in the
+  first run: the first card was at x = 198 in godot-uxml and at x = 228 in
+  Unity (a sidebar 30 px narrower). Unity gives the one child of a row that
+  grows and shrinks a flex basis of 0 (Yoga's single flex child); see
+  `docs/design.md`, "Layout", and the case `lay-shrink-wrap`. In the second
+  run the first card is at x = 228 on both sides.
 - The first run of the release build crashed (0xC0000005, after
   `big: load`). The next 19 runs of the release build did not crash (9
   trials and two runs of 5 rounds), and one run of the debug template did
   not crash. The cause is not known. `run.py` runs a failed arm again once and writes
-  `out/failures.json`.
+  `out/failures.json`. On `perf/unity-gap` it did not happen again: the 10
+  release runs of the second comparison, 3 release runs of 60 big-document
+  loads and frames, and 10 release runs of 30 with the shader and pipeline
+  caches deleted before each run (the first run of the first comparison ran
+  with empty caches) all completed.
+
+## Native core toward Unity UI Toolkit (`perf/unity-gap`)
+
+The work of the second run of the comparison above.
+
+### Method
+
+- Profiles: `tools/gdprof.py` starts Godot with `--remote-debug`, turns on
+  Godot's script profiler with native calls and sums the per-frame function
+  data (`--marked`: only the frames between `gdprof:on` and `gdprof:off`
+  debugger messages). `bench/prof/ops.gd --op=<op>` runs one operation of
+  `bench/unity_compare.gd` between the markers, and prints the native timers
+  (`UxmlNative.prof_enable` / `prof_take`, scopes in `native/src/prof.rs`;
+  off unless enabled). `--op=big-steps` times the steps of a load.
+- Regressions: interleaved A/A/B rounds against a worktree of `main`
+  (`150c0ba`), three rounds of `bench/bench.gd --quick` and
+  `bench/workloads.gd --quick`, the order rotated per round; values are the
+  medians of the rounds, the A/A ratio in brackets.
+
+### What changed
+
+- **Cross-pass layout cache** (`docs/design.md`, "Cross-pass layout
+  cache"): an unchanged subtree keeps its measures and layout from the last
+  pass, and an unchanged control is not placed again. A layout of the big
+  document after a text or class change: 10 ms to 2.7 ms of native layout
+  (timers on).
+- **Restyles with nothing to do** return at once (`_quiet`): 0.2 ms to
+  0.01 ms.
+- **Layout hooks** of behaviors run only for the subtrees the placement
+  changed: the 38 slider hooks of the big document cost about 1.5 ms per
+  restyle before.
+- **R31, R32** (subtree layouts for a text-style change of a fixed element and
+  for a change inside a fixed collection view) and **R30** (one placeholder
+  write) of the uxml-editor.
+- **Single flex child** (a parity fix, `lay-shrink-wrap`): the sidebar of the
+  big document has Unity's width.
+- The control factory builds top-down (a few percent of a load).
+
+### Other benchmarks (geomean of the medians, branch / main, A/A in brackets)
+
+| Suite | Native |
+| --- | ---: |
+| `bench.gd --quick` (25 ops) | 0.752 (1.029) |
+| `workloads.gd --quick` (17 ops) | 0.816 (0.961) |
+
+| `bench.gd` op | main | branch | branch / main (A/A) |
+| --- | ---: | ---: | ---: |
+| idle restyle (no change) | 0.247 | 0.014 | 0.06 (1.00) |
+| set_text + relayout | 12.2 | 3.80 | 0.31 (1.04) |
+| transition frame (width) | 11.7 | 3.47 | 0.30 (1.02) |
+| resize relayout | 13.2 | 5.46 | 0.41 (1.04) |
+| set_class churn (card) | 13.9 | 5.94 | 0.43 (1.07) |
+| `workloads.gd`: list1k update one row + relayout | 18.3 | 10.1 | 0.55 (1.00) |
+| `workloads.gd`: inventory count change + relayout | 1.12 | 0.585 | 0.52 (1.02) |
+| `workloads.gd`: inventory select slot | 1.47 | 1.05 | 0.71 (1.00) |
+
+No op is slower than its A/A noise; the loads, the parse and the cascade
+resolve are unchanged (0.97 to 1.02). `load_document(Menu.uxml)` is 1.14
+(A/A 1.09, 3.3 ms).
+
+### Tried and dropped
+
+- A memo of the slider layout hook on its inputs: comparing the dragger's
+  computed style cost as much as the hook. The subtree filter replaced it.
+- No theme update for a Label whose overrides do not change: a comment of the
+  applier records that `bench/equiv_runtime.gd` differs without it (a Label
+  shapes its text again on a theme update).
+
+### What remains
+
+- **Loads** (14 to 26 times Unity): one themed Godot Control per element.
+  The first apply (about 100 µs per control, most of it the theme update of a
+  Label or Button), entering the tree (about 60 µs), the output Dictionaries
+  of the first cascade (about 30 µs per container) and control creation are
+  the steps. Matching Unity needs elements without a Control each (boxes and
+  text drawn by the core through `RenderingServer`), a change of the runtime's
+  architecture.
+- **The `ListView` scroll** (38 times): a scroll should move the content and
+  bind the new rows without a restyle of the rows that stay.
+- **A tab switch** (6 times): the shown page is applied twice.
+- The validation of the cache reads every control once per layout pass
+  (0.7 ms on the big document); an engine signal for a changed minimum size
+  is deferred, so it cannot replace the read.

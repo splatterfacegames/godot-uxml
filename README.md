@@ -33,9 +33,9 @@ loads in 72 ms and scrolls in 2.9 ms.
 
 **Verified against Unity.** A dump tool runs each test case in Unity
 6000.3 and records every element, every rectangle and every resolved
-style value. godot-uxml matches Unity exactly in 176 of 177 cases. Over
-all cases, 4,329 of 4,329 elements, 302,242 of 302,243 style values,
-14,519 of 14,520 geometry values and 86 of 86 import diagnostics match.
+style value. godot-uxml matches Unity exactly in 177 of 178 cases. Over
+all cases, 4,466 of 4,466 elements, 314,548 of 314,549 style values,
+15,023 of 15,024 geometry values and 86 of 86 import diagnostics match.
 Unity also renders every case, and `bench/pixels.py` compares the pixels:
 99.8% of the box pixels match exactly, 99.9% within one pixel. The
 default theme draws Inter, the font that Unity's default font copies.
@@ -272,10 +272,10 @@ style.
 
 | Measure | Match |
 | --- | ---: |
-| Cases, exact | 176 of 177 |
-| Elements | 4,329 of 4,329 |
-| Resolved style values | 302,242 of 302,243 |
-| Geometry values | 14,519 of 14,520 |
+| Cases, exact | 177 of 178 |
+| Elements | 4,466 of 4,466 |
+| Resolved style values | 314,548 of 314,549 |
+| Geometry values | 15,023 of 15,024 |
 | Import diagnostics | 86 of 86 |
 
 The cases cover the controls and every USS property, and every value form, keyword,

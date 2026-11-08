@@ -16,7 +16,15 @@ extends Control
 ## purpose: Control.size clamps to the combined minimum, which would floor
 ## the laid-out box — Yoga semantics let authored dims and shrink go below
 ## the intrinsic size instead.
-var natural_size := Vector2.ZERO
+var natural_size := Vector2.ZERO:
+	set(v):
+		if v != natural_size:
+			natural_size = v
+			UxmlBox.natural_epoch += 1
+
+## Bumped by every change of a natural_size: the native layout reads the
+## natural sizes again only when it moved (layout.rs XCache::validate).
+static var natural_epoch := 0
 
 
 ## The stylebox drawn behind the element, or null for no background.

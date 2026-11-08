@@ -177,9 +177,9 @@ on structure only.
 
 ### Unity
 
-**176 of 177 cases match exactly. Structure: 4329/4329 elements.
-Geometry: 14519/14520 values. Style: 302242/302243 values. Element
-properties: 5177/5177. Import diagnostics: 86/86.** The one value that differs is a Unity-internal
+**177 of 178 cases match exactly. Structure: 4466/4466 elements.
+Geometry: 15023/15024 values. Style: 314548/314549 values. Element
+properties: 5429/5429. Import diagnostics: 86/86.** The one value that differs is a Unity-internal
 1px (`ctl-numeric`, below).
 
 The seven `px-*` paint cases (borders, backgrounds and images, clipping,
@@ -211,6 +211,7 @@ before) all match:
 | `sel-pseudo`, `sel-root` | every pseudo-class: `:hover`, `:active`, `:inactive`, `:focus`, `:checked`, `:selected`, `:disabled`, `:enabled`, `:root`, compounds, pseudo-classes on ancestors; `:root` of the case sheet, a nested `<Style>` and a template sheet, as subject and as ancestor |
 | `uss-all`, `uss-all-2`, `uss-keywords`, `uss-keywords-2`, `uss-keywords-3`, `uss-var`, `uss-important`, `uss-invalid`, `uss-invalid-unit`, `uss-shorthand` | `all: initial` against later, higher-specificity and inline declarations, `all: unset`; `initial`, `unset`, `inherit` on every property kind; `var()` (fallbacks, nested fallbacks, var in shorthands, var referencing var, missing var, scoped redefinition); `!important`; an unreadable value of each kind; an unsupported unit; every shorthand arity (margin, padding, border width, colour and radius, `flex` in all forms, `transition` lists) |
 | `lay-percent`, `lay-minmax`, `lay-wrap`, `lay-absolute`, `lay-fraction` | percentages and `auto` in every length property; min/max conflicts, min/max with grow and shrink, aspect ratio with bounds; `flex-wrap`, `wrap-reverse`, `align-content` (every value), `justify-content` `space-evenly`/`space-around`, `align-self`; absolute positioning (right/bottom, left+right, top+bottom, %, margins, no offsets, min/max, negative, in centred and row-reversed parents); fractional margins, padding and borders |
+| `lay-shrink-wrap` | Yoga's single flex child: the one child that grows and shrinks gets a flex basis of 0 (a fixed sidebar beside a growing row-wrap content keeps its width), and what cancels it (a later flexible or `display: none` sibling, an earlier flexible sibling; not an absolute or a rigid one) |
 | `tpl-overrides`, `imp-assets-noslash`, `imp-style-noslash`, `absolute-import-packages`, `absolute-import-package-project`, `absolute-import-rooted-packages` | Template / Instance with AttributeOverrides (several, nested templates, `enabled`), template `<Style>`, a `content-container` slot; `Assets/` and `Packages/` paths with and without a leading slash, `project://` package paths |
 | `tr-t100`, `tr-t250`, `tr-t500`, `tr-t800`, `tr-t1200`, `tr-reverse` | transitions sampled at fixed times: linear, ease, ease-in-out-sine, ease-out, ease-out-bounce, ease-in-cubic on width, margin, opacity, colour, height (with delay), translate, rotate, scale, `all`, a discrete property, font-size, a ms duration, two properties with their own durations, `transition-property: none`, a negative delay, a transition reversed half way |
 | `ctl-attrs`, `ctl-more`, `ctl-more-2`, `ctl-listview-dynamic`, `ctl-states-more`, `ed-states-more` | common attributes (focusable, tabindex, picking-mode, tooltip, enabled, language-direction, usage-hints, view-data-key), toggle-on-label-click, rich text, display-tooltip-when-elided, parse-escape-sequences; ProgressBar title and ranges, RadioButtonGroup choices, Toggle with text or label only, GroupBox, Box, PopupWindow, nested Foldouts, HelpBox message types; vertical TwoPaneSplitView with fixed pane 1, TabView reorderable and closeable, horizontal and both-axis ScrollViews; DynamicHeight, horizontal-scrolling and multiple-selection ListViews; hover, focus, checked+hover, disabled+focus, read-only focus and disabled states of the runtime controls; focus, hover, active and checked states of editor controls (ColorField, ObjectField, ToolbarSearchField, MaskField, LayerField, TagField, EnumFlagsField, ToolbarMenu, ToolbarToggle, ToolbarButton, CurveField, GradientField) |

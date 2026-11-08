@@ -1,0 +1,12 @@
+.body { flex-direction: row; height: 48px; margin-bottom: 2px; }
+.side { width: 100px; padding: 4px; border-right-width: 1px; border-color: rgb(80, 80, 80); background-color: rgb(200, 200, 200); }
+.list { flex-grow: 1; }
+.content { flex-grow: 1; flex-shrink: 1; padding: 6px; }
+.grid { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; align-content: flex-start; padding: 2px; }
+.card { width: 60px; height: 8px; margin: 2px; background-color: rgb(80, 80, 80); }
+.gone { display: none; width: 30px; }
+.tail { width: 20px; background-color: rgb(120, 40, 40); }
+.rigid { flex-shrink: 0; }
+.abs { position: absolute; width: 10px; height: 10px; left: 0; top: 0; }
+.basis { flex-basis: 50px; }
+.wide { width: 500px; }

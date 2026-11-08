@@ -1610,6 +1610,16 @@ over an explicit cross dimension, after the min/max bounds of the main
 axis (Yoga): `aspect-ratio: 0.5; height: 30px; min-width: 20px` in a
 row is 20 by 40 (measured: `lay-minmax`).
 
+Single flex child (Yoga's `singleFlexChild`, Unity's layout; measured:
+`lay-shrink-wrap`): in a container laid out at its size, the one child with a
+`flex-grow` and a `flex-shrink` above 0 has a flex basis of 0 (its
+`flex-basis` and main size are not read), unless a flexible child (any
+`flex-grow` or `flex-shrink` but 0, not absolute; a `display: none` child
+counts) follows it, or another candidate comes before a flexible sibling. A
+fixed sidebar beside a `flex-grow: 1` content therefore keeps its width
+however wide the content measures (the sidebar of the big benchmark document
+was 30 px narrower before). Native, GDScript and reference layouts alike.
+
 Flex minimums follow the editor's Yoga layout (yoga-layout 3.2.1), not
 browser CSS: a flex item's automatic **content** minimum is **0**, so an
 explicit `width`/`height` is only a *preferred* size — it shrinks below
@@ -1887,6 +1897,57 @@ style parsing stay in GDScript (the native core calls back and memoizes),
 so those semantics are shared by construction. `bench/equiv*.gd` (with
 `-- --gdscript` for the fallback) check the two paths against the
 original implementation.
+
+#### Cross-pass layout cache (`perf/unity-gap`)
+
+The placing layout (`layout_place`) keeps what an unchanged subtree computed
+in the passes before (`layout.rs`, `XCache`), as Yoga keeps the layout of a
+node that is not dirty:
+
+- At the start of a pass every element is checked: it *changed* when its
+  layout record changed (every record refresh since the last placing pass
+  counts, the subtree layouts' included), its control was applied again
+  (`force`, and the re-applies of `layout_subtrees` and `place_only`), the
+  placement touched its control (a fit, an inset hook, a best-fit font:
+  `LayoutIn::touched`), or its fingerprint differs: the combined minimum size
+  and the text of a text control, and the `natural_size` of a `UxmlBox`.
+  `UxmlBox.natural_size` is a property whose setter bumps the static
+  `UxmlBox.natural_epoch`; the document hands it over before each layout
+  (`set_natural_epoch`), and the natural sizes are read again only when it
+  moved.
+- A subtree without a changed element keeps its measure entries (keyed, as
+  in a pass, on the available size, the hint, the bounds and the widths of
+  its wrapping Labels) and its last `layout()` call: a call with the same
+  border-box size, containing-block width and wrapping-Label widths takes the
+  subtree's rects, content sizes, insets and containing-block widths from the
+  last pass and sets the Label widths that the call left. An unchanged
+  element keeps its leaf measures. Every entry is a pure function of the
+  state of its subtree and of its key, so the results are those of a pass
+  without the cache (`bench/equiv_layout.gd`, `bench/equiv_runtime.gd`).
+- A subtree layout (`layout_subtrees`) drops the layout entries of its roots,
+  their subtrees and their ancestors, whose outputs it replaced.
+- The placement skips an unchanged control at the rect and insets it was last
+  placed at: every write would be a no-op. The controls of the rows of a
+  collection view (`set_controls` kinds bit 4), which the behaviors move, are
+  checked for their position and size again; a text control is checked for
+  its size. `placed_subtrees()` gives, per element, whether the last
+  placement placed something in its subtree: the layout hooks of the
+  behaviors (slider draggers, editor fields) run only for those subtrees.
+
+A control that code outside the layout moves or resizes directly (not through
+the model) is not seen by the placement until it changes: call `refresh()`.
+
+On the big benchmark document (1,952 elements) a class change or a text
+change lays out in about 1.3 ms of native layout instead of 10 ms.
+
+#### Restyles with nothing to do
+
+`_queue_restyle()` bumps a revision; a restyle that no request, dirty
+element, settling pass, running transition, pending event or override
+(`UssCascade.touched`) follows returns at once (`_quiet`): 0.01 ms instead
+of 0.2 ms on the big document. A caller that changes runtime state without
+`_queue_restyle()` (a state set on the document's dictionaries directly) is
+not seen by such a restyle.
 
 ## Public API (runtime)
 
@@ -2345,6 +2406,11 @@ placement and each placeholder change; a memo keeps a field with the same text,
 width, font and position from elision work. Only a field with a placeholder is
 in the list of this check.
 
+R30: `set_field_placeholder` with the text the field already has writes
+nothing. A new placeholder of a field that elides is written once, elided
+(each write of `LineEdit.placeholder_text` shapes the text), not first whole
+and then elided.
+
 ### Hit test
 
 `element_at(point, respect_picking, include_parts)` walks the element
@@ -2529,6 +2595,23 @@ Tests: `test_scroll_lays_out_only_the_rows` (both paths, against a layout of
 the document after each step); `bench/equiv_runtime.gd` scrolls, selects and
 expands the views of `tests/fixtures/runtime/Assets/UI/collections.uxml`
 against a document that is refreshed before each flush.
+
+Two more kinds of change lay out a subtree instead of the document
+(`perf/unity-gap`):
+
+- R32: a change inside a collection view (a new item source, an expand: the
+  content height, the rows, the scrollers) whose border box cannot follow its
+  content lays out the view's subtree (`_add_local_view`), when no row root
+  takes it. The view's own post-layout behavior runs too.
+- R31: a change of a text property that changes the text measure only
+  (`TEXT_MEASURE`: `-unity-font-style`, `-unity-font`,
+  `-unity-font-definition`, `font-size`, `letter-spacing`, `word-spacing`,
+  `-unity-paragraph-spacing`, beside paint-only properties) of an element
+  whose two axes are fixed lays out the element's own subtree; the element
+  is placed again.
+
+Local roots no longer nest: a root inside a root of the pass is laid out with
+it, and a root added around earlier roots replaces them.
 
 ### Context menus
 

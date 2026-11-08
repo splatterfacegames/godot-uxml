@@ -326,6 +326,14 @@ pub struct LayoutIn {
     /// Used only while `maxc_on`: a meta check per text control and pass
     /// cost as much as the rest of its measure.
     pub cliptext: std::cell::RefCell<Vec<Option<bool>>>,
+    /// Elements whose control the placement changed in a way a measure
+    /// can read (a fit, an inset hook, a best-fit font): the next pass of
+    /// the cross-pass cache treats them as changed (see XCache).
+    pub touched: std::cell::RefCell<Vec<bool>>,
+    /// Elements whose control something outside the layout moves (the rows
+    /// of a collection view, CollectionBehavior._place): their placement
+    /// checks the control's position and size again.
+    pub ext: Vec<bool>,
 }
 
 impl LayoutIn {
@@ -370,6 +378,11 @@ pub struct Placement {
     /// text) and its size at the rect, fit_button would write nothing, so
     /// it is not called. A forced (re-applied) placement drops it.
     bfit_at: Vec<Option<(Vector2, Vector2, Vector2, Vector2)>>,
+    /// The rect each control was last placed at.
+    placed_at: Vec<Option<Rect2>>,
+    /// Per element: placed by the last placing pass (not skipped as clean
+    /// by place_clean).
+    pub replaced: Vec<bool>,
 }
 
 impl Placement {
@@ -377,7 +390,57 @@ impl Placement {
     /// set_content_insets / applier.apply_resolved_insets) are idempotent
     /// for unchanged insets on unchanged styleboxes, so they only run when
     /// the insets changed or the element was just re-applied (`force`).
+    /// place() of a placing pass: `clean` when the element did not change
+    /// since the last placing pass (XCache::validate). A clean control at
+    /// the rect and insets it was last placed at, outside a fit, would get
+    /// no write: it is skipped.
+    pub fn place_clean(&mut self, io: &LayoutIn, i: usize, applier: &Option<Gd<Object>>, force: bool, clean: bool) {
+        let n = io.controls.len();
+        if self.replaced.len() != n {
+            self.replaced = vec![true; n];
+        }
+        self.replaced[i] = true;
+        if clean && !force && i != 0 {
+            if let (Some(out), Some(c)) = (&self.last, &io.controls[i]) {
+                let n = io.controls.len();
+                if out.rects[i].is_none() {
+                    // Not laid out (display: none): place() does nothing.
+                    self.replaced[i] = false;
+                    return;
+                }
+                if let Some(r) = out.rects[i] {
+                    if self.placed_at.len() == n
+                        && self.placed_at[i] == Some(r)
+                        && self.hooked.len() == n
+                        && out.insets[i].is_some()
+                        && self.hooked[i] == out.insets[i]
+                        && io.auto_size.is_none()
+                        && (io.ext.is_empty() || !io.ext[i] || c.get_position() == r.position)
+                        && ((io.labels[i].is_none() && io.rich[i].is_none() && !io.ext.get(i).copied().unwrap_or(true)) || c.get_size() == r.size)
+                    {
+                        self.replaced[i] = false;
+                        return;
+                    }
+                }
+            }
+        }
+        self.place(io, i, applier, force);
+    }
+
+    fn touch(io: &LayoutIn, i: usize) {
+        if let Some(t) = io.touched.borrow_mut().get_mut(i) {
+            *t = true;
+        }
+    }
+
     pub fn place(&mut self, io: &LayoutIn, i: usize, applier: &Option<Gd<Object>>, force: bool) {
+        let _p = crate::prof::scope("place1");
+        if self.placed_at.len() != io.controls.len() {
+            self.placed_at = vec![None; io.controls.len()];
+        }
+        if let Some(out) = &self.last {
+            self.placed_at[i] = out.rects.get(i).copied().flatten();
+        }
         if force {
             // Re-applied: new styleboxes, font and size.
             if let Some(e) = io.margins.borrow_mut().get_mut(i) {
@@ -400,6 +463,7 @@ impl Placement {
                 };
                 let mut a = a.clone();
                 a.call("autosize_place", &[c.to_variant(), cs.to_variant()]);
+                Self::touch(io, i);
                 io.unfit.borrow_mut()[i] = None;
             }
         }
@@ -420,6 +484,7 @@ impl Placement {
             if d(c.get_size().x) > d(r.size.x) + 0.01 {
                 let mut a = a.clone();
                 a.call("fit_label_width", &[c.to_variant()]);
+                Self::touch(io, i);
                 if let Some(e) = io.cliptext.borrow_mut().get_mut(i) {
                     *e = None;
                 }
@@ -461,6 +526,7 @@ impl Placement {
             if call {
                 let mut a = a.clone();
                 a.call("fit_label", &[c.to_variant(), r.size.to_variant()]);
+                Self::touch(io, i);
                 self.fit_h[i] = if lbl.has_meta(&*sn_fit) { r.size.y } else { f32::NAN };
                 self.fit_seen[i] = Some((r.size.y, c.get_size().y));
                 io.unfit.borrow_mut()[i] = None;
@@ -489,6 +555,7 @@ impl Placement {
         if io.fields[i] {
             if changed {
                 c.upcast::<Object>().call("set_content_insets", &[start.to_variant(), end.to_variant()]);
+                Self::touch(io, i);
             }
         } else {
             if let Some(mut tr) = io.texrects[i].clone() {
@@ -501,6 +568,7 @@ impl Placement {
                 if let Some(a) = applier {
                     let mut a = a.clone();
                     a.call("apply_resolved_insets", &[c.to_variant(), start.to_variant(), end.to_variant()]);
+                    Self::touch(io, i);
                 }
             }
             // UxmlDocument._place_control: a Button floored at its minimum
@@ -526,6 +594,7 @@ impl Placement {
                     }
                     let mut a = a.clone();
                     let fitted = a.call("fit_button", &[c.to_variant(), r.size.to_variant(), start.to_variant(), end.to_variant()]);
+                    Self::touch(io, i);
                     self.bfit[i] = fitted.try_to::<bool>().unwrap_or(false);
                     self.bfit_at[i] = if self.bfit[i] {
                         Some((r.size, start, end, c.get_minimum_size()))
@@ -579,6 +648,7 @@ impl Out {
     }
 }
 
+#[derive(Clone)]
 struct MemoE {
     kx: f64,
     ky: f64,
@@ -594,7 +664,166 @@ struct MemoE {
     exit: Vec<f64>,
 }
 
+/// The last layout() call of an element in a placing pass: its border-box
+/// size, containing-block width and the widths of the wrapping Labels of its
+/// subtree before and after it. Its outputs are the subtree's entries of the
+/// previous Out.
+#[derive(Clone)]
+pub struct LayE {
+    size: Vector2,
+    cb: f64,
+    entry: Vec<f64>,
+    exit: Vec<f64>,
+}
+
+/// What a placing pass hands to the next one (XCache).
+#[derive(Default)]
+pub struct Carry {
+    meas: Vec<Vec<MemoE>>,
+    lay: Vec<Option<LayE>>,
+    pure: Vec<Option<(f64, Vector2)>>,
+    vset: Vec<HashMap<u64, (f64, Vector2)>>,
+    vread: Vec<HashMap<u64, Vector2>>,
+    volatile: Vec<bool>,
+}
+
+/// What a control measures from, as far as the layout can see: its
+/// combined minimum size, the natural size of a UxmlBox and the text of a
+/// text control. Compared at the start of every placing pass with the value
+/// of the last one.
+#[derive(Clone, PartialEq)]
+pub struct Fp {
+    min: Vector2,
+    nat: Vector2,
+    text: Option<GString>,
+}
+
+/// Cross-pass cache of the placing layout (layout_place). A pass keeps the
+/// measure entries and the last layout() call of every element whose
+/// subtree did not change since the pass that made them, and the leaf
+/// measures of every element that did not change. An element changed when
+/// its layout record changed, its control was applied again (`force`),
+/// the placement touched its control (LayoutIn::touched) or its Fp differs.
+/// The results are those of a pass without the cache: every entry is a pure
+/// function of the state of its subtree and of its key.
+#[derive(Default)]
+pub struct XCache {
+    pub carry: Option<Carry>,
+    fp: Vec<Option<Fp>>,
+    key: Option<(usize, bool, bool)>,
+    /// UxmlBox.natural_epoch now (set_natural_epoch) and at the last
+    /// validate(): natural sizes are read again only when it moved.
+    pub nat_epoch: i64,
+    nat_seen: i64,
+}
+
+impl XCache {
+    pub fn clear(&mut self) {
+        let e = self.nat_epoch;
+        *self = XCache::default();
+        self.nat_epoch = e;
+        self.nat_seen = -1;
+    }
+
+    /// Drops the layout entries of the subtrees of `roots` and of their
+    /// ancestors: a subtree layout (layout_subtrees) wrote new outputs
+    /// there, which the entries no longer describe.
+    pub fn drop_layouts(&mut self, c: &Cascade, roots: &[usize]) {
+        let Some(carry) = self.carry.as_mut() else { return };
+        for &r in roots {
+            if r >= carry.lay.len() {
+                continue;
+            }
+            for j in r..c.subtree_end(r) {
+                carry.lay[j] = None;
+            }
+            let mut p = c.parent_of(r);
+            while p >= 0 {
+                carry.lay[p as usize] = None;
+                p = c.parent_of(p as usize);
+            }
+        }
+    }
+
+    /// The elements that changed since the last placing pass (see XCache),
+    /// and the subtrees that hold one. Updates the fingerprints.
+    pub fn validate(&mut self, c: &Cascade, io: &LayoutIn, forced: &[bool], rec_changed: &[bool]) -> (Vec<bool>, Vec<bool>) {
+        let _p = crate::prof::scope("xc.validate");
+        let n = c.len();
+        let key = (n, io.text_clip, io.auto_size.is_some());
+        let all = self.key != Some(key) || self.fp.len() != n || self.carry.is_none();
+        if all {
+            self.fp = vec![None; n];
+            self.carry = None;
+            self.key = Some(key);
+        }
+        let mut chg = vec![all; n];
+        let read_nat = all || self.nat_epoch != self.nat_seen;
+        self.nat_seen = self.nat_epoch;
+        let sn_nat = StringName::from("natural_size");
+        let mut touched = io.touched.borrow_mut();
+        if touched.len() != n {
+            *touched = vec![false; n];
+        }
+        for i in 0..n {
+            if forced[i] || rec_changed.get(i).copied().unwrap_or(true) || touched[i] {
+                chg[i] = true;
+            }
+            touched[i] = false;
+            let prev = &self.fp[i];
+            let fp = io.controls[i].as_ref().map(|ctl| {
+                // A UxmlBox measures as its natural size (measure_leaf): its
+                // minimum size is not read.
+                if io.boxed[i] {
+                    let nat = if read_nat {
+                        ctl.clone().upcast::<Object>().get(&sn_nat).try_to::<Vector2>().unwrap_or(Vector2::ZERO)
+                    } else {
+                        prev.as_ref().map(|p| p.nat).unwrap_or(Vector2::ZERO)
+                    };
+                    return Fp { min: Vector2::ZERO, nat, text: None };
+                }
+                let min = ctl.get_combined_minimum_size();
+                let nat = Vector2::ZERO;
+                let text = if let Some(l) = &io.labels[i] {
+                    Some(l.get_text())
+                } else if let Some(r) = &io.rich[i] {
+                    Some(r.get_text())
+                } else if io.buttons[i] {
+                    ctl.clone().try_cast::<godot::classes::Button>().ok().map(|b| b.get_text())
+                } else {
+                    None
+                };
+                Fp { min, nat, text }
+            });
+            if fp != self.fp[i] {
+                chg[i] = true;
+                self.fp[i] = fp;
+            }
+        }
+        let mut sub = chg.clone();
+        for i in (1..n).rev() {
+            if sub[i] {
+                let p = c.parent_of(i);
+                if p >= 0 {
+                    sub[p as usize] = true;
+                }
+            }
+        }
+        (chg, sub)
+    }
+}
+
+/// The cross-pass state of one placing pass (Pass::new_cached).
+pub struct Cached<'a> {
+    pub chg: Vec<bool>,
+    pub sub: Vec<bool>,
+    pub prev: Option<&'a Out>,
+    pub carry: Carry,
+}
+
 pub struct Pass<'a> {
+    xc: Option<(Vec<bool>, Vec<bool>, Option<&'a Out>)>,
+    lay_c: Vec<Option<LayE>>,
     c: &'a Cascade,
     io: &'a LayoutIn,
     recs: &'a [Rec],
@@ -651,7 +880,15 @@ pub struct Pass<'a> {
 
 impl<'a> Pass<'a> {
     pub fn new(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], _sbw: f64, warned: VarDictionary, warnings: VarArray) -> Self {
+        Self::new_with(c, io, recs, warned, warnings, None)
+    }
+
+    /// `keep`: the elements that changed since the last placing pass and
+    /// its volatile flags, which unchanged elements keep (only an apply
+    /// changes the autowrap mode or the best-fit meta).
+    fn new_with(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], warned: VarDictionary, warnings: VarArray, keep: Option<(&Vec<bool>, &mut Vec<bool>)>) -> Self {
         let n = c.len();
+        let keep = keep.filter(|(_, v)| v.len() == n);
         let mut kinds = vec![CtlKind::None; n];
         let mut volatile = vec![false; n];
         let mut vw = vec![0.0; n];
@@ -661,6 +898,15 @@ impl<'a> Pass<'a> {
         for i in 0..n {
             if let Some(ctl) = &io.controls[i] {
                 kinds[i] = if io.boxed[i] { CtlKind::Boxed } else { CtlKind::Plain };
+                if let Some((chg, vol)) = &keep {
+                    if !chg[i] && io.auto_size.is_none() {
+                        if vol[i] {
+                            volatile[i] = true;
+                            vw[i] = d(ctl.get_size().x) - hpad_of(io.margins_of(i, ctl, &sn_normal, &sn_margins));
+                        }
+                        continue;
+                    }
+                }
                 if io.auto_size.is_some() && ctl.has_meta("uxml_autosize") {
                     hinted[i] = true;
                     continue;
@@ -678,6 +924,8 @@ impl<'a> Pass<'a> {
         }
         let any_hinted = hinted.iter().any(|&h| h);
         Pass {
+            xc: None,
+            lay_c: vec![],
             c,
             io,
             recs,
@@ -726,6 +974,77 @@ impl<'a> Pass<'a> {
             sn_fit: StringName::from("uxml_fit"),
             sn_unfit: StringName::from("uxml_unfit"),
         }
+    }
+
+    /// A placing pass with the cross-pass cache (see XCache).
+    pub fn new_cached(c: &'a Cascade, io: &'a LayoutIn, recs: &'a [Rec], warned: VarDictionary, warnings: VarArray, cached: Cached<'a>) -> Self {
+        let Cached { chg, sub, prev, mut carry } = cached;
+        let mut p = Self::new_with(c, io, recs, warned, warnings, Some((&chg, &mut carry.volatile)));
+        let n = c.len();
+        let ok = carry.meas.len() == n && prev.is_some_and(|o| o.raw.len() == n);
+        if ok {
+            for i in 0..n {
+                if !sub[i] {
+                    p.meas_m[i] = std::mem::take(&mut carry.meas[i]);
+                }
+                if !chg[i] {
+                    p.pure_m[i] = carry.pure[i];
+                    p.vset[i] = std::mem::take(&mut carry.vset[i]);
+                    p.vread[i] = std::mem::take(&mut carry.vread[i]);
+                }
+            }
+            p.lay_c = std::mem::take(&mut carry.lay);
+            for i in 0..n {
+                if sub[i] {
+                    p.lay_c[i] = None;
+                }
+            }
+        } else {
+            p.lay_c = vec![None; n];
+        }
+        p.xc = Some((chg, sub, if ok { prev } else { None }));
+        p
+    }
+
+    /// The state the next placing pass starts from (XCache).
+    fn carry_out(&mut self) -> Carry {
+        let n = self.c.len();
+        let mut lay = std::mem::take(&mut self.lay_c);
+        for j in 0..n {
+            if self.out.rects[j].is_none() {
+                lay[j] = None;
+            }
+        }
+        let mut meas = std::mem::take(&mut self.meas_m);
+        for m in meas.iter_mut() {
+            if m.len() > 24 {
+                m.clear();
+            }
+        }
+        let mut vset = std::mem::take(&mut self.vset);
+        let mut vread = std::mem::take(&mut self.vread);
+        for k in 0..n {
+            if vset[k].len() > 24 {
+                vset[k].clear();
+            }
+            if vread[k].len() > 24 {
+                vread[k].clear();
+            }
+        }
+        Carry { meas, lay, pure: std::mem::take(&mut self.pure_m), vset, vread, volatile: std::mem::take(&mut self.volatile) }
+    }
+
+    /// run() of a cached pass: the output and what the next pass starts from.
+    pub fn run_cached(mut self, host: Vector2) -> (Out, Carry) {
+        self.layout(0, Rect2::new(Vector2::ZERO, host), d(host.x));
+        let carry = self.carry_out();
+        self.out.raw = self.out.rects.clone();
+        if self.io.pixel_grid {
+            let mut rounded = self.out.rects.clone();
+            round_node(self.c, 0, 0.0, 0.0, &self.out.raw, &mut rounded);
+            self.out.rects = rounded;
+        }
+        (self.out, carry)
     }
 
     pub fn run(mut self, host: Vector2) -> Out {
@@ -1175,6 +1494,7 @@ impl<'a> Pass<'a> {
 
     /// UxmlDocument._measure_leaf.
     fn measure_leaf(&mut self, i: usize, content_w: f64) -> Vector2 {
+        let _p = crate::prof::scope(if self.volatile[i] { "measure_leaf.volatile" } else { "measure_leaf" });
         let Some(c) = self.io.controls[i].clone() else { return Vector2::ZERO };
         if self.volatile[i] && content_w >= 0.0 {
             // UxmlDocument._measure_leaf: the content width plus the USS
@@ -1689,6 +2009,46 @@ impl<'a> Pass<'a> {
     // ------------------------------------------------------------- arrange
 
     fn layout(&mut self, i: usize, rect: Rect2, cb: f64) {
+        let mut entry: Option<Vec<f64>> = None;
+        if self.xc.is_some() {
+            let vl = self.vlist(i);
+            if let (Some((_, sub, Some(prev))), Some(e)) = (&self.xc, &self.lay_c[i]) {
+                if !sub[i]
+                    && e.size == rect.size
+                    && e.cb == cb
+                    && e.entry.len() == vl.len()
+                    && vl.iter().zip(e.entry.iter()).all(|(&v, &w)| self.vw[v] == w)
+                {
+                    let _p = crate::prof::scope("xc.layout_hit");
+                    let prev: &Out = prev;
+                    self.out.rects[i] = Some(rect);
+                    self.out.cbs[i] = cb;
+                    self.out.insets[i] = prev.insets[i];
+                    self.out.content[i] = prev.content[i];
+                    for j in i + 1..self.c.subtree_end(i) {
+                        self.out.rects[j] = prev.raw[j];
+                        self.out.content[j] = prev.content[j];
+                        self.out.insets[j] = prev.insets[j];
+                        self.out.cbs[j] = prev.cbs[j];
+                    }
+                    let exit = e.exit.clone();
+                    for (k, &v) in vl.iter().enumerate() {
+                        self.vw[v] = exit[k];
+                    }
+                    return;
+                }
+            }
+            entry = Some(vl.iter().map(|&v| self.vw[v]).collect());
+        }
+        self.layout_inner(i, rect, cb);
+        if let Some(entry) = entry {
+            let vl = self.vlist(i);
+            let exit = vl.iter().map(|&v| self.vw[v]).collect();
+            self.lay_c[i] = Some(LayE { size: rect.size, cb, entry, exit });
+        }
+    }
+
+    fn layout_inner(&mut self, i: usize, rect: Rect2, cb: f64) {
         self.out.rects[i] = Some(rect);
         self.out.cbs[i] = cb;
         let pad = self.padding(i, cb);
@@ -1717,7 +2077,39 @@ impl<'a> Pass<'a> {
         }
     }
 
+    /// Yoga's single flex child (Unity's layout, measured: lay-shrink-wrap):
+    /// in a container laid out at its size, the one child that grows and
+    /// shrinks, when no flexible sibling follows it, has a flex basis of 0.
+    /// Every child counts (display: none ones too); an absolute child is not
+    /// flexible. Read from the records without diagnostics.
+    fn single_flex(&self, i: usize) -> Option<usize> {
+        let mut single: Option<usize> = None;
+        let num = |ch: usize, pid: usize, dflt: f64| -> f64 {
+            if self.recs[ch].kinds[pid] == K::Num { self.recs[ch].vals[pid] } else { dflt }
+        };
+        let mut ch = i + 1;
+        let e = self.c.subtree_end(i);
+        while ch < e {
+            let next = self.c.subtree_end(ch);
+            if !self.c.non_visual(ch) {
+                let grow = num(ch, P_GROW, 0.0);
+                let shrink = num(ch, P_SHRINK, 1.0);
+                if single.is_some() {
+                    let abs = self.recs[ch].enums[E_POSITION - NP].as_deref().map(str::trim) == Some("absolute");
+                    if !abs && (grow != 0.0 || shrink != 0.0) {
+                        return None;
+                    }
+                } else if grow > 0.0 && shrink > 0.0 {
+                    single = Some(ch);
+                }
+            }
+            ch = next;
+        }
+        single
+    }
+
     fn place(&mut self, i: usize, area: Rect2, kids: &[usize]) -> Vector2 {
+        let single = self.single_flex(i);
         let row = self.is_row(i);
         let wrap_mode = self.enum_(i, E_WRAP, &WRAPS, "nowrap");
         let justify = self.enum_(i, E_JUSTIFY, &JUSTIFY, "flex-start");
@@ -1774,7 +2166,9 @@ impl<'a> Pass<'a> {
             let (bxc, byc) = bnd(&m);
             let nat = self.measure_b(ch, area.size, sh, bxc, byc).0;
             let basis = self.lenr(ch, P_BASIS, am);
-            let hyp = if !basis.is_nan() {
+            let hyp = if single == Some(ch) {
+                0.0
+            } else if !basis.is_nan() {
                 basis
             } else {
                 let explicit = self.dim(ch, size_prop, am);
@@ -2148,23 +2542,38 @@ fn flex_line(
 pub struct RecCache {
     pub recs: Vec<Rec>,
     pub vers: Vec<u64>,
+    /// The records that changed since the last take_changed().
+    changed: Vec<bool>,
 }
 
 impl RecCache {
+    /// Rebuilds the records whose layout values changed.
     pub fn refresh(&mut self, c: &Cascade) {
         let n = c.len();
         if self.recs.len() != n {
             self.recs = (0..n).map(|i| build_rec(c.layout_values(i))).collect();
             self.vers = (0..n).map(|i| c.layout_version(i)).collect();
+            self.changed = vec![true; n];
             return;
+        }
+        if self.changed.len() != n {
+            self.changed = vec![true; n];
         }
         for i in 0..n {
             let v = c.layout_version(i);
             if v != self.vers[i] {
                 self.recs[i] = build_rec(c.layout_values(i));
                 self.vers[i] = v;
+                self.changed[i] = true;
             }
         }
+    }
+
+    /// Per element: its record changed since the last call (every refresh
+    /// in between counts, the subtree layouts' included).
+    pub fn take_changed(&mut self) -> Vec<bool> {
+        let n = self.recs.len();
+        std::mem::replace(&mut self.changed, vec![false; n])
     }
 }
 

@@ -145,6 +145,9 @@ var _opt_warnings: Array = []
 var _ov := {}
 var _tgt := {}
 var _ov_force := PackedInt32Array()
+## Bumped by every change outside update() (overrides, forced rules):
+## UxmlDocument._quiet.
+var touched := 0
 
 ## UxmlElement -> computed style (property -> {value, origin}), preorder.
 var styles := {}
@@ -859,6 +862,7 @@ static func sheet_patch(old: Array, new: Array):
 ## to their subtrees. An element that a changed rule does not match now
 ## reads the new declarations when its inputs change.
 func patch_rules(si: int, patch: Dictionary) -> void:
+	touched += 1
 	var rs := PackedInt32Array()
 	for r in _rule_sheet.size():
 		if _rule_sheet[r] != si:
@@ -896,6 +900,7 @@ func patch_rules(si: int, patch: Dictionary) -> void:
 ## Mark for recompute the elements that the rules `rs` match now (every
 ## element above PATCH_MATCH_LIMIT rules).
 func force_matching(rs: PackedInt32Array) -> void:
+	touched += 1
 	if rs.is_empty():
 		return
 	if _native != null:
@@ -1002,6 +1007,7 @@ func rules_of(items: Dictionary) -> PackedInt32Array:
 ## with diagnostics (their offsets can move). False when the native cascade
 ## cannot keep its theme blocks: the caller builds a new cascade.
 func recompile_rules() -> bool:
+	touched += 1
 	_rule_scope_idx = PackedInt32Array()
 	_rule_scope_lo = PackedInt32Array()
 	_rule_scope_hi = PackedInt32Array()
@@ -1380,6 +1386,7 @@ func update(options: Dictionary = {}, force: bool = false, dirty = null, only_fo
 ## cascade on the next update(), which recomputes the element even when
 ## none of its inputs changed.
 func set_override(i: int, entries: Dictionary) -> void:
+	touched += 1
 	if _native != null:
 		_native.call("set_override", i, entries)
 		return

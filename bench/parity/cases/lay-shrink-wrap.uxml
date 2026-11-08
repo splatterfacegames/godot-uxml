@@ -1,0 +1,42 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:VisualElement name="body-a" class="body">
+    <ui:VisualElement name="side-a" class="side" />
+    <ui:VisualElement name="content-a" class="content"><ui:VisualElement name="grid-a" class="grid"><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /></ui:VisualElement></ui:VisualElement>
+  </ui:VisualElement>
+  <ui:VisualElement name="body-b" class="body">
+    <ui:VisualElement name="side-b" class="side"><ui:ScrollView name="list-b" class="list"><ui:Label text="Item 0" /><ui:Label text="Item 1" /><ui:Label text="Item 2" /></ui:ScrollView></ui:VisualElement>
+    <ui:VisualElement name="content-b" class="content"><ui:VisualElement name="grid-b" class="grid"><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /></ui:VisualElement></ui:VisualElement>
+  </ui:VisualElement>
+  <ui:VisualElement name="body-c" class="body">
+    <ui:VisualElement name="side-c" class="side" />
+    <ui:VisualElement name="content-c" class="content"><ui:VisualElement name="grid-c" class="grid"><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /></ui:VisualElement></ui:VisualElement>
+    <ui:VisualElement name="gone-c" class="gone" />
+  </ui:VisualElement>
+  <ui:VisualElement name="body-d" class="body">
+    <ui:VisualElement name="side-d" class="side" />
+    <ui:VisualElement name="content-d" class="content"><ui:VisualElement name="grid-d" class="grid"><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /></ui:VisualElement></ui:VisualElement>
+    <ui:VisualElement name="tail-d" class="tail" />
+  </ui:VisualElement>
+  <ui:VisualElement name="body-e" class="body">
+    <ui:VisualElement name="content-e" class="content"><ui:VisualElement name="grid-e" class="grid"><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /></ui:VisualElement></ui:VisualElement>
+    <ui:VisualElement name="side-e" class="side" />
+  </ui:VisualElement>
+  <ui:VisualElement name="body-f" class="body">
+    <ui:VisualElement name="side-f" class="side" />
+    <ui:VisualElement name="content-f" class="content basis"><ui:VisualElement name="grid-f" class="grid"><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /></ui:VisualElement></ui:VisualElement>
+  </ui:VisualElement>
+  <ui:VisualElement name="body-g" class="body">
+    <ui:VisualElement name="side-g" class="side" />
+    <ui:VisualElement name="content-g" class="content"><ui:VisualElement name="grid-g" class="grid"><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /></ui:VisualElement></ui:VisualElement>
+    <ui:VisualElement name="abs-g" class="abs" />
+  </ui:VisualElement>
+  <ui:VisualElement name="body-h" class="body">
+    <ui:VisualElement name="side-h" class="side" />
+    <ui:VisualElement name="content-h" class="content"><ui:VisualElement name="grid-h" class="grid"><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /></ui:VisualElement></ui:VisualElement>
+    <ui:VisualElement name="rigid-h" class="tail rigid" />
+  </ui:VisualElement>
+  <ui:VisualElement name="body-i" class="body">
+    <ui:VisualElement name="side-i" class="side rigid" />
+    <ui:VisualElement name="content-i" class="content wide"><ui:VisualElement name="grid-i" class="grid"><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /><ui:VisualElement class="card" /></ui:VisualElement></ui:VisualElement>
+  </ui:VisualElement>
+</ui:UXML>

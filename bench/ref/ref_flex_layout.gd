@@ -259,6 +259,33 @@ func _warn_once(el: UxmlElement, prop: String, message: String) -> void:
 
 ## Children that participate in flex layout: visual elements that are not
 ## display:none. UXML/Style are document structure, never boxes.
+## (perf/unity-gap) Yoga's single flex child: in a container laid out at
+## its size, the one child that grows and shrinks, when no flexible sibling
+## follows it, has a flex basis of 0. Every child counts (display: none
+## ones too); an absolute child is not flexible. No diagnostics.
+func _single_flex(el: UxmlElement):
+	var single = null
+	for child in el.children:
+		if UssControls.is_non_visual(child.local):
+			continue
+		var gv = _prop(child, "flex-grow")
+		var sv = _prop(child, "flex-shrink")
+		var grow := 0.0 if gv == null else RefUssValues.parse_number(String(gv))
+		var shrink := 1.0 if sv == null else RefUssValues.parse_number(String(sv))
+		if is_nan(grow):
+			grow = 0.0
+		if is_nan(shrink):
+			shrink = 1.0
+		if single != null:
+			var pv = _prop(child, "position")
+			var absolute := pv != null and String(pv).strip_edges() == "absolute"
+			if not absolute and (grow != 0.0 or shrink != 0.0):
+				return null
+		elif grow > 0.0 and shrink > 0.0:
+			single = child
+	return single
+
+
 func _flex_children(el: UxmlElement) -> Array:
 	var out: Array = []
 	for child in el.children:
@@ -637,6 +664,7 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 	var bnd_y: float = -1.0 if (sc and not row) else area.size.y
 
 	# Hypothetical main sizes, with min/max already applied.
+	var single = _single_flex(el)
 	var items: Array = []
 	for child in kids:
 		var m := _margins(child, area.size.x)
@@ -645,7 +673,9 @@ func _place(el: UxmlElement, area: Rect2, kids: Array) -> Vector2:
 			-1.0 if bnd_y < 0.0 else maxf(0.0, bnd_y - m["t"] - m["b"]))
 		var hyp: float
 		var basis := _len(child, "flex-basis", am)
-		if not basis["auto"]:
+		if child == single:
+			hyp = 0.0
+		elif not basis["auto"]:
 			hyp = basis["v"]
 		else:
 			var explicit := _dim(child, size_prop, am)
