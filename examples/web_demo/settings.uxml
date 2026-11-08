@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A game settings screen. Every element is a Godot control made by godot-uxml. -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="settings.uss" />
+  <ui:VisualElement name="screen" class="screen">
+    <ui:VisualElement name="card" class="card">
+      <ui:VisualElement class="header">
+        <ui:Label name="title" text="Settings" class="title" />
+        <ui:Label name="subtitle" text="settings.uxml + settings.uss" class="subtitle" />
+      </ui:VisualElement>
+      <ui:TabView name="tabs" class="tabs">
+        <ui:Tab label="Video" name="tab-video">
+          <ui:DropdownField name="resolution" label="Resolution" choices="1280 x 720,1920 x 1080,2560 x 1440,3840 x 2160" index="1" class="row" />
+          <ui:DropdownField name="window-mode" label="Window" choices="Windowed,Borderless,Fullscreen" index="1" class="row" />
+          <ui:Toggle name="vsync" label="V-Sync" value="true" class="row" />
+          <ui:SliderInt name="frame-limit" label="Frame limit" low-value="30" high-value="240" value="60" show-input-field="true" class="row" />
+          <ui:Slider name="brightness" label="Brightness" low-value="0" high-value="1" value="0.5" class="row" />
+        </ui:Tab>
+        <ui:Tab label="Audio" name="tab-audio">
+          <ui:SliderInt name="master" label="Master" low-value="0" high-value="100" value="80" show-input-field="true" class="row" />
+          <ui:SliderInt name="music" label="Music" low-value="0" high-value="100" value="55" show-input-field="true" class="row" />
+          <ui:SliderInt name="effects" label="Effects" low-value="0" high-value="100" value="70" show-input-field="true" class="row" />
+          <ui:RadioButtonGroup name="output" label="Output" choices="Stereo,Headphones,Surround" value="0" class="row" />
+          <ui:Toggle name="subtitles" label="Subtitles" value="true" class="row" />
+        </ui:Tab>
+        <ui:Tab label="Profile" name="tab-profile">
+          <ui:TextField name="player-name" label="Name" value="Player One" class="row" />
+          <ui:MinMaxSlider name="match-level" label="Match level" low-limit="1" high-limit="50" min-value="10" max-value="25" class="row" />
+          <ui:ProgressBar name="xp" title="Level 12 - 64%" value="64" class="row" />
+          <ui:Foldout name="advanced" text="Advanced" value="false" class="row">
+            <ui:Toggle name="show-fps" label="Show FPS" />
+            <ui:Toggle name="console" label="Developer console" />
+          </ui:Foldout>
+        </ui:Tab>
+      </ui:TabView>
+      <ui:VisualElement class="footer">
+        <ui:Label name="status" text="No changes" class="status" />
+        <ui:Button name="reset" text="Reset" class="btn" />
+        <ui:Button name="apply" text="Apply" class="btn primary" />
+      </ui:VisualElement>
+    </ui:VisualElement>
+  </ui:VisualElement>
+</ui:UXML>

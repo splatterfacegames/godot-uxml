@@ -1,0 +1,81 @@
+.screen {
+  flex-grow: 1;
+  padding: 16px;
+  background-color: #12161b;
+}
+
+.title {
+  font-size: 18px;
+  -unity-font-style: bold;
+  color: #e6ebf0;
+  margin-bottom: 8px;
+}
+
+.items {
+  flex-grow: 1;
+  border-width: 1px;
+  border-color: #313a45;
+  border-radius: 6px;
+  background-color: #1d232b;
+}
+
+.row {
+  flex-direction: row;
+  align-items: center;
+  height: 28px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.index {
+  width: 64px;
+  color: #6f7c8b;
+  font-size: 11px;
+}
+
+.name {
+  flex-grow: 1;
+  color: #e6ebf0;
+}
+
+.value {
+  color: #4fd1a5;
+  -unity-text-align: middle-right;
+}
+
+/* The parts of the ListView take USS like any element. */
+
+.unity-collection-view__item--alternative-background {
+  background-color: #222a33;
+}
+
+.unity-collection-view__item:hover {
+  background-color: #28323d;
+}
+
+.unity-collection-view__item--selected {
+  background-color: #1b3a31;
+}
+
+.unity-scroller {
+  background-color: #1d232b;
+  border-color: #313a45;
+}
+
+.unity-scroller__low-button,
+.unity-scroller__high-button {
+  background-color: #1d232b;
+  border-color: #313a45;
+  -unity-background-image-tint-color: #8b97a5;
+}
+
+.unity-scroller__slider .unity-base-slider__tracker {
+  background-color: #1d232b;
+  border-color: #1d232b;
+}
+
+.unity-scroller__slider .unity-base-slider__dragger {
+  background-color: #3a4552;
+  border-color: #3a4552;
+  border-radius: 4px;
+}

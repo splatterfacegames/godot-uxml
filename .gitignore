@@ -10,3 +10,8 @@ native/target/
 /tools/unity-dump/Assets/Cases/
 /tools/unity-dump/Assets/Cases.meta
 /bench/pixels/out/
+
+# Site build (site/build.sh)
+/site/dist/
+/site/.r2-upload/
+/site/project.godot.orig

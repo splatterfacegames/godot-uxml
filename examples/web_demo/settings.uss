@@ -1,0 +1,202 @@
+.screen {
+  --accent: #4fd1a5;
+  --panel: #1d232b;
+  --line: #313a45;
+  --ink: #e6ebf0;
+  --muted: #8b97a5;
+  flex-grow: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background-color: #12161b;
+}
+
+.card {
+  width: 560px;
+  max-width: 100%;
+  padding: 20px;
+  border-radius: 10px;
+  border-width: 1px;
+  border-color: var(--line);
+  background-color: var(--panel);
+}
+
+.header {
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.title {
+  font-size: 24px;
+  -unity-font-style: bold;
+  color: var(--ink);
+}
+
+.subtitle {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tabs {
+  min-height: 250px;
+}
+
+.row {
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.row > Label,
+.row Label {
+  color: var(--ink);
+}
+
+.footer {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top-width: 1px;
+  border-color: var(--line);
+}
+
+.status {
+  flex-grow: 1;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.btn {
+  min-width: 88px;
+  height: 32px;
+  border-radius: 6px;
+  border-width: 1px;
+  border-color: var(--line);
+  background-color: #262e38;
+  color: var(--ink);
+  transition-property: background-color, scale, border-color;
+  transition-duration: 0.15s, 0.15s, 0.15s;
+  transition-timing-function: ease-out;
+}
+
+.btn:hover {
+  background-color: #303a46;
+  border-color: var(--accent);
+  scale: 1.04 1.04;
+}
+
+.btn:active {
+  scale: 0.97 0.97;
+}
+
+.primary {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: #0c1a15;
+  -unity-font-style: bold;
+}
+
+.primary:hover {
+  background-color: #7be3bf;
+}
+
+/* The parts of the Unity controls take USS like any element. */
+
+.unity-tab__header {
+  padding: 6px 14px;
+  background-color: rgba(0, 0, 0, 0);
+  color: var(--muted);
+}
+
+.unity-tab__header:hover {
+  color: var(--ink);
+}
+
+.unity-tab__header:checked {
+  color: var(--ink);
+}
+
+.unity-tab__header-underline {
+  background-color: var(--accent);
+}
+
+.unity-tab-view__header-container {
+  border-bottom-width: 1px;
+  border-color: var(--line);
+  margin-bottom: 8px;
+}
+
+.unity-base-field__label {
+  color: var(--ink);
+}
+
+.unity-base-popup-field__input,
+.unity-base-text-field__input {
+  background-color: #12161b;
+  border-color: var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+}
+
+.unity-base-popup-field__input:hover {
+  border-color: var(--accent);
+}
+
+.unity-base-popup-field__text {
+  color: var(--ink);
+}
+
+.unity-base-popup-field__arrow {
+  -unity-background-image-tint-color: var(--muted);
+}
+
+.unity-base-slider__tracker,
+.unity-min-max-slider__tracker {
+  background-color: #2b333d;
+  border-color: #2b333d;
+}
+
+.unity-base-slider__dragger,
+.unity-min-max-slider__min-thumb,
+.unity-min-max-slider__max-thumb {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  border-radius: 3px;
+}
+
+.unity-min-max-slider__dragger {
+  background-color: rgba(79, 209, 165, 0.35);
+  border-width: 0;
+}
+
+.unity-toggle__checkmark,
+.unity-radio-button__checkmark-background {
+  background-color: #12161b;
+  border-color: var(--line);
+  -unity-background-image-tint-color: var(--accent);
+}
+
+.unity-radio-button__checkmark {
+  background-color: var(--accent);
+}
+
+.unity-toggle__text,
+.unity-radio-button__text,
+.unity-foldout__text {
+  color: var(--ink);
+}
+
+.unity-progress-bar__background {
+  background-color: #12161b;
+  border-color: var(--line);
+}
+
+.unity-progress-bar__progress {
+  background-color: var(--accent);
+}
+
+.unity-progress-bar__title {
+  color: var(--ink);
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A ListView of 10,000 items. Only the rows in view exist; a scroll binds them again. -->
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="list.uss" />
+  <ui:VisualElement name="screen" class="screen">
+    <ui:Label name="list-title" text="10,000 items" class="title" />
+    <ui:ListView name="items" class="items" fixed-item-height="28" item-template="list_row.uxml" show-alternating-row-backgrounds="ContentOnly" />
+  </ui:VisualElement>
+</ui:UXML>

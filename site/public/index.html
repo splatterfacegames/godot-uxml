@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="godot-uxml is a Godot 4.7 addon that loads Unity UI Toolkit documents (UXML) and stylesheets (USS) and makes native Godot controls. Live demo in the browser." />
+    <meta name="theme-color" content="#eef1f4" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="godot-uxml: Unity UXML and USS in Godot 4" />
+    <meta property="og:description" content="Loads UXML and USS files and makes native Godot controls. Matches Unity 6000.3 in 176 of 177 test cases." />
+    <meta property="og:url" content="https://godot-uxml.splatterfacegames.com" />
+    <link rel="canonical" href="https://godot-uxml.splatterfacegames.com" />
+    <link rel="icon" href="/mark.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>godot-uxml: Unity UXML and USS in Godot 4</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="godot-uxml home">
+        <img src="/mark.svg" width="30" height="30" alt="" />
+        <span>godot-uxml</span>
+      </a>
+      <nav aria-label="Primary">
+        <a href="#parity">Parity</a>
+        <a href="#performance">Performance</a>
+        <a href="#demo">Demo</a>
+        <a href="#install">Install</a>
+        <a class="nav-source" href="https://github.com/splatterfacegames/godot-uxml">Source</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-copy">
+          <h1>Unity UI files, running as Godot controls.</h1>
+          <p class="lede">
+            godot-uxml is a Godot 4.7 addon. It loads Unity UI Toolkit
+            documents (UXML) and stylesheets (USS) and makes a real Godot
+            control for each element. Make the UI in Unity or in
+            <a href="https://uxml-editor.splatterfacegames.com">UXML Editor</a>;
+            the same files run in Godot without changes.
+          </p>
+          <div class="actions">
+            <a class="button button-primary" href="#demo">Run the demo</a>
+            <a class="button button-quiet" href="https://github.com/splatterfacegames/godot-uxml">Read the source</a>
+          </div>
+          <dl class="facts">
+            <div><dt>Engine</dt><dd>Godot 4.7</dd></div>
+            <div><dt>Core</dt><dd>GDScript, optional Rust</dd></div>
+            <div><dt>Runtime dependencies</dt><dd>None</dd></div>
+            <div><dt>Licence</dt><dd>Apache 2.0</dd></div>
+          </dl>
+        </div>
+
+        <figure class="compare" data-compare>
+          <div class="compare-frame" style="--split: 50%">
+            <img class="compare-godot" src="/img/godot-ed-propertyfield.png" width="400" height="240" alt="The ed-propertyfield test case drawn by godot-uxml: an inspector with int, string, colour, vector, enum, curve and texture fields in Unity's dark editor skin." />
+            <img class="compare-unity" src="/img/unity-ed-propertyfield.png" width="400" height="240" alt="The same test case drawn by Unity 6000.3." />
+            <div class="compare-handle" aria-hidden="true"><span></span></div>
+            <span class="compare-tag compare-tag-unity">Unity 6000.3</span>
+            <span class="compare-tag compare-tag-godot">godot-uxml</span>
+            <input class="compare-range" type="range" min="0" max="100" value="50" aria-label="Move the line between Unity's render and godot-uxml's render" />
+          </div>
+          <figcaption>
+            Drag the line. Left of it: Unity's render of the test case
+            <code>ed-propertyfield</code>. Right of it: godot-uxml's render
+            of the same UXML. 99.26% of the box pixels are the same.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="parity section" id="parity" aria-labelledby="parity-title">
+        <div class="section-head">
+          <h2 id="parity-title">Checked against Unity, value by value.</h2>
+          <p>
+            A dump tool runs each test case in Unity 6000.3 and records every
+            element, every rectangle and every resolved style value.
+            <code>bench/parity.gd</code> compares them with godot-uxml, and
+            <code>bench/pixels.py</code> compares the pixels.
+          </p>
+        </div>
+
+        <table class="tally">
+          <caption class="visually-hidden">godot-uxml compared with Unity 6000.3</caption>
+          <thead>
+            <tr><th scope="col">Measure</th><th scope="col">Same as Unity</th><th scope="col">Of</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Test cases, exact</th><td>176</td><td>177</td></tr>
+            <tr><th scope="row">Elements (structure)</th><td>4,329</td><td>4,329</td></tr>
+            <tr><th scope="row">Geometry values</th><td>14,519</td><td>14,520</td></tr>
+            <tr><th scope="row">Resolved style values</th><td>302,242</td><td>302,243</td></tr>
+            <tr class="tally-pct"><th scope="row">Box pixels, exact</th><td colspan="2">99.806%</td></tr>
+          </tbody>
+        </table>
+        <p class="note">
+          The case that differs is a 1px text width that Unity does not lay out
+          the same way in every run. Text is compared by placement, because
+          the rasterisers differ. <a href="https://github.com/splatterfacegames/godot-uxml/blob/main/docs/parity.md">docs/parity.md</a>
+          lists every case.
+        </p>
+
+        <div class="pairs">
+          <figure class="pair">
+            <div class="pair-images">
+              <img src="/img/unity-ctl-styled-parts.png" width="400" height="340" alt="Unity's render of ctl-styled-parts: control parts with author USS colours." />
+              <img src="/img/godot-ctl-styled-parts.png" width="400" height="340" alt="godot-uxml's render of ctl-styled-parts." />
+            </div>
+            <figcaption><code>ctl-styled-parts</code>, author USS on control parts. Box pixels 99.92% exact.</figcaption>
+          </figure>
+          <figure class="pair">
+            <div class="pair-images">
+              <img src="/img/unity-ed-colorfield.png" width="400" height="140" alt="Unity's render of ed-colorfield: colour fields in the dark editor skin." />
+              <img src="/img/godot-ed-colorfield.png" width="400" height="140" alt="godot-uxml's render of ed-colorfield." />
+            </div>
+            <figcaption><code>ed-colorfield</code>, editor controls. Box pixels 99.71% exact.</figcaption>
+          </figure>
+          <figure class="pair">
+            <div class="pair-images">
+              <img src="/img/unity-ctl-tabview.png" width="400" height="180" alt="Unity's render of ctl-tabview: a TabView with three tabs." />
+              <img src="/img/godot-ctl-tabview.png" width="400" height="180" alt="godot-uxml's render of ctl-tabview." />
+            </div>
+            <figcaption><code>ctl-tabview</code>, a TabView. Box pixels 100% exact.</figcaption>
+          </figure>
+        </div>
+        <p class="pair-key"><span>Unity 6000.3</span><span>godot-uxml</span></p>
+      </section>
+
+      <section class="how section" aria-labelledby="how-title">
+        <div class="section-head">
+          <h2 id="how-title">Two implementations, one behaviour.</h2>
+          <p>
+            Each Unity control is made from the same part elements as in
+            Unity, with a default theme of values measured in Unity 6000.3.
+            Focus, keyboard and controller navigation, theme fonts and
+            signals work as in any Godot UI.
+          </p>
+        </div>
+        <div class="paths">
+          <article>
+            <h3>Native core</h3>
+            <p>
+              A Rust GDExtension (godot-rust). It keeps style and layout data
+              in Rust and places the controls directly. It loads automatically
+              when <code>godot_uxml_native.windows.x86_64.dll</code> is in
+              <code>addons/godot_uxml/bin</code>. The binary is for Windows x64
+              only for now.
+            </p>
+          </article>
+          <article>
+            <h3>GDScript path</h3>
+            <p>
+              The same behaviour without the binary: Linux, macOS
+              and the web. The demo on this page runs this path in your
+              browser.
+            </p>
+          </article>
+          <article>
+            <h3>Checked equal</h3>
+            <p>
+              Equivalence checks compare each optimized path with the original
+              implementation, value by value: 0 differences in 5,929 checks on
+              the native core and 5,694 on the GDScript path.
+            </p>
+          </article>
+        </div>
+        <ul class="traits">
+          <li><strong>Incremental updates.</strong> A hover or a class change recomputes only the elements it can affect. A paint-only change does not run layout again.</li>
+          <li><strong>Virtualized lists.</strong> <code>ListView</code> makes only the rows that fill the viewport and binds them again during a scroll.</li>
+          <li><strong>Diagnostics with a position.</strong> Each unsupported feature gives one diagnostic with file, line and column. A malformed document still loads.</li>
+          <li><strong>No code runs from a document.</strong> No Unity, Node.js or browser at runtime.</li>
+        </ul>
+      </section>
+
+      <section class="performance section" id="performance" aria-labelledby="perf-title">
+        <div class="section-head">
+          <h2 id="perf-title">Performance</h2>
+          <p>
+            A screen of 1,531 elements, 3 stylesheets of about 250 rules,
+            <code>var()</code> and <code>:hover</code>/<code>:focus</code>
+            rules, with the Unity default theme. Intel Xeon W-2135, Windows 11,
+            Godot 4.7.1. Medians.
+          </p>
+        </div>
+        <div class="table-wrap">
+          <table class="perf">
+            <thead>
+              <tr>
+                <th scope="col">Operation</th>
+                <th scope="col">First version</th>
+                <th scope="col">GDScript</th>
+                <th scope="col">Native core</th>
+                <th scope="col">Hand-built Godot UI</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Hover toggle</th><td>8,479 ms</td><td>6.0 ms</td><td class="best">1.1 ms</td><td>0.03 ms</td></tr>
+              <tr><th scope="row">Restyle, no change</th><td>8,396 ms</td><td>5.5 ms</td><td class="best">1.0 ms</td><td>&mdash;</td></tr>
+              <tr><th scope="row">Window resize</th><td>2,183 ms</td><td>112 ms</td><td class="best">13 ms</td><td>6.4 ms</td></tr>
+              <tr><th scope="row">Class change</th><td>8,991 ms</td><td>155 ms</td><td class="best">14 ms</td><td>&mdash;</td></tr>
+              <tr><th scope="row">Label text change and layout</th><td>&mdash;</td><td>98 ms</td><td class="best">13 ms</td><td>1.1 ms</td></tr>
+              <tr><th scope="row">Document load</th><td>9,839 ms</td><td>1,479 ms</td><td class="best">633 ms</td><td>267 ms (<code>.tscn</code>)</td></tr>
+              <tr><th scope="row">HUD frame, 37 elements, 8 labels</th><td>37.5 ms</td><td>2.0 ms</td><td class="best">0.58 ms</td><td>&mdash;</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="perf-more">
+          <div>
+            <h3>Game screens, native core</h3>
+            <dl class="readings">
+              <div><dt>Settings, 4 tabs of 12 rows</dt><dd>load 72 ms, switch tab 8.5 ms, hover 0.43 ms</dd></div>
+              <div><dt>Inventory, 80 slots</dt><dd>load 92 ms, hover 0.75 ms, select 1.6 ms</dd></div>
+              <div><dt>Dialog</dt><dd>load 10 ms, typewriter character 0.41 ms</dd></div>
+              <div><dt><code>ListView</code>, 10,000 items</dt><dd>load 72 ms, scroll 3 rows 2.9 ms</dd></div>
+            </dl>
+          </div>
+          <div>
+            <h3>Frame cost with a renderer</h3>
+            <dl class="readings">
+              <div><dt>Empty scene</dt><dd>0.34 ms</dd></div>
+              <div><dt>godot-uxml, test document</dt><dd>0.99 ms</dd></div>
+              <div><dt>Hand-built Godot UI, same screen</dt><dd>0.88 ms</dd></div>
+            </dl>
+            <p class="note">CPU time per frame, Vulkan, RTX 5060 Ti, measured before the Unity theme.</p>
+          </div>
+        </div>
+        <p class="note">
+          &ldquo;First version&rdquo; is the implementation before optimization
+          and before the Unity theme. Method and all values:
+          <a href="https://github.com/splatterfacegames/godot-uxml/blob/main/docs/performance.md">docs/performance.md</a>.
+        </p>
+      </section>
+
+      <section class="demo section-wide" id="demo" aria-labelledby="demo-title">
+        <div class="section-head section">
+          <h2 id="demo-title">Run it in your browser.</h2>
+          <p>
+            A Godot web export (Compatibility renderer, no threads, GDScript
+            path). Pick a document in the bar: a settings screen, a
+            <code>ListView</code> of 10,000 items, <code>examples/minimal</code>
+            and test fixtures with the runtime and editor skins.
+            <b>Source</b> shows the UXML and USS files and the signals.
+          </p>
+        </div>
+        <div class="demo-shell">
+          <div class="demo-bar">
+            <span>godot-uxml.splatterfacegames.com/demo</span>
+            <a href="/demo/" target="_blank" rel="noopener">Open in a new tab</a>
+          </div>
+          <div class="demo-stage" data-demo-stage>
+            <div class="demo-poster">
+              <img src="/img/demo-poster.webp" width="1400" height="800" alt="" />
+              <div class="demo-poster-copy">
+                <button class="button button-primary" type="button" data-load-demo>Load the demo</button>
+                <small>About 40 MB. The download starts when you click.</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="api section" id="api" aria-labelledby="api-title">
+        <div class="section-head">
+          <h2 id="api-title">Editor APIs</h2>
+          <p>
+            Calls for tools such as a UXML editor. They take a
+            <code>UxmlElement</code>, so elements without a <code>name</code>
+            work too. <a href="https://uxml-editor.splatterfacegames.com">UXML Editor</a>
+            is built on them.
+          </p>
+        </div>
+        <div class="api-grid">
+          <pre class="code" tabindex="0"><code>doc.load_source(text, path, "", resolver)   <i># read every file through a resolver</i>
+doc.get_control_for(element)                <i># also get_native_for, get_element_for</i>
+doc.explain_style(element, "margin-top")    <i># every declaration, winner first</i>
+doc.set_forced_states(element, PackedStringArray(["hover"]))
+doc.get_transitions()                       <i># and seek_transitions(seconds)</i>
+doc.element_at(point)                       <i># deepest element at a point</i>
+doc.reload_stylesheet(origin, uss_text)     <i># restyle without a reload</i>
+doc.replace_source(uxml_text)               <i># edit in place when possible</i>
+UxmlControls.catalog()                      <i># elements and attributes</i>
+doc.set_drag_and_drop("list", callbacks)    <i># Unity drag-and-drop callbacks</i>
+doc.get_item_index_at("list", point)        <i># also get_item_rect("list", index)</i>
+doc.get_element_rect(element, space)        <i># rectangle in another element's space</i></code></pre>
+          <dl class="readings">
+            <div><dt>Stylesheet reload, one colour changed</dt><dd>2.1 ms native, 8.8 ms GDScript</dd></div>
+            <div><dt>Stylesheet reload, one selector changed</dt><dd>64 ms native, 591 ms GDScript</dd></div>
+            <div><dt>Text change, Label of fixed size</dt><dd>1.5 ms native, 4.2 ms GDScript</dd></div>
+            <div><dt>Document load, 507 elements</dt><dd>369 ms native, 907 ms GDScript</dd></div>
+          </dl>
+        </div>
+        <p class="note">
+          Element offsets and diagnostic ranges are a documented contract. See
+          &ldquo;Editor APIs&rdquo; in
+          <a href="https://github.com/splatterfacegames/godot-uxml/blob/main/docs/design.md">docs/design.md</a>.
+        </p>
+      </section>
+
+      <section class="install section" id="install" aria-labelledby="install-title">
+        <div class="install-steps">
+          <h2 id="install-title">Install</h2>
+          <ol>
+            <li>Copy <code>addons/godot_uxml</code> into the <code>addons</code> folder of your Godot project.</li>
+            <li>Open <b>Project &gt; Project Settings &gt; Plugins</b>.</li>
+            <li>Enable <b>godot_uxml</b>.</li>
+          </ol>
+          <p>
+            Then add a <code>UxmlDocument</code> node to a scene and set
+            <code>uxml_path</code> and <code>project_root</code>, or load a
+            document from code.
+          </p>
+        </div>
+        <pre class="code" tabindex="0"><code>var doc := UxmlDocument.new()
+add_child(doc)
+doc.set_anchors_preset(Control.PRESET_FULL_RECT)
+doc.load_document("ui.uxml", "res://ui")
+
+doc.button_pressed.connect(func(name): print("pressed ", name))
+doc.value_changed.connect(func(name, value): print(name, " = ", value))
+
+for d in doc.diagnostics:
+    print(UxmlDiagnostic.format(d))</code></pre>
+      </section>
+
+      <section class="licence section" aria-labelledby="licence-title">
+        <h2 id="licence-title">Licence</h2>
+        <p>
+          Copyright 2026 Jetha Chan. godot-uxml is available under the
+          <a href="https://github.com/splatterfacegames/godot-uxml/blob/main/LICENSE">Apache License 2.0</a>.
+          Parts of <code>addons/godot_uxml/core/</code> are ports of
+          uxml-preview (Apache 2.0). The native core uses godot-rust (MPL 2.0).
+          The default theme draws Inter (SIL OFL 1.1).
+          <a href="https://github.com/splatterfacegames/godot-uxml/blob/main/addons/godot_uxml/THIRD-PARTY-NOTICES.md">THIRD-PARTY-NOTICES.md</a>
+          gives the details. godot-uxml is not affiliated with Unity Technologies.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand" href="#top"><img src="/mark.svg" width="24" height="24" alt="" /><span>godot-uxml</span></a>
+      <p>Also from Splatterface Games: <a href="https://uxml-editor.splatterfacegames.com">UXML Editor</a>, the visual editor for UXML and USS.</p>
+      <div>
+        <a href="https://github.com/splatterfacegames/godot-uxml">GitHub</a>
+        <a href="https://github.com/splatterfacegames/godot-uxml/blob/main/README.md">README</a>
+        <a href="https://github.com/splatterfacegames/godot-uxml/blob/main/LICENSE">Apache 2.0</a>
+      </div>
+    </footer>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
