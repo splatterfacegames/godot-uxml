@@ -890,6 +890,28 @@ func patch_rules(si: int, patch: Dictionary) -> void:
 			sels.append(s)
 	if _native != null:
 		return
+	_force_gd(rs, sels)
+
+
+## Mark for recompute the elements that the rules `rs` match now (every
+## element above PATCH_MATCH_LIMIT rules).
+func force_matching(rs: PackedInt32Array) -> void:
+	if rs.is_empty():
+		return
+	if _native != null:
+		_native.call("force_rules", rs, PATCH_MATCH_LIMIT)
+		return
+	var hit := {}
+	for r in rs:
+		hit[r] = true
+	var sels := PackedInt32Array()
+	for s in _sel_rule.size():
+		if hit.has(_sel_rule[s]):
+			sels.append(s)
+	_force_gd(rs, sels)
+
+
+func _force_gd(rs: PackedInt32Array, sels: PackedInt32Array) -> void:
 	var n := els.size()
 	if rs.size() > PATCH_MATCH_LIMIT:
 		for i in n:
@@ -908,6 +930,120 @@ func patch_rules(si: int, patch: Dictionary) -> void:
 			if _match_from(parts, parts.size() - 1, i, _rule_scope_idx[r]):
 				_ov_force.append(i)
 				break
+
+
+## The rule items of a sheet that a structural edit changed, when its imports
+## stay: [old item indices, new item indices] (Dictionaries index -> true), or
+## null. The items before the first and after the last difference are kept;
+## when the number of items changes, the items after the first difference
+## move to another index (a computed origin names its item), so they count
+## as changed too.
+static func rule_diff(old: Array, new: Array):
+	var a: Array = []
+	var b: Array = []
+	var ia: Array = []
+	var ib: Array = []
+	for it in old:
+		a.append(_item_sig(it))
+		if it["kind"] != "rule":
+			ia.append(a[-1])
+	for it in new:
+		b.append(_item_sig(it))
+		if it["kind"] != "rule":
+			ib.append(b[-1])
+	if ia != ib:
+		return null
+	var m := mini(a.size(), b.size())
+	var p := 0
+	while p < m and a[p] == b[p]:
+		p += 1
+	var q := 0
+	if a.size() == b.size():
+		while q < m - p and a[a.size() - 1 - q] == b[b.size() - 1 - q]:
+			q += 1
+	var out := [{}, {}]
+	for k in range(p, a.size() - q):
+		out[0][k] = true
+	for k in range(p, b.size() - q):
+		out[1][k] = true
+	return out
+
+
+static func _item_sig(it: Dictionary) -> Array:
+	var kind: String = it["kind"]
+	if kind == "import":
+		return [kind, it["url"], it.get("resolved_sheet", -1)]
+	if kind != "rule":
+		return [kind, str(it)]
+	var rule: Dictionary = it["rule"]
+	var sels: Array = []
+	for sel in rule["selectors"]:
+		sels.append(sel["parts"])
+	var decls: Array = []
+	for dcl in rule["declarations"]:
+		decls.append([dcl["property"], dcl["value"]])
+	return [kind, sels, decls]
+
+
+## The compiled rules of the sheets in `items` (sheet -> {item: true}).
+func rules_of(items: Dictionary) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for r in _rule_sheet.size():
+		var d = items.get(_rule_sheet[r])
+		if d != null and (d as Dictionary).has(_rule_item[r]):
+			out.append(r)
+	return out
+
+
+## Compile the rules again from the sheets of the document, in place: every
+## per-element state stays, so only the elements that a later force_matching
+## marks are computed (UxmlDocument.reload_stylesheet, "rules"). Elements
+## whose ancestor key changes are marked with their subtrees, and elements
+## with diagnostics (their offsets can move). False when the native cascade
+## cannot keep its theme blocks: the caller builds a new cascade.
+func recompile_rules() -> bool:
+	_rule_scope_idx = PackedInt32Array()
+	_rule_scope_lo = PackedInt32Array()
+	_rule_scope_hi = PackedInt32Array()
+	_rule_sheet = PackedInt32Array()
+	_rule_item = PackedInt32Array()
+	_rule_file = PackedStringArray()
+	_rule_dprop = []
+	_rule_dval = []
+	_rule_dflag = []
+	_rule_dexp = []
+	_sel_rule = PackedInt32Array()
+	_sel_spec = PackedInt64Array()
+	_sel_parts = []
+	_sel_states = []
+	_sel_origins = []
+	_sel_need = PackedInt64Array()
+	_sel_entries = []
+	_b_name = {}
+	_b_class = {}
+	_b_type = {}
+	_b_any = PackedInt32Array()
+	_anc_classes = {}
+	_anc_names = {}
+	_anc_states = 0
+	_anc_state_reqs = []
+	_anc_state_seen = {}
+	_rule_warnings = []
+	_blocks = []
+	_compile_rules()
+	if _native != null:
+		return bool(_native.call("recompile", self))
+	if _computed_once:
+		for i in els.size():
+			var ak := _anc_key_of(i)
+			if ak != _anc_key[i]:
+				_anc_key[i] = ak
+				for j in range(i, _end[i]):
+					_ov_force.append(j)
+			var w = _warn[i]
+			if w != null and not (w as Array).is_empty():
+				_ov_force.append(i)
+	return true
 
 
 ## Move the rule diagnostics of a patched sheet: `moved` maps the old selector

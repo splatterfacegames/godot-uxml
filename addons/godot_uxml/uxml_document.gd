@@ -496,8 +496,10 @@ func reload_stylesheet(origin: String, text: String) -> int:
 	for si in hits:
 		var patch = UssCascade.sheet_patch(old_items[si], _doc.sheets[si]["items"])
 		if patch == null:
-			_last_reload = "cascade"
 			_reapply.append_array(warned)
+			if _reload_rules(hits, old_items, running):
+				return OK
+			_last_reload = "cascade"
 			_layout_records = {}
 			_layout_xcache = {}
 			_swap_cascade()
@@ -517,12 +519,49 @@ func reload_stylesheet(origin: String, text: String) -> int:
 	return OK
 
 
-## "restyle", "cascade" or "full": what the last reload_stylesheet() ran
-## ("" before). "restyle": only declarations changed, and only the elements
-## of the changed rules and the subtrees they pass values to were computed.
+## "restyle", "rules", "cascade" or "full": what the last reload_stylesheet()
+## ran ("" before). "restyle": only declarations changed, and only the
+## elements of the changed rules and the subtrees they pass values to were
+## computed. "rules": selectors or rules changed, the imports stayed: the
+## rules were compiled again in place, and only the elements that an old or a
+## new changed rule matches were computed (with the subtrees they pass values
+## to).
 ## "cascade": selectors, rules or imports changed, so the rules were compiled
 ## and every element computed, but only the controls with another computed
 ## style were applied.
+## reload_stylesheet when selectors or rules changed and the imports stay
+## ("rules"): the elements that the changed rules of the old text match are
+## marked, the rules compile again in the same cascade, and the elements that
+## the changed rules of the new text match are marked. False when the edit
+## changes more than UssCascade.PATCH_MATCH_LIMIT rules or the imports: the
+## caller builds a new cascade.
+func _reload_rules(hits: Array, old_items: Dictionary, running) -> bool:
+	var old_ch := {}
+	var new_ch := {}
+	for si in hits:
+		var d = UssCascade.rule_diff(old_items[si], _doc.sheets[si]["items"])
+		if d == null:
+			return false
+		old_ch[si] = d[0]
+		new_ch[si] = d[1]
+	var old_rs := _cascade.rules_of(old_ch)
+	if old_rs.size() > UssCascade.PATCH_MATCH_LIMIT:
+		return false
+	if running != null:
+		for ti in running._written:
+			_cascade.set_override(ti, {})
+	_cascade.force_matching(old_rs)
+	if not _cascade.recompile_rules():
+		return false
+	# Above PATCH_MATCH_LIMIT rules every element is computed.
+	_cascade.force_matching(_cascade.rules_of(new_ch))
+	_reload_rev += 1
+	_last_reload = "rules"
+	_reload_pass = true
+	_restyle_now(not _restyle_queued and _attr_dirty.is_empty())
+	return true
+
+
 func get_last_reload_mode() -> String:
 	return _last_reload
 

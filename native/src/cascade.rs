@@ -294,6 +294,9 @@ pub struct Cascade {
     lay_vals: Vec<Vec<Option<GString>>>,
     lay_ver: Vec<u64>,
     computed_once: bool,
+    /// The theme blocks of the rule tables (id, first rule, rules, first
+    /// selector, selectors), as setup converted them.
+    block_ranges: Vec<(i64, usize, usize, usize, usize)>,
     /// The state inputs of the last update (see update).
     prev_es: HashMap<usize, i32>,
     prev_dis: HashMap<usize, u8>,
@@ -620,6 +623,7 @@ impl Cascade {
             lay_vals: vec![],
             lay_ver: vec![],
             computed_once: false,
+            block_ranges: vec![],
             prev_es: HashMap::new(),
             prev_dis: HashMap::new(),
             prev_global: 0,
@@ -826,42 +830,50 @@ impl Cascade {
             c.sels.push(sel);
             s += 1;
         }
+        c.block_ranges = blocks.clone();
+        c.index_sels();
+        Some(c)
+    }
+
+    /// Buckets and ancestor features of the compiled selectors.
+    fn index_sels(&mut self) {
         // Buckets and ancestor features, from the selectors (the derivation
         // of UssCascade._compile_rule / _add_rule: bucket by the rightmost
         // compound's first name, else class, else type; ancestor classes,
         // names and states from the other compounds).
-        for (si, sel) in c.sels.iter().enumerate() {
+        for si in 0..self.sels.len() {
+            let sel = self.sels[si].clone();
             let right = &sel.parts[sel.parts.len() - 1];
             let si = si as u32;
             if let Some(&k) = right.names.first() {
-                c.b_name.entry(k).or_default().push(si);
+                self.b_name.entry(k).or_default().push(si);
             } else if let Some(&k) = right.classes.first() {
-                c.b_class.entry(k).or_default().push(si);
+                self.b_class.entry(k).or_default().push(si);
             } else if let Some(&k) = right.types.first() {
-                c.b_type.entry(k).or_default().push(si);
+                self.b_type.entry(k).or_default().push(si);
             } else {
-                c.b_any.push(si);
+                self.b_any.push(si);
             }
             for cp in sel.parts.iter().take(sel.parts.len() - 1) {
                 for &x in &cp.classes {
                     let x = x as usize;
-                    if c.anc_classes.len() <= x {
-                        c.anc_classes.resize(x + 1, false);
+                    if self.anc_classes.len() <= x {
+                        self.anc_classes.resize(x + 1, false);
                     }
-                    c.anc_classes[x] = true;
+                    self.anc_classes[x] = true;
                 }
                 for &x in &cp.names {
                     let x = x as usize;
-                    if c.anc_names.len() <= x {
-                        c.anc_names.resize(x + 1, false);
+                    if self.anc_names.len() <= x {
+                        self.anc_names.resize(x + 1, false);
                     }
-                    c.anc_names[x] = true;
+                    self.anc_names[x] = true;
                 }
-                c.anc_states |= cp.mask;
+                self.anc_states |= cp.mask;
             }
         }
         let mut reqs: Vec<(Vec<u32>, Vec<u32>, Vec<u32>, i32)> = vec![];
-        for sel in &c.sels {
+        for sel in self.sels.iter() {
             for cp in sel.parts.iter().take(sel.parts.len().saturating_sub(1)) {
                 if cp.mask == 0 {
                     continue;
@@ -872,8 +884,7 @@ impl Cascade {
                 }
             }
         }
-        c.anc_state_reqs = reqs;
-        Some(c)
+        self.anc_state_reqs = reqs;
     }
 
     fn convert_rule(&mut self, t: &Tables, r: usize) -> Rule {
@@ -1805,6 +1816,108 @@ impl Cascade {
         self.parent[i]
     }
 
+    /// Compile the rules again from the tables of the GDScript cascade, in
+    /// place: the per-element state, the interned names and the converted
+    /// theme blocks stay (UssCascade.recompile_rules, a reload_stylesheet
+    /// that changes selectors or rules). Elements whose ancestor key changes
+    /// are marked with their subtrees, and elements with diagnostics (their
+    /// offsets can move). False when the theme blocks differ: the caller
+    /// builds a new cascade.
+    pub fn recompile(&mut self, cas: &Gd<Object>) -> bool {
+        let get = |name: &str| cas.get(name);
+        let t = Tables {
+            r_scope_idx: get("_rule_scope_idx").to::<PackedInt32Array>(),
+            r_lo: get("_rule_scope_lo").to::<PackedInt32Array>(),
+            r_hi: get("_rule_scope_hi").to::<PackedInt32Array>(),
+            r_sheet: get("_rule_sheet").to::<PackedInt32Array>(),
+            r_item: get("_rule_item").to::<PackedInt32Array>(),
+            r_file: get("_rule_file").to::<PackedStringArray>(),
+            r_dprop: get("_rule_dprop").to::<VarArray>(),
+            r_dval: get("_rule_dval").to::<VarArray>(),
+            r_dflag: get("_rule_dflag").to::<VarArray>(),
+            r_dexp: get("_rule_dexp").to::<VarArray>(),
+            s_rule: get("_sel_rule").to::<PackedInt32Array>(),
+            s_spec: get("_sel_spec").to::<PackedInt64Array>(),
+            s_parts: get("_sel_parts").to::<VarArray>(),
+            s_states: get("_sel_states").to::<VarArray>(),
+        };
+        let mut blocks: Vec<(i64, usize, usize, usize, usize)> = vec![];
+        if let Ok(arr) = get("_blocks").try_to::<VarArray>() {
+            for bv in arr.iter_shared() {
+                let Ok(a) = bv.try_to::<VarArray>() else { return false };
+                let n = |k: usize| a.at(k).try_to::<i64>().unwrap_or(0);
+                blocks.push((n(0), n(1) as usize, n(2) as usize, n(3) as usize, n(4) as usize));
+            }
+        }
+        if blocks != self.block_ranges {
+            return false;
+        }
+        let old_rules = std::mem::take(&mut self.rules);
+        let old_sels = std::mem::take(&mut self.sels);
+        let mut b = 0usize;
+        let mut r = 0usize;
+        let nr = t.r_sheet.len();
+        while r < nr {
+            if b < blocks.len() && blocks[b].1 == r {
+                let (_, r0, cnt, _, _) = blocks[b];
+                for k in 0..cnt {
+                    self.rules.push(t.rule_shell(r0 + k, old_rules[r0 + k].decls.clone()));
+                }
+                r += cnt;
+                b += 1;
+                continue;
+            }
+            let rule = self.convert_rule(&t, r);
+            self.rules.push(rule);
+            r += 1;
+        }
+        let mut b = 0usize;
+        let mut si = 0usize;
+        let ns = t.s_rule.len();
+        while si < ns {
+            if b < blocks.len() && blocks[b].3 == si {
+                let (_, _, _, s0, cnt) = blocks[b];
+                for k in 0..cnt {
+                    let mut sel = old_sels[s0 + k].clone();
+                    sel.rule = t.s_rule.as_slice()[s0 + k] as usize;
+                    sel.spec = t.s_spec.as_slice()[s0 + k];
+                    self.sels.push(sel);
+                }
+                si += cnt;
+                b += 1;
+                continue;
+            }
+            let sel = self.convert_sel(&t, si);
+            self.sels.push(sel);
+            si += 1;
+        }
+        self.b_name.clear();
+        self.b_class.clear();
+        self.b_type.clear();
+        self.b_any.clear();
+        self.anc_classes.clear();
+        self.anc_names.clear();
+        self.anc_states = 0;
+        self.anc_state_reqs.clear();
+        self.index_sels();
+        if self.computed_once {
+            let n = self.els.len();
+            let mut i = 0usize;
+            while i < n {
+                let ak = self.anc_key_of(i);
+                if ak != self.anc_key[i] {
+                    self.anc_key[i] = ak;
+                    self.ov_force.extend(i..self.end[i] as usize);
+                }
+                if !self.warn[i].is_empty() {
+                    self.ov_force.push(i);
+                }
+                i += 1;
+            }
+        }
+        true
+    }
+
     /// Direct children (preorder indices) of element i.
     pub fn children(&self, i: usize) -> Vec<usize> {
         let mut out = vec![];
@@ -2231,6 +2344,15 @@ impl UxmlNativeCascade {
             if r >= 0 {
                 c.patch_rule(r as usize, &dp, &dv, &df, &de);
             }
+        }
+    }
+
+    /// See Cascade::recompile.
+    #[func]
+    fn recompile(&mut self, cascade: Gd<Object>) -> bool {
+        match self.inner.as_mut() {
+            Some(c) => c.recompile(&cascade),
+            None => false,
         }
     }
 

@@ -1577,11 +1577,19 @@ func test_reload_restyles_only_the_edit() -> void:
 		# A selector, a new rule, a removed rule.
 		var t8 := t7.replace(".other {", ".other, .cell {")
 		apply_all.call(t8)
-		h.eq(a.get_last_reload_mode(), "cascade", "a selector change compiles the rules")
+		h.eq(a.get_last_reload_mode(), "rules", "a selector change compiles the rules in place")
 		_r25_same(a, b, "selector")
+		# A state of an ancestor in a new first rule: the ancestor keys change,
+		# and every later item moves.
+		var t8b := "#in:hover > * { padding-left: 1px; }\n" + t8
+		apply_all.call(t8b)
+		h.eq(a.get_last_reload_mode(), "rules", "a rule added first")
+		_r25_same(a, b, "ancestor state")
+		apply_all.call(t8)
+		_r25_same(a, b, "first rule removed")
 		var t9 := t8 + "#in { color: rgb(9, 9, 9); }\n"
 		apply_all.call(t9)
-		h.eq(a.get_last_reload_mode(), "cascade", "a new rule compiles the rules")
+		h.eq(a.get_last_reload_mode(), "rules", "a new rule compiles the rules in place")
 		h.eq(String(a.get_computed_style("in")["color"]["value"]), "rgb(9, 9, 9)", "the new rule applies")
 		_r25_same(a, b, "added rule")
 		apply_all.call(t8)

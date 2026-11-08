@@ -389,12 +389,17 @@ func _edit_sheet(text: String, origin: String, rng: RandomNumberGenerator) -> St
 			var d2: Dictionary = decls[rng.randi() % decls.size()]
 			return text.substr(0, int(d2["span"]["start"])) + text.substr(int(d2["span"]["end"]))
 		8:
-			var suffix: String = [", .rl-none", ":hover", " Label", ", Label"][rng.randi() % 4]
+			# Ancestor states (`:hover > *`) change the ancestor keys of the
+			# cascade ("rules" reloads mark those subtrees).
+			var suffix: String = [", .rl-none", ":hover", " Label", ", Label", ":hover > *", ":checked Label"][rng.randi() % 6]
 			return text.insert(int(rule["selector_span"]["end"]), suffix)
 		9:
 			return text.substr(0, int(rule["span"]["start"])) + text.substr(int(rule["span"]["end"]))
 		10:
 			return "/* moved */\n" + text
+		11:
+			# A rule first: every later item moves to another index.
+			return RELOAD_RULES[rng.randi() % RELOAD_RULES.size()] + "\n" + text
 	return text
 
 
