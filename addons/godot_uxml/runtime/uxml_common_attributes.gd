@@ -160,7 +160,7 @@ func _set_direction(el: UxmlElement, d: int) -> void:
 	if c == null:
 		return
 	for t in [c, _doc._natives.get(el, c)]:
-		if t is Label or t is Button or t is LineEdit or t is TextEdit:
+		if UxmlStyleApplier.is_label(t) or t is Button or t is LineEdit or t is TextEdit:
 			t.text_direction = td
 	if c is UxmlField and (c as UxmlField).caption != null:
 		(c as UxmlField).caption.text_direction = td

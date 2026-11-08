@@ -1563,11 +1563,14 @@ impl Cascade {
 
         drop(s_sub);
         let _s_build = crate::prof::scope("c.build");
+        let s_dup = crate::prof::scope("b.dup");
         let (mut computed, mut comp): (VarDictionary, Vec<Item>) = if p >= 0 {
             (self.fc_dict[p as usize].duplicate_shallow(), (*self.fc[p as usize]).clone())
         } else {
             (VarDictionary::new(), vec![])
         };
+        drop(s_dup);
+        let s_best = crate::prof::scope("b.best");
         for b in &best {
             let pidx = b.pid as usize;
             if b.failed {
@@ -1623,6 +1626,8 @@ impl Cascade {
             }
         }
 
+        drop(s_best);
+        let s_font = crate::prof::scope("b.font");
         // font-size: a percentage of the inherited size, computed here as
         // Unity computes it (uss_cascade.gd _font_percent).
         if let Some(fpid) = self.props.index.get("font-size").copied() {
@@ -1653,6 +1658,7 @@ impl Cascade {
             }
         }
 
+        drop(s_font);
         self.warn[i] = warns;
         // Computed overrides (transitions) replace the cascade result last,
         // so inheritance, layout values and the output all see them.
@@ -1681,6 +1687,7 @@ impl Cascade {
         } else if !self.tgt.is_empty() {
             self.tgt.remove(&i);
         }
+        let s_lay = crate::prof::scope("b.lay");
         // Layout-relevant values for the native flex pass (versioned).
         let mut lv: Vec<Option<GString>> = vec![None; crate::layout::LAYOUT_PROPS.len()];
         for it in &comp {
@@ -1701,6 +1708,8 @@ impl Cascade {
             }
             None => 0,
         };
+        drop(s_lay);
+        let _s_wrap = crate::prof::scope("b.wrap");
         if self.els[i].leaf {
             self.fc[i] = self.empty_fc.clone();
             self.fc_dict[i] = VarDictionary::new();
@@ -2072,7 +2081,7 @@ impl UxmlNativeCascade {
         for (k, v) in controls.iter_shared().enumerate() {
             let c = v.try_to::<Gd<godot::classes::Control>>().ok();
             buttons.push(c.as_ref().is_some_and(|c| c.clone().try_cast::<godot::classes::Button>().is_ok()));
-            labels.push(c.as_ref().and_then(|c| c.clone().try_cast::<godot::classes::Label>().ok()));
+            labels.push(c.as_ref().and_then(crate::layout::TextCtl::of));
             rich.push(c.as_ref().and_then(|c| c.clone().try_cast::<godot::classes::RichTextLabel>().ok()));
             ctl.push(c);
             let nat = natives.get(k).and_then(|n| n.try_to::<Gd<godot::classes::TextureRect>>().ok());
@@ -2100,6 +2109,29 @@ impl UxmlNativeCascade {
         });
         self.placement = crate::layout::Placement::default();
         self.xcache.clear();
+    }
+
+    /// Replace the control of element i (a UxmlText swapped for a Label,
+    /// UxmlDocument._promote_text). Its measures are read again, and the
+    /// next placement writes its rect (place_only after the apply).
+    #[func]
+    fn set_control(&mut self, i: i64, control: Variant) {
+        let Some(io) = self.layout_in.as_mut() else { return };
+        let i = i as usize;
+        if i >= io.controls.len() {
+            return;
+        }
+        let c = control.try_to::<Gd<godot::classes::Control>>().ok();
+        io.buttons[i] = c.as_ref().is_some_and(|c| c.clone().try_cast::<godot::classes::Button>().is_ok());
+        io.labels[i] = c.as_ref().and_then(crate::layout::TextCtl::of);
+        io.rich[i] = c.as_ref().and_then(|c| c.clone().try_cast::<godot::classes::RichTextLabel>().ok());
+        io.controls[i] = c;
+        io.maxc.borrow_mut()[i] = None;
+        io.unfit.borrow_mut()[i] = None;
+        io.margins.borrow_mut()[i] = None;
+        io.cliptext.borrow_mut()[i] = None;
+        io.touched.borrow_mut()[i] = true;
+        self.placement.forget(i);
     }
 
     /// The style applier while best-fit text is active, else null (see

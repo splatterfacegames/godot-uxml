@@ -11,7 +11,7 @@ extends RefCounted
 ## Cost: one extra Label and one canvas group per Label with a blurred
 ## shadow; nothing for other Labels.
 
-var label: Label
+var label: Control
 var copy: Label
 var item: RID
 var enabled := true
@@ -21,7 +21,7 @@ var _color := Color(0, 0, 0, 0)
 var _empty := StyleBoxEmpty.new()
 
 
-func _init(p_label: Label) -> void:
+func _init(p_label: Control) -> void:
 	label = p_label
 	copy = Label.new()
 	copy.name = "uxml-text-shadow"

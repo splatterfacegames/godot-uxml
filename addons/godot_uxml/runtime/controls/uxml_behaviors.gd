@@ -542,7 +542,9 @@ class TextPartBehavior extends Behavior:
 ## Controls that draw their own `text` (PopupWindow).
 class OwnTextBehavior extends Behavior:
 	func on_model_changed() -> void:
-		var l := doc._controls.get(el) as Label
+		var l = doc._controls.get(el)
+		if l != null and not UxmlStyleApplier.is_label(l):
+			l = null
 		if l != null and l.text != attr("text"):
 			doc._set_control_text(l, attr("text"))
 

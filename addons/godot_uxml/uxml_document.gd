@@ -227,6 +227,8 @@ var _native_bound: UssCascade = null  # cascade whose native layout has the cont
 ## the scene tree until they are shown (see _park_hidden). False keeps
 ## every control in the tree from the load on.
 static var park_hidden := true
+## A/B switch of experiments (bench/prof/ab.gd).
+static var ab_flag := true
 var _transitions: UssTransitions = null  # running USS transitions (per load)
 
 ## Round the layout to the pixel grid as Unity does (Yoga's
@@ -1056,6 +1058,7 @@ func _clear() -> void:
 ## Parent map, name index (first wins, duplicates diagnosed), runtime
 ## control tree, and signal wiring — everything keyed off the element tree.
 func _index() -> void:
+	var pt := Time.get_ticks_usec() if profile != null else 0
 	var collections := _prepare_collections()
 	# Control part trees (Toggle label/input/checkmark, Foldout content, ...)
 	# become real model elements before anything indexes the tree.
@@ -1068,6 +1071,8 @@ func _index() -> void:
 					for sub in row.walk():
 						if sub.part_of == null:
 							_pooled[sub] = true
+	if profile != null:
+		pt = _profile_add("load: part trees", pt)
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
@@ -1090,9 +1095,13 @@ func _index() -> void:
 			continue
 		_by_name[ns] = el
 		_el_names[el] = ns
+	if profile != null:
+		pt = _profile_add("load: index", pt)
 
 	var factory := UxmlControlFactory.new(_resolver, _doc.path, _doc.source, _rt_warnings)
 	factory.element_paths = _doc.element_paths
+	factory.core_text = _core_text()
+	factory.pooled = _pooled
 	var built: Array = []
 	for child in _doc.root.children:
 		if UssControls.is_non_visual(child.local):
@@ -1103,8 +1112,12 @@ func _index() -> void:
 	_controls[_doc.root] = _root_box
 	for el in _controls:
 		_el_of[_controls[el]] = el
+	if profile != null:
+		pt = _profile_add("load: control creation", pt)
 	# The controls were built off the tree; hidden subtrees stay off it.
 	_park_hidden()
+	if profile != null:
+		pt = _profile_add("load: first cascade", pt)
 	for c in built:
 		if not c.has_meta(&"uxml_parked"):
 			_root_box.add_child(c)
@@ -1117,9 +1130,17 @@ func _index() -> void:
 		if el == _doc.root:
 			continue
 		_wire(el, _controls[el])
+	if profile != null:
+		pt = _profile_add("load: add_child, wiring", pt)
 	_behaviors = UxmlBehaviors.attach_all(self)
+	if profile != null:
+		pt = _profile_add("load: behaviors", pt)
 	_attrs.setup()
+	if profile != null:
+		pt = _profile_add("load: attributes", pt)
 	_binding.setup()
+	if profile != null:
+		pt = _profile_add("load: bindings", pt)
 
 
 # ---------------------------------------------------------------------------
@@ -1658,7 +1679,7 @@ func _settle_snapshot() -> void:
 				_snap_kind.append(3)
 				continue
 			_snap_cs.append(c)
-			_snap_kind.append(1 if box else (2 if c is Label or c is RichTextLabel or c is Button else 0))
+			_snap_kind.append(1 if box else (2 if UxmlStyleApplier.is_label(c) or c is RichTextLabel or c is Button else 0))
 	var n := _snap_cs.size()
 	var mins := PackedVector2Array()
 	var nats := PackedVector2Array()
@@ -2031,7 +2052,7 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 	var c: Control = _controls.get(el)
 	if c == null:
 		return Vector2.ZERO
-	if ((c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
+	if ((UxmlStyleApplier.is_label(c) or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
 			and content_w >= 0.0 and not c.has_meta(&"uxml_autosize")):
 		# Label reports its wrapped height from its current width — hand it
 		# the width the line assigned so the measurement is honest. The
@@ -2077,7 +2098,7 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 			c.set_meta(&"uxml_clip_full", [full, clipped, ms])
 	else:
 		ms = c.get_combined_minimum_size()
-	if c is Label:
+	if UxmlStyleApplier.is_label(c):
 		if c.autowrap_mode != TextServer.AUTOWRAP_OFF and not c.has_meta(&"uxml_autosize"):
 			# Unity measures wrapping text at its max-content width: the
 			# longest paragraph. The layout clamps the measure to the space
@@ -2113,7 +2134,7 @@ func _volatile_measures() -> Dictionary:
 	var out := {}
 	for el in _controls:
 		var c: Control = _controls[el]
-		if ((c is Label or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
+		if ((UxmlStyleApplier.is_label(c) or c is RichTextLabel) and c.autowrap_mode != TextServer.AUTOWRAP_OFF
 				and not c.has_meta(&"uxml_autosize")):
 			out[el] = c.size.x - _hpad(c)
 	return out
@@ -2200,7 +2221,7 @@ func _text_controls() -> Dictionary:
 		var out := {&"_of": _doc}
 		for el in _controls:
 			var c = _controls[el]
-			if not (el as UxmlElement).children.is_empty() and (c is Label or c is RichTextLabel or c is Button):
+			if not (el as UxmlElement).children.is_empty() and (UxmlStyleApplier.is_label(c) or c is RichTextLabel or c is Button):
 				out[el] = true
 		_text_parents = out
 	return _text_parents
@@ -2551,12 +2572,12 @@ func _place_control(el: UxmlElement) -> void:
 		UxmlStyleApplier.autosize_place(c, cs)
 	c.position = r.position
 	c.size = r.size
-	if _applier != null and c is Label and c.size.x > r.size.x + 0.01:
+	if _applier != null and UxmlStyleApplier.is_label(c) and c.size.x > r.size.x + 0.01:
 		# Narrower than its text (UxmlStyleApplier.fit_label_width; the
 		# native placement does the same).
 		_applier.fit_label_width(c)
 		c.size = r.size
-	if _applier != null and c is Label:
+	if _applier != null and UxmlStyleApplier.is_label(c):
 		# Godot floors a Label at one text line; Unity's box can be shorter.
 		# A one-line Label taller than its box is fitted; a fitted Label is
 		# fitted again for a new height (the native placement does the same).
@@ -2658,6 +2679,72 @@ func _park_hidden() -> void:
 		_parked[el] = pc
 
 
+## Plain Labels are drawn by the core (UxmlText, native/src/text.rs) on the
+## native path: a Label's text with a Label's properties and theme items,
+## without the cost of a Label (docs/design.md, "Core-drawn text"). False
+## makes every Label a Label. Read at load time.
+static var core_text := true
+
+
+## Whether this load makes UxmlTexts: the native cascade and layout run and
+## no Godot theme above the document has other Label items.
+func _core_text() -> bool:
+	return (core_text and ab_flag and use_native_layout and UssCascade.use_native
+		and ClassDB.class_exists(&"UxmlText") and ClassDB.class_exists(&"UxmlNativeCascade")
+		and not _theme_above(_root_box))
+
+
+## A UxmlText is swapped for a Label with the same state when an API call
+## hands its control out (get_element, get_native, get_control_for,
+## get_native_for): code that writes Label.text (or anything of a Label) then
+## works as before. The Label is built, applied and placed as the load would
+## have made it; the UxmlText is freed.
+func _promote_text(el: UxmlElement) -> void:
+	var t = _controls.get(el)
+	if t == null or t is Label or not (t as Control).is_class(&"UxmlText"):
+		return
+	var l := Label.new()
+	for p in [&"text", &"horizontal_alignment", &"vertical_alignment", &"autowrap_mode",
+			&"autowrap_trim_flags", &"clip_text", &"text_overrun_behavior", &"uppercase",
+			&"label_settings", &"text_direction"]:
+		l.set(p, t.get(p))
+	for p in [&"name", &"tooltip_text", &"mouse_filter", &"focus_mode", &"visible", &"position", &"size"]:
+		l.set(p, t.get(p))
+	for m in (t as Control).get_meta_list():
+		if m in [&"uxml_filter", &"uxml_shadow", &"uxml_clip", &"uxml_shadow_sharp", &"uxml_unclip", &"uxml_el"]:
+			continue
+		l.set_meta(m, t.get_meta(m))
+	if _applier != null:
+		_applier.forget_control(t)
+	var parent: Node = t.get_parent()
+	if parent != null:
+		var at: int = t.get_index()
+		parent.remove_child(t)
+		parent.add_child(l)
+		parent.move_child(l, at)
+	for ch in (t as Control).get_children(true):
+		ch.reparent(l, false)
+	_controls[el] = l
+	_natives[el] = l
+	_el_of.erase(t)
+	_el_of[l] = el
+	_applied_as.erase(t)
+	_styled_as.erase(t)
+	_wire(el, l)
+	if _cascade != null and _cascade.index.has(el):
+		var ci: int = _cascade.index[el]
+		if _native_bound == _cascade and _cascade._native != null:
+			_cascade._native.call("set_control", ci, l)
+		if _applier != null and ci < _dis.size():
+			var st: Dictionary = _styles.get(el, {})
+			_applier.apply(el, l, l, st, _dis[ci] == 1, _gone[ci] == 1)
+			_applied_as[l] = [st, _dis[ci] * 2 + _gone[ci]]
+			if _gone[ci] == 0:
+				_styled_as[l] = [st, _dis[ci]]
+			_place_elements([el], _cascade.index)
+	t.free()
+
+
 ## Authored elements, and the content of an authored Foldout (collapsed:
 ## its behavior only sets the content's style). Other parts are placed,
 ## measured or moved by their control's behavior.
@@ -2755,7 +2842,10 @@ func _free_parked() -> void:
 ## UxmlField wrapper; for Image the host box.
 func get_element(element_name: String) -> Control:
 	var el := _named(element_name)
-	return null if el == null else _controls.get(el)
+	if el == null:
+		return null
+	_promote_text(el)
+	return _controls.get(el)
 
 
 func get_element_by_name(element_name: String) -> Control:
@@ -2770,6 +2860,7 @@ func get_native(element_name: String) -> Control:
 	var el := _named(element_name)
 	if el == null:
 		return null
+	_promote_text(el)
 	var b = _behaviors.get(el)
 	if b != null:
 		return b.native()
@@ -2832,6 +2923,9 @@ func get_control_for(element: UxmlElement) -> Control:
 	var c = _controls.get(element)
 	if c != null and not _parked.is_empty():
 		_expose(element)
+	if c != null:
+		_promote_text(element)
+		c = _controls.get(element)
 	return c
 
 
@@ -2842,6 +2936,7 @@ func get_native_for(element: UxmlElement) -> Control:
 		return null
 	if not _parked.is_empty():
 		_expose(element)
+	_promote_text(element)
 	var b = _behaviors.get(element)
 	if b != null:
 		return b.native()
@@ -3352,7 +3447,7 @@ func _set_control_text(c: Control, text: String) -> bool:
 		c.remove_meta("uxml_rich_key")
 		refresh()
 		return true
-	if c is Label or c is Button:
+	if UxmlStyleApplier.is_label(c) or c is Button:
 		var el = _text_leaf(c)
 		if el != null and not _text_dirty.has(el):
 			_text_dirty[el] = _measure_leaf(el, _styles.get(el, {}), -1.0)
@@ -3669,9 +3764,9 @@ const _OWN_TEXT := {"Label": true, "Button": true, "RepeatButton": true, "TextEl
 ## (UxmlControlFactory.text_of), through the same path as set_text.
 func _sync_own_text(el: UxmlElement) -> void:
 	var c = _natives.get(el, _controls.get(el))
-	if not (c is Label or c is RichTextLabel or c is Button):
+	if not (UxmlStyleApplier.is_label(c) or c is RichTextLabel or c is Button):
 		return
-	var t := UxmlControlFactory.text_of(el, c is Button or (el.local != "Label" and c is Label))
+	var t := UxmlControlFactory.text_of(el, c is Button or (el.local != "Label" and UxmlStyleApplier.is_label(c)))
 	if UxmlBinding._shown_text(c) != t:
 		_set_control_text(c, t)
 

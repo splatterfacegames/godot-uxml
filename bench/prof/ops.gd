@@ -46,6 +46,37 @@ func _initialize() -> void:
 				var a: Array = steps[k]
 				a.sort()
 				print("  step %-40s %8.2f ms" % [k, a[a.size() / 2]])
+		"load-steps", "settings-steps", "inventory-steps", "dialog-steps":
+			# The steps of UxmlDocument._finish_load as the document times
+			# them (UxmlDocument.profile), the rest of the load as "parse".
+			var doc := "big" if op == "load-steps" else "wl_" + op.get_slice("-", 0)
+			var steps := {}
+			for i in _n + 2:
+				var d := UxmlDocument.new()
+				root.add_child(d)
+				d.size = Vector2(1280, 800) if doc == "big" else Vector2(1280, 720)
+				UxmlDocument.profile = {}
+				var t := Time.get_ticks_usec()
+				d.load_document("Assets/UI/%s.uxml" % doc, ROOT)
+				var total := (Time.get_ticks_usec() - t) / 1000.0
+				var p: Dictionary = UxmlDocument.profile
+				UxmlDocument.profile = null
+				var rest := total
+				for k in p:
+					rest -= float(p[k])
+				p["parse, theme attach, rest"] = rest
+				p["TOTAL"] = total
+				if i >= 2:
+					for k in p:
+						if not steps.has(k): steps[k] = []
+						steps[k].append(float(p[k]))
+				root.remove_child(d)
+				d.free()
+				await process_frame
+			for k in steps:
+				var a: Array = steps[k]
+				a.sort()
+				print("  step %-40s %8.2f ms" % [k, a[a.size() / 2]])
 		_:
 			await _op(op)
 	print("PROF_DONE %.1f ms" % ((Time.get_ticks_usec() - t0) / 1000.0))

@@ -879,7 +879,7 @@ func _write(rec: Dictionary, v: Variant) -> int:
 	match prop:
 		"text":
 			var s := _str(v)
-			if native is Label or native is Button or native is RichTextLabel:
+			if UxmlStyleApplier.is_label(native) or native is Button or native is RichTextLabel:
 				if _shown_text(native) == s:
 					return 0
 				var shown := s

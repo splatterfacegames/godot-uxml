@@ -8,16 +8,26 @@ mod cascade;
 mod layout;
 mod parse;
 mod prof;
+mod text;
 
 struct UxmlNativeExtension;
 
 #[gdextension]
 unsafe impl ExtensionLibrary for UxmlNativeExtension {
+    fn on_stage_init(stage: InitStage) {
+        // Before any node exists: declaring the theme variation of UxmlText
+        // changes the default theme, which every Control would see.
+        if stage == InitStage::MainLoop {
+            text::ensure_variation();
+        }
+    }
+
     fn on_stage_deinit(stage: InitStage) {
         // The cascade's theme block cache holds Godot strings: drop it
         // while the engine is still up.
         if stage == InitStage::MainLoop || stage == InitStage::Scene {
             cascade::clear_cache();
+            text::clear_cache();
         }
     }
 }

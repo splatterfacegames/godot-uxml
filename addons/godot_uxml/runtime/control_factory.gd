@@ -56,6 +56,11 @@ var _warned: Dictionary = {}
 var controls: Dictionary = {}
 ## element -> innermost interactive native Control (defaults to outer)
 var natives: Dictionary = {}
+## Make a UxmlText (native/src/text.rs: the text drawn by the core, with a
+## Label's properties) for an authored Label without rich text, outside the
+## row pools (`pooled`). UxmlDocument sets it on the native layout path.
+var core_text := false
+var pooled: Dictionary = {}
 ## Element cloned from a template file -> that file's path
 ## (UxmlDocumentModel.element_paths); relative image references in such an
 ## element resolve against its own file.
@@ -139,6 +144,11 @@ func _create(el: UxmlElement) -> Control:
 				var pr := UxmlRichText.parse(text)
 				if pr["rich"]:
 					return _create_rich_label(el, text, pr)
+			if core_text and el.part_of == null and not pooled.has(el):
+				var t: Control = ClassDB.instantiate(&"UxmlText")
+				t.text = text
+				_text_element_attrs(el, t)
+				return t
 			var l := Label.new()
 			l.text = text
 			_text_element_attrs(el, l)

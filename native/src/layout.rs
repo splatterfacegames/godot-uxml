@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use godot::classes::{Control, Font, Label, Object, RichTextLabel, StyleBox};
+use godot::classes::{Control, Font, Label, LabelSettings, Object, RichTextLabel, StyleBox};
 use godot::prelude::*;
 
 use crate::cascade::Cascade;
@@ -282,7 +282,7 @@ enum CtlKind {
 pub struct LayoutIn {
     pub controls: Vec<Option<Gd<Control>>>,
     pub boxed: Vec<bool>,
-    pub labels: Vec<Option<Gd<Label>>>,
+    pub labels: Vec<Option<TextCtl>>,
     /// Rich text Labels (RichTextLabel): wrap-volatile like Labels.
     pub rich: Vec<Option<Gd<RichTextLabel>>>,
     /// Buttons (Button and its subclasses): fitted to their box by the
@@ -427,6 +427,22 @@ impl Placement {
         self.place(io, i, applier, force);
     }
 
+    /// Element i has another control: nothing of the old one is kept.
+    pub fn forget(&mut self, i: usize) {
+        if let Some(p) = self.placed_at.get_mut(i) {
+            *p = None;
+        }
+        if let Some(h) = self.hooked.get_mut(i) {
+            *h = None;
+        }
+        if let Some(f) = self.fit_h.get_mut(i) {
+            *f = f32::NAN;
+        }
+        if let Some(f) = self.fit_seen.get_mut(i) {
+            *f = None;
+        }
+    }
+
     fn touch(io: &LayoutIn, i: usize) {
         if let Some(t) = io.touched.borrow_mut().get_mut(i) {
             *t = true;
@@ -478,6 +494,7 @@ impl Placement {
             c.set_size(r.size);
         }
         if let (Some(lbl), Some(a)) = (&io.labels[i], applier) {
+            let lbl = lbl.ctl();
             // UxmlDocument._place_control: a Label narrower than its text
             // (UxmlStyleApplier.fit_label_width) gets clip_text and the
             // `uxml_clip_text` meta the measure reads.
@@ -493,7 +510,8 @@ impl Placement {
                 }
             }
         }
-        if let (Some(lbl), Some(a)) = (&io.labels[i], applier) {
+        if let (Some(tl), Some(a)) = (&io.labels[i], applier) {
+            let lbl = tl.ctl();
             // UxmlDocument._place_control: Godot floors a Label at one text
             // line; Unity's box can be shorter (UxmlStyleApplier.fit_label).
             // A fitted Label is fitted again only for a new height.
@@ -518,7 +536,7 @@ impl Placement {
             let fitted = !fh.is_nan();
             let now_h = c.get_size().y;
             let floored = d(now_h) > d(r.size.y) + 0.01;
-            let mut call = (floored && (fitted || lbl.get_autowrap_mode() == godot::classes::text_server::AutowrapMode::OFF))
+            let mut call = (floored && (fitted || !tl.wraps()))
                 || (fitted && fh != r.size.y);
             if call && self.fit_seen[i] == Some((r.size.y, now_h)) {
                 call = false;
@@ -785,7 +803,7 @@ impl XCache {
                 let min = ctl.get_combined_minimum_size();
                 let nat = Vector2::ZERO;
                 let text = if let Some(l) = &io.labels[i] {
-                    Some(l.get_text())
+                    Some(l.text())
                 } else if let Some(r) = &io.rich[i] {
                     Some(r.get_text())
                 } else if io.buttons[i] {
@@ -927,7 +945,7 @@ impl<'a> Pass<'a> {
                     continue;
                 }
                 let wraps = match (&io.labels[i], &io.rich[i]) {
-                    (Some(lbl), _) => lbl.get_autowrap_mode() != godot::classes::text_server::AutowrapMode::OFF,
+                    (Some(lbl), _) => lbl.wraps(),
                     (None, Some(r)) => r.get_autowrap_mode() != godot::classes::text_server::AutowrapMode::OFF,
                     _ => false,
                 };
@@ -1609,7 +1627,7 @@ impl<'a> Pass<'a> {
                     let kept = if on { self.io.unfit.borrow()[i] } else { None };
                     let v = match kept {
                         Some(v) => v,
-                        None if lbl.has_meta(&self.sn_fit) => unfitted_height(&lbl, &self.sn_unfit),
+                        None if lbl.ctl().has_meta(&self.sn_fit) => unfitted_height(&lbl.ctl(), &self.sn_unfit),
                         None => -1.0,
                     };
                     if on {
@@ -1625,7 +1643,7 @@ impl<'a> Pass<'a> {
         }
         if let Some(lbl) = &self.io.labels[i] {
             // Unity measures an empty text 0 x 0 (UxmlDocument._measure_leaf).
-            if lbl.get_text().is_empty() {
+            if lbl.text().is_empty() {
                 return Vector2::ZERO;
             }
         }
@@ -1692,11 +1710,11 @@ impl<'a> Pass<'a> {
     }
 
     /// label_max_content through the cross-layout cache (by text).
-    fn max_content(&self, i: usize, lbl: &Gd<Label>) -> f64 {
+    fn max_content(&self, i: usize, lbl: &TextCtl) -> f64 {
         if !self.io.maxc_on.get() {
             return label_max_content(lbl, &self.sn_names);
         }
-        let text = lbl.get_text();
+        let text = lbl.text();
         if let Some((t, v)) = &self.io.maxc.borrow()[i] {
             if *t == text {
                 return *v;
@@ -2596,8 +2614,9 @@ impl RecCache {
 /// UxmlStyleApplier.label_max_content: the longest paragraph of a Label as
 /// one line, plus its stylebox margins, kept in the `uxml_maxc` meta for the
 /// text.
-fn label_max_content(l: &Gd<Label>, sn: &[StringName; 4]) -> f64 {
-    let text = l.get_text();
+fn label_max_content(tl: &TextCtl, sn: &[StringName; 4]) -> f64 {
+    let text = tl.text();
+    let l = tl.ctl();
     if l.has_meta(&sn[3]) {
         if let Ok(c) = l.get_meta(&sn[3]).try_to::<VarArray>() {
             let same = c.get(0).and_then(|v| v.try_to::<GString>().ok()).map(|v| v == text).unwrap_or(false);
@@ -2610,14 +2629,14 @@ fn label_max_content(l: &Gd<Label>, sn: &[StringName; 4]) -> f64 {
     }
     let mut font: Option<Gd<Font>> = l.get_theme_font(&sn[0]);
     let mut fs = l.get_theme_font_size(&sn[1]);
-    if let Some(ls) = l.get_label_settings() {
+    if let Some(ls) = tl.label_settings() {
         if let Some(lf) = ls.get_font() {
             font = Some(lf);
         }
         fs = ls.get_font_size();
     }
     let mut t = text.clone();
-    if l.is_uppercase() {
+    if tl.uppercase() {
         t = t.to_upper();
     }
     let mut w = 0.0f64;
@@ -2639,7 +2658,7 @@ fn label_max_content(l: &Gd<Label>, sn: &[StringName; 4]) -> f64 {
 /// UxmlStyleApplier.unfitted_height: one line of the font a fitted Label has
 /// without the fit, plus its stylebox margins; kept in the same
 /// `uxml_unfit` meta.
-fn unfitted_height(l: &Gd<Label>, sn_unfit: &StringName) -> f64 {
+fn unfitted_height(l: &Gd<Control>, sn_unfit: &StringName) -> f64 {
     if l.has_meta(sn_unfit) {
         if let Ok(v) = l.get_meta(sn_unfit).try_to::<f64>() {
             return v;
@@ -2759,4 +2778,57 @@ fn pixel(v: f64) -> f64 {
         return v - fr + 1.0;
     }
     v - fr + if fr > 0.5 || (fr - 0.5).abs() < 0.0001 { 1.0 } else { 0.0 }
+}
+
+
+/// A Label, or the core-drawn text of a Label element (crate::text::UxmlText):
+/// what the layout measures and fits as text.
+#[derive(Clone)]
+pub enum TextCtl {
+    L(Gd<Label>),
+    T(Gd<crate::text::UxmlText>),
+}
+
+impl TextCtl {
+    pub fn of(c: &Gd<Control>) -> Option<TextCtl> {
+        if let Ok(l) = c.clone().try_cast::<Label>() {
+            return Some(TextCtl::L(l));
+        }
+        c.clone().try_cast::<crate::text::UxmlText>().ok().map(TextCtl::T)
+    }
+
+    pub fn ctl(&self) -> Gd<Control> {
+        match self {
+            TextCtl::L(l) => l.clone().upcast(),
+            TextCtl::T(t) => t.clone().upcast(),
+        }
+    }
+
+    pub fn text(&self) -> GString {
+        match self {
+            TextCtl::L(l) => l.get_text(),
+            TextCtl::T(t) => t.bind().text_ref().clone(),
+        }
+    }
+
+    pub fn wraps(&self) -> bool {
+        match self {
+            TextCtl::L(l) => l.get_autowrap_mode() != godot::classes::text_server::AutowrapMode::OFF,
+            TextCtl::T(t) => t.bind().autowrap() != 0,
+        }
+    }
+
+    pub fn label_settings(&self) -> Option<Gd<LabelSettings>> {
+        match self {
+            TextCtl::L(l) => l.get_label_settings(),
+            TextCtl::T(t) => t.bind().settings(),
+        }
+    }
+
+    pub fn uppercase(&self) -> bool {
+        match self {
+            TextCtl::L(l) => l.is_uppercase(),
+            TextCtl::T(t) => t.bind().upper(),
+        }
+    }
 }

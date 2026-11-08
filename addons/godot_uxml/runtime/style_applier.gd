@@ -259,6 +259,12 @@ func _apply_image(box: UxmlBox, tr: TextureRect, style: Dictionary, el: UxmlElem
 # Themed controls
 # ---------------------------------------------------------------------------
 
+## A Label, or a UxmlText: the core-drawn text of a plain Label element
+## (native/src/text.rs), which has a Label's properties and theme items.
+static func is_label(c) -> bool:
+	return c is Label or (c is Control and (c as Control).is_class(&"UxmlText"))
+
+
 func _stylebox_slots(c: Control) -> Array:
 	if c is CheckBox:
 		return ["normal", "hover", "pressed", "disabled", "focus"]
@@ -270,7 +276,7 @@ func _stylebox_slots(c: Control) -> Array:
 		return ["normal", "focus", "read_only"]
 	if c is TextEdit:
 		return ["normal", "focus", "read_only"]
-	if c is Label or c is RichTextLabel:
+	if is_label(c) or c is RichTextLabel:
 		return ["normal"]
 	if c is Slider:
 		return ["slider"]
@@ -287,7 +293,7 @@ func _font_color_names(c: Control) -> Array:
 		return ["font_color", "font_placeholder_color"]
 	if c is TextEdit:
 		return ["font_color"]
-	if c is Label:
+	if is_label(c):
 		return ["font_color"]
 	if c is RichTextLabel:
 		return ["default_color"]
@@ -508,10 +514,10 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 		c.remove_meta(&"uxml_clip_full")
 	if c.has_meta(&"uxml_unfit"):
 		c.remove_meta(&"uxml_unfit")
-	if unity_line_metrics and (c is Label or c is Button or c is LineEdit or c is TextEdit
+	if unity_line_metrics and (is_label(c) or c is Button or c is LineEdit or c is TextEdit
 			or c is RichTextLabel) and not _has_url_font(style):
 		font = _line_font(c, font, style, el)
-	if unity_line_metrics and (c is Label or c is TextEdit) and not c.has_theme_constant_override(&"line_spacing"):
+	if unity_line_metrics and (is_label(c) or c is TextEdit) and not c.has_theme_constant_override(&"line_spacing"):
 		# Unity's lines follow each other at the line height; Godot adds
 		# line_spacing (Label 3px, TextEdit 4px): a three-line TextField
 		# was 85px high, Unity's 73px (ctl-textfield-multiline).
@@ -546,7 +552,7 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 	if _gate(c, style, _TEXT_FX_KEYS, &"uxml_textfx"):
 		_apply_text_shadow(c, style, el)
 		_apply_elision(c, style, el)
-		if c is Label or c is RichTextLabel:
+		if is_label(c) or c is RichTextLabel:
 			# Last: LabelSettings must copy every text override set above.
 			_apply_paragraph_spacing(c, style, el)
 	if c is RichTextLabel:
@@ -584,7 +590,7 @@ func _apply_auto_size(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	if e == null and not had:
 		return
 	var spec = null
-	if e != null and (c is Label or (c is Button and not c is OptionButton)):
+	if e != null and (is_label(c) or (c is Button and not c is OptionButton)):
 		var r := UssValues.parse_text_auto_size(String(e["value"]))
 		if not r["ok"]:
 			_warn(el, "-unity-text-auto-size", r["problem"])
@@ -685,7 +691,7 @@ static func _fits(c: Control, s: int, w: float, h: float) -> bool:
 ## off, so the size is the full text's.
 static func _combined_at(c: Control, s: int, w: float) -> Vector2:
 	c.add_theme_font_size_override(_font_size_name(c), s)
-	if c is Label and c.autowrap_mode != TextServer.AUTOWRAP_OFF:
+	if is_label(c) and c.autowrap_mode != TextServer.AUTOWRAP_OFF:
 		var m := _uxml_margins(c)
 		if w < 0.0:
 			c.autowrap_mode = TextServer.AUTOWRAP_OFF
@@ -716,7 +722,7 @@ static func _autosize_save(c: Control) -> Array:
 	var clip = c.get(&"clip_text")
 	if clip == true:
 		c.set(&"clip_text", false)
-	if c is Label:
+	if is_label(c):
 		c.set_meta(&"uxml_autosize_wrap", c.autowrap_mode)
 	return [fs, c.size, shown, full, clip]
 
@@ -739,7 +745,7 @@ static func _autosize_restore(c: Control, saved: Array) -> void:
 ## thickness around each glyph; Godot's outline_size is the full stroke
 ## width centred on the glyph edge, so it is doubled.
 func _apply_text_outline(c: Control, style: Dictionary, el: UxmlElement) -> void:
-	if not (c is Label or c is Button or c is LineEdit or c is RichTextLabel):
+	if not (is_label(c) or c is Button or c is LineEdit or c is RichTextLabel):
 		return
 	var w := _float_px(style, "-unity-text-outline-width", el)
 	var col = _color(style, "-unity-text-outline-color", el)
@@ -1172,7 +1178,7 @@ const _FONT_KEY := &"uxml_font_key"
 ## line) plus its stylebox margins: what Unity's TextElement measures
 ## without a width bound. The native measurer computes the same value
 ## (layout.rs, label_max_content).
-static func label_max_content(l: Label) -> float:
+static func label_max_content(l: Control) -> float:
 	# Shaping a paragraph and the theme lookups cost microseconds: the width
 	# is kept on the Label for its text (`uxml_maxc`; apply() drops it with
 	# a font, size or stylebox change). The native measurer reads and
@@ -1183,12 +1189,12 @@ static func label_max_content(l: Label) -> float:
 			return c[1]
 	var font: Font = l.get_theme_font(&"font")
 	var fs: int = l.get_theme_font_size(&"font_size")
-	var ls := l.label_settings
+	var ls: LabelSettings = l.label_settings
 	if ls != null:
 		if ls.font != null:
 			font = ls.font
 		fs = ls.font_size
-	var t := l.text
+	var t: String = l.text
 	if l.uppercase:
 		t = t.to_upper()
 	var w := 0.0
@@ -1212,7 +1218,7 @@ static func label_max_content(l: Label) -> float:
 ## puts clip_text back when it applies the text overflow
 ## (_apply_elision), and the next placement fits the Label again. Called
 ## by both placements after the control got its laid-out size.
-func fit_label_width(c: Label) -> void:
+func fit_label_width(c: Control) -> void:
 	if c.has_meta(&"uxml_clip_text") or c.clip_text or c.autowrap_mode != TextServer.AUTOWRAP_OFF:
 		return
 	c.set_meta(&"uxml_clip_text_default", false)
@@ -1228,7 +1234,7 @@ func fit_label_width(c: Label) -> void:
 
 ## After the draw of a Label fitted by fit_label_width: the text draws past
 ## the box, as Unity draws it (Label set the canvas clip for clip_text).
-static func _unclip(c: Label) -> void:
+static func _unclip(c: Control) -> void:
 	if c.has_meta(&"uxml_wfit"):
 		RenderingServer.canvas_item_set_clip(c.get_canvas_item(), c.clip_contents)
 
@@ -1243,7 +1249,7 @@ static func _unclip(c: Label) -> void:
 ## baseline. `uxml_fit` (on the control) holds the deficit; the measurers
 ## measure it as unfitted (unfitted_height), so the measure does not
 ## change. Called after the control got its laid-out size.
-func fit_label(c: Label, want: Vector2) -> void:
+func fit_label(c: Control, want: Vector2) -> void:
 	var fit: int = int(c.get_meta(&"uxml_fit", 0))
 	var need := 0
 	if c.autowrap_mode == TextServer.AUTOWRAP_OFF and c.label_settings == null and c.get_line_count() <= 1:
@@ -1388,7 +1394,7 @@ static func _fit_as(c: Control, slots: Array, m: Array) -> bool:
 ## size of the Label after a font change. The native measurer computes the
 ## same value (layout.rs, unfitted_height). The value is kept on the Label
 ## (`uxml_unfit`) until apply(), new insets or a best-fit font size drop it.
-static func unfitted_height(c: Label) -> float:
+static func unfitted_height(c: Control) -> float:
 	if c.has_meta(&"uxml_unfit"):
 		return c.get_meta(&"uxml_unfit")
 	var base: Font = c.get_theme_font(&"font")
@@ -1915,7 +1921,7 @@ func _remember_text_defaults(c: Control) -> void:
 	if c.has_meta("uxml_text_defaults"):
 		return
 	c.set_meta("uxml_text_defaults", true)
-	if c is Label or c is RichTextLabel:
+	if is_label(c) or c is RichTextLabel:
 		c.set_meta("uxml_halign", c.horizontal_alignment)
 		c.set_meta("uxml_valign", c.vertical_alignment)
 		c.set_meta("uxml_autowrap", c.autowrap_mode)
@@ -1934,7 +1940,7 @@ func _apply_text_layout(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	if not align.is_empty():
 		hv = _parse_text_align(align, el)
 	var has_align := hv.x >= 0
-	if c is Label or c is RichTextLabel:
+	if is_label(c) or c is RichTextLabel:
 		_setp(c, &"horizontal_alignment", hv.x if has_align else int(c.get_meta("uxml_halign", 0)))
 		_setp(c, &"vertical_alignment", hv.y if has_align else int(c.get_meta("uxml_valign", 0)))
 	elif c is Button and not c is OptionButton:
@@ -1943,7 +1949,7 @@ func _apply_text_layout(c: Control, style: Dictionary, el: UxmlElement) -> void:
 		_setp(c, &"alignment", hv.x if has_align else HORIZONTAL_ALIGNMENT_LEFT)
 	elif c is LineEdit:
 		_setp(c, &"alignment", hv.x if has_align else int(c.get_meta("uxml_halign", 0)))
-	if c is Label or c is RichTextLabel:
+	if is_label(c) or c is RichTextLabel:
 		var ws := _str(style, "white-space")
 		# pre-wrap keeps white space at wrap points (no edge trimming); the
 		# trim flags are only written once a document uses pre-wrap.
@@ -2018,6 +2024,29 @@ func _warn_diag(kind: String, key: String, el: UxmlElement, message: String) -> 
 ## Take every diagnostic this applier reported out of the runtime warnings
 ## and forget them, so the next applies report again what still applies
 ## (UxmlDocument.reload_stylesheet).
+## Drop everything the applier keeps for control `c` (a UxmlText that a
+## Label replaced, UxmlDocument._promote_text): its filter, blurred shadow
+## and overflow clip are detached, its memos dropped.
+func forget_control(c: Control) -> void:
+	var nested := false
+	if c.has_meta(&"uxml_filter"):
+		(c.get_meta(&"uxml_filter")).detach()
+		c.remove_meta(&"uxml_filter")
+		nested = true
+	if c.has_meta(&"uxml_shadow"):
+		(c.get_meta(&"uxml_shadow")).detach()
+		c.remove_meta(&"uxml_shadow")
+		nested = true
+	if c.has_meta(&"uxml_clip"):
+		(c.get_meta(&"uxml_clip")).detach()
+		c.remove_meta(&"uxml_clip")
+	for d in [_inset_memo, _estimate, drifting, elide, _clip_content, fitted, fit_seen, _filters,
+			_shadows, _box_memo, _elide_memo]:
+		d.erase(c)
+	if nested:
+		_resolve_nesting()
+
+
 func forget_warnings() -> void:
 	if _warned.is_empty():
 		return
@@ -2682,7 +2711,7 @@ func _apply_material(c: Control, native: Control, style: Dictionary, el: UxmlEle
 ## itself (it inherits, so containers pass it down to everything).
 func _apply_text_shadow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	var e = style.get("text-shadow")
-	if not (c is Label or c is RichTextLabel):
+	if not (is_label(c) or c is RichTextLabel):
 		if e != null and String(e["origin"].get("kind", "")) != "inherited":
 			_warn_once_key("text-shadow-control", el,
 				"text-shadow is drawn for Label text only; this control draws none")
@@ -2769,7 +2798,7 @@ func _apply_paragraph_spacing(c: Control, style: Dictionary, el: UxmlElement) ->
 			_ov(c)
 			c.remove_theme_constant_override("paragraph_separation")
 		return
-	var l := c as Label
+	var l: Control = c
 	if px == 0:
 		if l.has_meta("uxml_label_settings"):
 			l.remove_meta("uxml_label_settings")
@@ -2809,7 +2838,7 @@ var _elide_memo := {}
 
 func _apply_elision(c: Control, style: Dictionary, el: UxmlElement) -> void:
 	_elide_memo.erase(c)
-	var is_text := c is Label or (c is Button and not c is OptionButton)
+	var is_text := is_label(c) or (c is Button and not c is OptionButton)
 	var ov0 := _str(style, "overflow")
 	var clip_text: bool = (is_text and (ov0 == "hidden" or ov0 == "scroll")
 		and c.autowrap_mode == TextServer.AUTOWRAP_OFF)

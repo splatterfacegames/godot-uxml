@@ -662,7 +662,7 @@ func _ctl(c: Control) -> Dictionary:
 		e["toggle"] = [c.button_pressed, c.disabled]
 	if c is LineEdit or c is TextEdit or c is Range:
 		e["editable"] = c.editable
-	if c is Label:
+	if UxmlStyleApplier.is_label(c):
 		e["align"] = [c.horizontal_alignment, c.vertical_alignment, c.autowrap_mode]
 	elif c is Button and not c is OptionButton:
 		e["align"] = c.alignment
