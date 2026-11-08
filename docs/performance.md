@@ -2516,7 +2516,8 @@ work loads: steps the branch did not change moved by up to 10%.
   engine calls without godot-rust's validity checks. Measured alone (editor
   binary, 3 interleaved runs each): the first cascade 134 to 117 ms, the first
   layout 85 to 78 ms. The checks never fired in the suites; a misuse would now
-  be undefined behaviour instead of a panic.
+  be undefined behaviour instead of a panic. *Removed again: see "Release
+  safety checks kept".*
 
 ### Results
 
@@ -2603,3 +2604,28 @@ again in five interleaved rounds (medians, `main` / `main` again / branch, ms):
   `from`), which `bench/equiv.gd` compares with the reference. A lazy output
   (Dictionaries built for the elements whose style is read) would remove it.
 - Signal wiring (27 ms): about 9,000 connections, five per control.
+
+## Release safety checks kept
+
+The release core is built with godot-rust's default safeguards again
+(`native/Cargo.toml`: the `safeguards-release-disengaged` feature of
+`perf/native-load` is gone, and the extension logs "safeguards balanced" at
+start): a misuse of an engine object is a panic with a message, not undefined
+behaviour. What the checks cost, measured on the release template:
+
+- `bench/prof/ops.gd --op=load-steps` (`tools/prof_release.py`, median of 15
+  loads, four rounds interleaved with `main` at `332cb7c`): the big load 624,
+  684, 624, 623 ms without the checks, 673, 762, 656, 652 ms with them (+5%);
+  the first cascade 89 to 91 ms against 104 to 122 ms, the first layout 55 to
+  62 ms against 61 to 69 ms. The other steps make no calls into the core.
+- `python tools/unity-bench/run.py --arms godot-release` (two rounds per run,
+  runs interleaved): the big load 677 and 652 ms without the checks, 710 and
+  678 ms with them.
+- A run with both arms (`--arms godot-release,unity-il2cpp`, 5 rounds, 60
+  iterations, the Unity player of the earlier runs): the big load 682 ms
+  (643-701) against Unity's 51.5 ms, 13.2 times; settings 60.8 against 4.5,
+  inventory 60.4 against 2.9, dialog 8.7 against 0.30, the class change 5.1
+  against 2.0 ms. The site's "Document load" row has the load figures.
+
+`tools/unity-bench/run.py` creates `Logs/` before the Godot export (a run
+with only Godot arms failed without it).

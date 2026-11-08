@@ -85,6 +85,7 @@ def build_unity(unity, backend):
 
 
 def export_godot(godot):
+    os.makedirs(os.path.join(HERE, "Logs"), exist_ok=True)
     stage = os.path.join(HERE, "Temp", "godot-stage")
     if os.path.isdir(stage):
         shutil.rmtree(stage)
