@@ -1296,17 +1296,31 @@ func _restyle_now(only_transitions: bool = false) -> void:
 	var local := {}
 	_fixed_memo.clear()
 	_def_memo.clear()
+	_local_covered = 0
 	if not _sub_req.is_empty() or not _local_unsettled.is_empty():
-		for r in _sub_req:
+		if not (need_layout and settle_layout_only.is_empty()):
+			# The requested rows alone can cover a third of the document.
+			var req := 0
+			for r in _sub_req:
+				var ri = _cascade.index.get(r)
+				if ri != null:
+					req += _cascade._end[ri] - ri
+			if req * 3 > _cascade.els.size():
+				need_layout = true
+				settle_layout_only = []
+		for r in ([] if need_layout and settle_layout_only.is_empty() else _sub_req):
 			if not _add_local(local, r, r, false):
 				need_layout = true
 				settle_layout_only = []
-		for r in _local_unsettled:
-			if _local_measures(r) == _local_unsettled[r]:
-				continue
-			if not _add_local(local, r, r, false):
-				need_layout = true
-				settle_layout_only = []
+				break
+		if not (need_layout and settle_layout_only.is_empty()):
+			for r in _local_unsettled:
+				if _local_measures(r) == _local_unsettled[r]:
+					continue
+				if not _add_local(local, r, r, false):
+					need_layout = true
+					settle_layout_only = []
+					break
 		_sub_req = {}
 		_local_unsettled = {}
 	var load_pass := _first_pass
@@ -1396,17 +1410,6 @@ func _restyle_now(only_transitions: bool = false) -> void:
 					text_placed.append(tel)
 	if need_layout and settle_layout_only.is_empty() and not _settle_ms.is_empty():
 		_settle_skip = true
-	if not local.is_empty() and not (need_layout and settle_layout_only.is_empty()):
-		# Roots that cover a third of the document: one layout of the document
-		# costs less than a layout of each.
-		var covered := 0
-		var cidx1: Dictionary = _cascade.index
-		for r in local:
-			var ri: int = cidx1[r]
-			covered += _cascade._end[ri] - ri
-		if covered * 3 > _cascade.els.size():
-			need_layout = true
-			settle_layout_only = []
 	if need_layout and not settle_layout_only.is_empty() and _settled_without_layout(text_placed):
 		# The pass that left the document unsettled is confirmed: the
 		# controls measure as after its layout, so a layout would give the
@@ -2110,6 +2113,7 @@ func _do_layout() -> void:
 ## restyle (the rows of a view share their ancestors).
 var _fixed_memo: Dictionary = {}
 var _def_memo: Dictionary = {}
+var _local_covered := 0  # elements under the roots of the restyle
 
 
 ## The subtree layouts since the load (_do_local_layout): a change inside a
@@ -2143,12 +2147,21 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 		if r == null:
 			return false
 	if not local.has(r):
+		# Roots that cover a third of the document: one layout of the
+		# document costs less than a layout of each.
+		var ri = _cascade.index.get(r)
+		if ri == null:
+			return false
+		var covered: int = _local_covered + _cascade._end[ri] - ri
+		if covered * 3 > _cascade.els.size():
+			return false
 		var ok = _fixed_memo.get(r)
 		if ok == null:
 			ok = _fixed_root(r)
 			_fixed_memo[r] = ok
 		if not ok:
 			return false
+		_local_covered = covered
 		local[r] = fresh
 	elif fresh:
 		local[r] = true

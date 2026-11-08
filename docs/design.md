@@ -2518,9 +2518,12 @@ the same rects as a layout of the document. The controls inside the root are
 placed; the root keeps its placement (a row control is moved to its item by
 the collection: `place_rows` after every placement without a layout). The
 post-layout behaviors inside the root, the layout hooks and the elision run as
-after a layout. A root whose rects or measures changed is laid out again by
-the next restyle, as an unsettled document is. `local_layout_count` counts
-these layouts; `layout_count` does not.
+after a layout. A root whose rects or measures changed keeps the measures of
+its controls (minimum sizes, natural sizes); the next restyle lays it out
+again when they differ, as the snapshot of an unsettled document decides
+(`_settle_snapshot`). Roots that cover a third of the elements of the
+document lay out the document instead: one pass costs less than a pass per
+root. `local_layout_count` counts these layouts; `layout_count` does not.
 
 Tests: `test_scroll_lays_out_only_the_rows` (both paths, against a layout of
 the document after each step); `bench/equiv_runtime.gd` scrolls, selects and
