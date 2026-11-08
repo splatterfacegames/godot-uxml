@@ -1,0 +1,4 @@
+<linker>
+  <!-- UiBench reaches the panel update and pseudoStates by reflection. -->
+  <assembly fullname="UnityEngine.UIElementsModule" preserve="all" />
+</linker>

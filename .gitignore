@@ -15,3 +15,16 @@ native/target/
 /site/dist/
 /site/.r2-upload/
 /site/project.godot.orig
+/tools/unity-bench/Library/
+/tools/unity-bench/Logs/
+/tools/unity-bench/Temp/
+/tools/unity-bench/UserSettings/
+/tools/unity-bench/Builds/
+/tools/unity-bench/Assets/Resources/UI/
+/tools/unity-bench/Assets/Resources/UI.meta
+/tools/unity-bench/Assets/Bench.unity
+/tools/unity-bench/Assets/Bench.unity.meta
+/tools/unity-bench/ProjectSettings/*
+!/tools/unity-bench/ProjectSettings/ProjectVersion.txt
+/tools/unity-bench/out/
+/tools/unity-bench/out-*/

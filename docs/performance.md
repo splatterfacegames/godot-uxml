@@ -2032,3 +2032,162 @@ remains. Applying before `add_child` would save about 25 us per Label (about
   change of the row element itself (its own padding, display) still lay out
   the document.
 - Selector reloads: the GDScript path compiles every author rule again.
+
+## Native core vs Unity UI Toolkit (`tools/unity-bench`)
+
+The same documents and the same operations in godot-uxml (native core,
+Rust GDExtension, Godot 4.7.1) and in Unity UI Toolkit (Unity
+6000.3.24f1), each in a release build. godot-uxml at `f4ffe6e`.
+
+### Method
+
+- Machine: Intel Xeon W-2135 @ 3.70 GHz (6 cores, 12 threads), Windows 11
+  Enterprise (10.0.26200), NVIDIA GeForce RTX 5060 Ti (driver 616.92).
+  Other agents load the CPU during the runs.
+- Run: `python tools/unity-bench/run.py` (5 rounds, 60 iterations).
+  It writes the documents, builds the players, exports the Godot build
+  and runs the rounds. Raw samples go to `tools/unity-bench/out/` (not
+  committed).
+- Documents: `bench/unity_compare.gd --write-docs` writes them with the
+  generators of `bench/bench.gd` (big document of 1,531 elements, 3
+  stylesheets of about 250 rules, `var()`, `:hover`/`:focus`; HUD of 37
+  elements) and `bench/workloads.gd` (settings, inventory, dialog,
+  `ListView` of 10,000 items). Unity imports the same files from
+  `Assets/Resources/UI`. Both sides use the Unity default runtime theme
+  (godot-uxml: its port of the theme; Unity: `unity-theme://default`).
+- godot-uxml: `bench/unity_compare.gd`, exported with the official
+  release template (`windows_release_x86_64.exe`, Forward+, Vulkan) from
+  a staged copy of the project. The native core is the committed
+  optimized library. A second arm runs the same script in the editor
+  binary (`Godot_v4.7.1-stable_win64_console.exe`), the harness of the
+  earlier figures.
+- Unity: `tools/unity-bench/Assets/Scripts/UiBench.cs` in a Windows x64
+  standalone player, not a development build, IL2CPP (compiler
+  configuration Release, code generation for speed). A second arm is the
+  same player with Mono. `UIDocument` with a `PanelSettings` of
+  `ConstantPixelSize`, scale 1.
+- Timed region, both sides: the mutation, then the style and layout pass,
+  forced synchronously, then the end of the timer. godot-uxml:
+  `UxmlDocument._restyle_now()`. Unity: the panel update without the
+  repaint (`BaseVisualElementPanel.UpdateWithoutRepaint()`, internal,
+  called through a delegate made once by reflection). It runs the phases
+  that the player loop runs before it draws: bindings, animations,
+  styles, layout, transforms and clipping. At the end of the region the
+  UI is laid out and ready to draw. Drawing is not in the region on
+  either side (Unity: the UIR repaint; Godot: the `CanvasItem` draw). The
+  frame after each iteration is not timed. Timer: `Time.get_ticks_usec()`
+  and `Stopwatch` (CPU wall time).
+- Pseudo-states: godot-uxml `set_element_state()`; Unity sets the
+  internal `VisualElement.pseudoStates` (what a pointer enter does). A
+  class change: `set_class()`, `EnableInClassList()`. Text: `Label.text`
+  (godot-uxml then `relayout()`). Resize: the size of the document root
+  (Unity: the host element), 1280x800 to 1024x720 and back. `ListView`:
+  `set_list_source()` / `itemsSource` + `bindItem` (Unity: the
+  `item-template` of the UXML), `set_scroll_offset()` /
+  `ScrollView.scrollOffset`, `refresh_list()` / `RefreshItems()`.
+- Load: the document is made, loaded and laid out inside the region.
+  godot-uxml parses the UXML and USS text in each load. Unity parses at
+  import time, in the editor; the player clones an imported
+  `VisualTreeAsset` (`CloneTree`), which `Resources.Load` caches after
+  the first call. Each one is the way that it ships. `load + first frame`
+  also includes the first frame drawn after the load (Unity: until
+  `WaitForEndOfFrame`; Godot: until the next `process_frame`).
+- Frame rows: wall time between frames, vsync off, no frame cap, idle.
+- Warm-up: 2 loads or 4 operations before the samples. In each round,
+  every arm runs once, and the order rotates per round. Values: the
+  median of all samples of the 5 rounds; in brackets the lowest and the
+  highest median of a round.
+- Windows: every player runs in a 640x400 window at the bottom right of
+  the work area, without focus. The documents keep their own sizes
+  (1280x800, 1280x720, HUD 640x360), so the window size does not change
+  the layout work. The frame rows draw into this window on both sides.
+  Each process exits at the end of its run.
+
+### Results (ms)
+
+| Operation | Native core, release | Unity, IL2CPP | Native / Unity | Native core, editor binary | Unity, Mono |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| big: load | 662 (635–841) | 44.3 (41.4–69.3) | 15 | 836 (797–1,207) | 80.6 (62.4–106) |
+| big: load + first frame | 712 (689–1,072) | 68.8 (65.1–95.1) | 10 | 969 (878–1,399) | 116 (101–147) |
+| big: hover toggle (button) | 0.457 (0.399–0.619) | 0.959 (0.897–1.39) | 0.5 | 0.546 (0.447–0.778) | 1.16 (0.973–1.60) |
+| big: hover toggle (card, descendant selector) | 1.39 (1.23–1.87) | 1.03 (0.951–1.63) | 1.3 | 1.65 (1.35–2.16) | 1.24 (1.05–1.71) |
+| big: restyle, no change | 0.197 (0.166–0.249) | 0.014 (0.010–0.021) | 14 | 0.259 (0.165–0.358) | 0.012 (0.009–0.014) |
+| big: class change (card) | 12.2 (11.8–18.6) | 1.67 (1.51–1.98) | 7.3 | 15.3 (14.0–24.3) | 2.03 (1.67–2.64) |
+| big: label text change + layout | 10.6 (10.1–16.2) | 1.40 (1.32–1.54) | 7.6 | 13.1 (12.0–21.2) | 1.62 (1.38–2.29) |
+| big: resize | 20.4 (19.2–33.4) | 3.67 (3.43–4.56) | 5.6 | 27.4 (24.3–42.4) | 4.17 (3.24–6.13) |
+| hud: frame, 8 labels + layout | 0.448 (0.408–0.580) | 0.257 (0.233–0.290) | 1.7 | 0.581 (0.440–0.744) | 0.324 (0.269–0.446) |
+| hud: hover toggle | 0.164 (0.145–0.216) | 0.072 (0.061–0.081) | 2.3 | 0.218 (0.178–0.260) | 0.084 (0.070–0.097) |
+| settings: load | 58.8 (57.0–88.0) | 4.31 (3.80–4.56) | 14 | 79.5 (71.2–123) | 6.98 (6.13–8.70) |
+| settings: switch tab | 7.17 (6.88–11.7) | 1.18 (1.10–1.29) | 6.1 | 10.1 (8.93–15.8) | 2.06 (1.54–2.56) |
+| settings: hover row | 0.198 (0.159–0.243) | 0.014 (0.012–0.017) | 14 | 0.193 (0.152–0.248) | 0.015 (0.013–0.017) |
+| inventory: load | 62.0 (58.0–91.7) | 2.97 (2.71–3.05) | 21 | 84.9 (74.1–129) | 5.06 (3.75–6.50) |
+| inventory: hover slot | 0.440 (0.357–0.551) | 0.317 (0.295–0.469) | 1.4 | 0.573 (0.460–0.678) | 0.472 (0.325–0.518) |
+| inventory: select slot | 1.17 (1.06–1.68) | 0.325 (0.288–0.445) | 3.6 | 1.68 (1.30–2.15) | 0.468 (0.339–0.558) |
+| inventory: count change + layout | 0.899 (0.759–1.21) | 0.294 (0.264–0.368) | 3.1 | 1.22 (0.921–1.58) | 0.408 (0.281–0.474) |
+| dialog: load | 8.49 (7.91–13.2) | 0.307 (0.289–0.410) | 28 | 11.3 (10.2–17.8) | 0.483 (0.321–0.588) |
+| dialog: typewriter character + layout | 0.379 (0.314–0.510) | 0.093 (0.089–0.108) | 4.1 | 0.466 (0.397–0.526) | 0.167 (0.136–0.211) |
+| dialog: hover choice | 0.062 (0.053–0.075) | 0.014 (0.013–0.016) | 4.5 | 0.079 (0.059–0.090) | 0.015 (0.013–0.017) |
+| listview: load, 10,000 items | 90.3 (87.5–139) | 3.67 (3.56–4.07) | 25 | 138 (113–196) | 6.92 (5.58–8.46) |
+| listview: scroll 3 rows | 2.47 (2.31–3.08) | 0.059 (0.050–0.072) | 42 | 3.71 (2.60–4.11) | 0.070 (0.056–0.083) |
+| listview: rebind visible items | 2.48 (2.20–3.29) | 0.356 (0.314–0.533) | 7.0 | 3.71 (2.84–4.60) | 0.552 (0.384–0.603) |
+| frame: empty scene | 0.271 (0.245–0.354) | 0.279 (0.267–0.326) | 1.0 | 0.295 (0.256–0.354) | 0.272 (0.251–0.302) |
+| frame: big document, idle | 0.607 (0.518–0.826) | 2.03 (2.03–2.04) | 0.3 | 0.851 (0.558–0.903) | 2.04 (2.03–2.05) |
+
+Samples per value: 75 loads, 300 operations (HUD 900, typewriter and
+scroll 600), 1,500 frames. None of these 20 runs failed.
+
+### What the numbers say
+
+- **Unity is faster on most operations.** On the big document, a class
+  change, a text change or a resize is 6 to 8 times faster in Unity. A
+  load is 10 to 28 times faster. Unity tracks what is dirty: a restyle
+  with no change costs 0.014 ms, against 0.20 ms in godot-uxml.
+- **A hover is on par or faster in godot-uxml.** On the big document, a
+  button hover is 0.46 ms in godot-uxml and 0.96 ms in Unity. A card
+  hover with a descendant selector is 1.39 ms and 1.03 ms. On the small
+  screens Unity is faster (HUD 0.16 and 0.07 ms).
+- **An idle frame is cheaper in Godot.** With the big document on screen
+  and no change, a Godot frame is 0.61 ms and a Unity frame 2.03 ms
+  (empty scene: 0.27 ms and 0.28 ms).
+- **A scroll of the `ListView` is 42 times faster in Unity** (0.059 ms
+  against 2.5 ms): Unity moves the rows and rebinds the rows that come
+  into view; godot-uxml rebinds, restyles and lays out the rows.
+- **A load does not compare the same work.** godot-uxml parses text in
+  each load, and Unity does not. On a document of 507 elements, the parse
+  is about 11 ms of a load of about 370 ms ("Where a load goes", above).
+  Most of the difference is the build of the Controls and the first
+  restyle, not the parse.
+- The release template is 10 to 35% faster than the editor binary on
+  most operations. IL2CPP is 10 to 45% faster than Mono.
+- Other agents loaded the machine. The arms run interleaved, so the load
+  falls on the two sides alike; the brackets show how much one round
+  moved. A first run at `782a951` (before `feat/editor-apis-5`), on a
+  more loaded machine, gave most ratios within 15% of these. The
+  exceptions: the big document hovers (button 0.9, card 1.5), the restyle
+  with no change (58), the settings row hover (22) and the `ListView`
+  scroll (55), which the later commits made faster, and the `ListView`
+  rebind (5.6, now 7.0).
+
+### Not compared
+
+- **Focus toggle** and **hover move**: the same work as a hover toggle.
+- **Transitions**: the two sides step the clock differently (godot-uxml
+  `advance_transitions()` by hand, Unity the clock of the panel), so a
+  frame of a transition does not measure the same thing.
+- **The list of 1,000 rows without virtualization** (`workloads.gd`):
+  left out to keep the run short. The `ListView` row covers lists.
+- **Parse alone, cascade alone**: Unity does them at import time, in the
+  editor. A player has no equivalent operation.
+
+### Notes
+
+- The layout of the big document is not the same on the two sides. The
+  first card is at x = 198 in godot-uxml and at x = 228 in Unity: the
+  sidebar is 30 px narrower in godot-uxml. The cards have the same size
+  (200x194) and the same 30 rows of 5. This is a parity gap, not a cost.
+  The case is not in `bench/parity`.
+- The first run of the release build crashed (0xC0000005, after
+  `big: load`). The next 19 runs of the release build did not crash (9
+  trials and two runs of 5 rounds), and one run of the debug template did
+  not crash. The cause is not known. `run.py` runs a failed arm again once and writes
+  `out/failures.json`.
