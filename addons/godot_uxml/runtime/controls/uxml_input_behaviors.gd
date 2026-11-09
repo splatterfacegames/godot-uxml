@@ -98,6 +98,8 @@ class InputBehavior extends UxmlBehaviors.Behavior:
 	var _syncing := false
 
 	func is_disabled() -> bool:
+		if doc._v2 != null:
+			return doc._v2.is_disabled(el)
 		if doc._cascade == null:
 			return false
 		var ci = doc._cascade.index.get(el)
@@ -128,6 +130,8 @@ class InputBehavior extends UxmlBehaviors.Behavior:
 		return Vector2.ZERO if c == null else c.size
 
 	func style_of(x: UxmlElement) -> Dictionary:
+		if doc._v2 != null:
+			return doc._v2.computed_style(x)
 		return doc._styles.get(x, {})
 
 	func flag(n: String, d: bool) -> bool:
@@ -1085,7 +1089,7 @@ class TextBehavior extends InputBehavior:
 		for x in [el, part("input"), part("editor")]:
 			if x == null:
 				continue
-			var st: Dictionary = doc._styles.get(x, {})
+			var st: Dictionary = style_of(x)
 			var e = st.get("text-overflow")
 			if e != null and String(e["value"]) == "ellipsis":
 				var p = st.get("-unity-text-overflow-position")
