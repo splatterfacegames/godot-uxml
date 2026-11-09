@@ -96,7 +96,10 @@ func _draw(to_canvas_item: RID, rect: Rect2) -> void:
 			var st := image as StyleBoxTexture
 			_mesh(to_canvas_item, _G_IMAGE, xf, st.modulate_color, st.texture.get_rid())
 		else:
-			image.draw(to_canvas_item, rect)
+			if _rec != null:
+				_rec.append([image])
+			else:
+				image.draw(to_canvas_item, rect)
 	if _uniform >= 0:
 		# Every drawn side has one colour: the sides are one mesh.
 		_mesh(to_canvas_item, 1, xf, colors[_uniform], RID())
@@ -126,6 +129,7 @@ var _geo_flags := -1.0
 func invalidate() -> void:
 	_geo = null
 	_geo_size = Vector2(-1.0, -1.0)
+	v2_version += 1
 
 
 ## New colours (a hover, a colour transition): the geometry stays when it
@@ -134,6 +138,7 @@ func invalidate() -> void:
 func set_colors(bg: Color, side_colors: Array) -> void:
 	bg_color = bg
 	colors = side_colors.duplicate()
+	v2_version += 1
 	if _geo != null and _shape_flags() != _geo_flags:
 		invalidate()
 
@@ -193,7 +198,26 @@ func _find_geo(size: Vector2) -> void:
 func _mesh(ci: RID, g: int, xf: Transform2D, modulate: Color, tex: RID) -> void:
 	var m = (_geo as Array)[g]
 	if m != null:
+		if _rec != null:
+			_rec.append([m, xf, modulate, tex])
+			return
 		RenderingServer.canvas_item_add_mesh(ci, (m as ArrayMesh).get_rid(), xf, modulate, tex)
+
+
+## Runtime v2 draws this style natively: the draw of `rect` as the
+## operations _draw makes, [ArrayMesh, Transform2D, Color, texture RID] or
+## [StyleBox] (drawn at `rect`), which the core keeps per (style, size,
+## v2_version) and replays. The same code path as _draw.
+var v2_version := 0
+var _rec = null
+
+
+func v2_ops(rect: Rect2) -> Array:
+	_rec = []
+	_draw(RID(), rect)
+	var out: Array = _rec
+	_rec = null
+	return out
 
 
 ## The box at the origin as meshes, one per group (null for an empty one).

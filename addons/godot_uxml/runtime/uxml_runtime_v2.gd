@@ -1091,9 +1091,13 @@ func v2_font(i: int, button: bool = false) -> Array:
 ## [box style, image style, image texture, text inset by the box] of
 ## element i with a background image (UxmlStyleApplier._apply_box for a
 ## box, _apply_themed_inner for a Label).
+static var _URL_PROPS := PackedStringArray(["background-image"])
+
+
 func v2_boxes(i: int, label: bool) -> Array:
 	var el: UxmlElement = cascade.els[i]
-	var style: Dictionary = cascade._native.call("style_of", i)
+	# The values, and the origin of the url() (the file it resolves against).
+	var style: Dictionary = cascade._native.call("style_of_lite", i, _URL_PROPS)
 	var tex := applier._texture(style, "background-image", el)
 	if label:
 		var sb: StyleBox = applier._stylebox(style, el)

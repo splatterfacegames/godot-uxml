@@ -317,6 +317,10 @@ struct St {
     vis_changed: bool,
     /// The placement each interaction Control was last given (place_states).
     placed: Vec<Option<(Rect2, Rect2, bool, f32)>>,
+    /// Per StyleBox instance: a UxmlBoxStyle (replayed by draw_sb).
+    sb_scripted: HashMap<i64, bool>,
+    /// UxmlBoxStyle draws: (instance, width bits, height bits, version) -> ops.
+    sb_ops: HashMap<(i64, u32, u32, i64), Rc<Vec<BoxOp>>>,
     /// The last elision of each eliding Label: (text, width, position, font
     /// size) and the text shown; whether it is elided now.
     elide_memo: Vec<Option<((GString, f32, GString, i32), GString)>>,
@@ -359,6 +363,12 @@ impl Drop for UxmlRuntimeV2 {
     fn drop(&mut self) {
         self.free_items();
     }
+}
+
+/// One operation of a UxmlBoxStyle draw (St::draw_sb).
+enum BoxOp {
+    Mesh(Gd<godot::classes::Mesh>, Transform2D, Color, Rid),
+    Draw(Gd<StyleBox>),
 }
 
 fn s(v: &Variant) -> String {
@@ -406,6 +416,7 @@ impl UxmlRuntimeV2 {
         let kv = "value".to_variant();
         let mut picking = vec![false; n];
         let kin = kinds_in.as_slice();
+        let p_scan = crate::prof::scope("v2.build.scan");
         for i in 0..n {
             let local = c.local_name(i);
             let given = kin.get(i).copied().unwrap_or(0);
@@ -430,13 +441,18 @@ impl UxmlRuntimeV2 {
             if kind[i] == K_NONE {
                 continue;
             }
+            let p_items = crate::prof::scope("v2.build.items");
             for it in c.items(i).iter() {
                 if !allowed[it.pid as usize] {
                     return GString::from(format!("property {} (element {}) is not drawn by runtime v2 yet", c.prop_name(it.pid), i).as_str());
                 }
             }
+            drop(p_items);
+            let p_get = crate::prof::scope("v2.build.get_attrs");
             // The <UXML> root's attributes are namespaces and editor settings.
             let attrs = if i == 0 { VarArray::new() } else { c.attributes(i) };
+            drop(p_get);
+            let _p_loop = crate::prof::scope("v2.build.attr_loop");
             let (mut seen_text, mut rich_on, mut escapes) = (false, true, false);
             let texty = kind[i] == K_LABEL || kind[i] == K_BUTTON;
             for a in attrs.iter_shared() {
@@ -518,6 +534,7 @@ impl UxmlRuntimeV2 {
             }
         }
         drop(cb);
+        drop(p_scan);
         let theme = {
             let mut h = helper.clone();
             let d = h.call("v2_label_theme", &[]).try_to::<VarDictionary>().unwrap_or_default();
@@ -612,6 +629,8 @@ impl UxmlRuntimeV2 {
             dup_names: vec![],
             dirty: vec![true; n],
             drawn: vec![None; n],
+            sb_scripted: HashMap::new(),
+            sb_ops: HashMap::new(),
         };
         for i in 0..n {
             st.vis[i].picking_ignore = picking[i];
@@ -1116,6 +1135,7 @@ impl St {
         if let Some(c) = self.color_memo.get(&k) {
             return c.ok_or_else(|| format!("color {}", k));
         }
+        let _cbp = crate::prof::scope("v2.cb.color");
         let r = self.helper.call("v2_color", &[v.clone()]);
         let c = r.try_to::<Color>().ok();
         self.color_memo.insert(k.clone(), c);
@@ -1127,6 +1147,7 @@ impl St {
         if let Some(c) = self.opacity_memo.get(&k) {
             return c.ok_or_else(|| format!("opacity {}", k));
         }
+        let _cbp = crate::prof::scope("v2.cb.opacity");
         let r = self.helper.call("v2_opacity", &[v.clone()]);
         let c = r.try_to::<f64>().ok().map(|x| x as f32);
         self.opacity_memo.insert(k.clone(), c);
@@ -1351,6 +1372,7 @@ impl St {
         } else if bg_img {
             // The background image (and the box it goes with) as runtime v1
             // builds them (UxmlStyleApplier._apply_box / _apply_themed_inner).
+            let _cbp = crate::prof::scope("v2.cb.boxes");
             let r = self.helper.call("v2_boxes", &[(i as i64).to_variant(), label.to_variant()]);
             let a = r.try_to::<VarArray>().map_err(|_| "background image".to_string())?;
             if a.len() != 4 {
@@ -1405,6 +1427,7 @@ impl St {
                     rec.push(&m.to_variant());
                     // _R_PX: the antialiased edge, one device pixel.
                     rec.push(&self.ppp.to_variant());
+                    let _cbp = crate::prof::scope("v2.cb.make_box");
                     let b = self.helper.call("v2_make_box", &[rec.to_variant()]).try_to::<Gd<StyleBox>>().ok();
                     self.box_memo.insert(key, b.clone());
                     b
@@ -1481,6 +1504,7 @@ impl St {
             let (font, size, line_fix) = match hit {
                 Some(h) => h,
                 None => {
+                    let _cbp = crate::prof::scope("v2.cb.font");
                     let r = self.helper.call("v2_font", &[(i as i64).to_variant(), button.to_variant()]);
                     let a = r.try_to::<VarArray>().map_err(|_| "font".to_string())?;
                     let f = a.get(0).and_then(|x| x.try_to::<Gd<Font>>().ok()).ok_or("font")?;
@@ -1577,6 +1601,7 @@ impl St {
             });
         }
         if self.kind[i] == K_IMAGE {
+            let _cbp = crate::prof::scope("v2.cb.image");
             let r = self.helper.call("v2_image", &[(i as i64).to_variant()]);
             if let Ok(a) = r.try_to::<VarArray>() {
                 if let (Some(Ok(t)), Some(Ok(m)), Some(Ok(c))) = (
@@ -1596,6 +1621,7 @@ impl St {
         // translate (UxmlStyleApplier._apply_transform: an offset of the
         // drawn box and of the hit test, never of the layout).
         if let Some(x) = vals[P_TRANSLATE].clone() {
+            let _cbp = crate::prof::scope("v2.cb.translate");
             let r = self.helper.call("v2_translate", &[x]);
             let a = r.try_to::<VarArray>().map_err(|_| "translate".to_string())?;
             let px = a.get(0).and_then(|x| x.try_to::<Vector2>().ok()).ok_or("translate")?;
@@ -1631,6 +1657,61 @@ impl St {
     /// visible rect inside the clips of its clipping ancestors, shown,
     /// opacity), for those whose placement changed since the last call:
     /// (position in idx, rect, visible rect, shown, opacity).
+    /// Draws StyleBox `sb` at `rect` into item `it`. A UxmlBoxStyle (a
+    /// GDScript StyleBox: its _draw is a script call) is replayed from the
+    /// operations it records (UxmlBoxStyle.v2_ops), kept per (style, size,
+    /// version): the same meshes, transforms and colours as its _draw.
+    fn draw_sb(&mut self, sb: &Gd<StyleBox>, it: Rid, rect: Rect2) {
+        let id = sb.instance_id().to_i64();
+        let scripted = *self.sb_scripted.entry(id).or_insert_with(|| sb.has_method("v2_ops"));
+        if !scripted || rect.position != Vector2::ZERO {
+            sb.draw(it, rect);
+            return;
+        }
+        let ver = sb.get("v2_version").try_to::<i64>().unwrap_or(0);
+        let key = (id, rect.size.x.to_bits(), rect.size.y.to_bits(), ver);
+        let ops = match self.sb_ops.get(&key) {
+            Some(o) => o.clone(),
+            None => {
+                let _pm = crate::prof::scope("v2.sb.record");
+                let a = sb.clone().upcast::<Object>().call("v2_ops", &[rect.to_variant()]).try_to::<VarArray>().unwrap_or_default();
+                let mut ops: Vec<BoxOp> = vec![];
+                for op in a.iter_shared() {
+                    let o = op.try_to::<VarArray>().unwrap_or_default();
+                    if o.len() == 1 {
+                        if let Some(s2) = o.get(0).and_then(|x| x.try_to::<Gd<StyleBox>>().ok()) {
+                            ops.push(BoxOp::Draw(s2));
+                        }
+                    } else if o.len() == 4 {
+                        let Some(m) = o.get(0).and_then(|x| x.try_to::<Gd<godot::classes::Mesh>>().ok()) else { continue };
+                        ops.push(BoxOp::Mesh(
+                            m,
+                            o.get(1).and_then(|x| x.try_to::<Transform2D>().ok()).unwrap_or(Transform2D::IDENTITY),
+                            o.get(2).and_then(|x| x.try_to::<Color>().ok()).unwrap_or(Color::WHITE),
+                            o.get(3).and_then(|x| x.try_to::<Rid>().ok()).unwrap_or(Rid::Invalid),
+                        ));
+                    }
+                }
+                if self.sb_ops.len() > 4096 {
+                    self.sb_ops.clear();
+                }
+                let ops = Rc::new(ops);
+                self.sb_ops.insert(key, ops.clone());
+                ops
+            }
+        };
+        let _pr = crate::prof::scope("v2.sb.replay");
+        let mut r = rs();
+        for op in ops.iter() {
+            match op {
+                BoxOp::Mesh(m, xf, c, tex) => {
+                    r.canvas_item_add_mesh_ex(it, m.get_rid()).transform(*xf).modulate(*c).texture(*tex).done();
+                }
+                BoxOp::Draw(s2) => s2.draw(it, rect),
+            }
+        }
+    }
+
     fn placements(&mut self, idx: &[i32]) -> Vec<(usize, Rect2, Rect2, bool, f32)> {
         let mut res = vec![];
         let mut placed = std::mem::take(&mut self.placed);
@@ -2180,14 +2261,14 @@ impl St {
         }
         let full = Rect2::new(Vector2::ZERO, size);
         if let Some(sb) = &v.box_sb {
-            sb.draw(it, full);
+            self.draw_sb(sb, it, full);
             if self.kind[i] == K_BUTTON && self.focused[i] {
                 // Button draws its focus stylebox (the same box) over it.
-                sb.draw(it, full);
+                self.draw_sb(sb, it, full);
             }
         }
         if let Some(sb) = &v.img_sb {
-            sb.draw(it, full);
+            self.draw_sb(sb, it, full);
         } else if let Some(t) = &v.img_tex {
             t.draw_rect(it, full, false);
         }

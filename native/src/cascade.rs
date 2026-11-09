@@ -1965,6 +1965,23 @@ impl Cascade {
         d
     }
 
+    /// Element i's computed style as style_dict gives it, with the origins
+    /// of `origin_props` only (the others `{value}`): what a reader of values
+    /// and of the files of a few url() properties needs.
+    pub fn style_dict_lite(&self, i: usize, origin_props: &PackedStringArray) -> VarDictionary {
+        let want: Vec<u32> = origin_props.as_slice().iter().filter_map(|p| self.props.index.get(&p.to_string()).copied()).collect();
+        let mut d = VarDictionary::new();
+        for it in self.out_items[i].iter() {
+            let mut e = VarDictionary::new();
+            e.set(&self.k_value, &*it.value);
+            if want.contains(&it.pid) {
+                e.set(&self.k_origin, &self.origin_of(i, it));
+            }
+            d.set(&self.props.keys[it.pid as usize], &e);
+        }
+        d
+    }
+
     /// The entries `{value}` of `props` in element i's computed style (those
     /// it has): the values style_dict gives, without the origins and the
     /// other properties (a layout hook reading a few lengths).
@@ -2764,6 +2781,15 @@ impl UxmlNativeCascade {
     fn style_values(&self, i: i64, props: PackedStringArray) -> VarDictionary {
         match self.inner.as_ref() {
             Some(c) if i >= 0 && (i as usize) < c.len() => c.style_values(i as usize, &props),
+            _ => VarDictionary::new(),
+        }
+    }
+
+    /// style_of with the origins of `origin_props` only.
+    #[func]
+    fn style_of_lite(&self, i: i64, origin_props: PackedStringArray) -> VarDictionary {
+        match self.inner.as_ref() {
+            Some(c) if i >= 0 && (i as usize) < c.len() => c.style_dict_lite(i as usize, &origin_props),
             _ => VarDictionary::new(),
         }
     }
