@@ -20,16 +20,32 @@ extends SceneTree
 ## items, selection, scroll offset, breadcrumbs, class changes and clock
 ## steps) run through the runtime API; pointer and keyboard actions do not
 ## replay (their result is in the copied state).
+##
+## --scaled: the panel-scaling dumps (bench/parity/unity-scaled/, see
+## bench/parity/scaled/matrix.json) instead. Each draws in a SubViewport of
+## the dump's screen size through a UxmlDocument with Unity's
+## PanelSettings (UxmlDocument.panel_settings, the screen DPI of the dump),
+## and the capture is cropped to the case host as Unity's is (the host's
+## size in points times the pixels per point, rounded up). A layout case is
+## a fixed host of its size in points at the panel origin, as the dumper
+## makes it (a wrapper element); a fill case is the whole panel. Rects are
+## written in pixels.
 
 const REF := "res://bench/parity/reference.json"
 const UNITY_DIR := "res://bench/parity/unity/"
 const CASES_DIR := "res://bench/parity/cases/"
+const SCALED_DIR := "res://bench/parity/unity-scaled/"
+const SCALED_CASES := "res://bench/parity/scaled/cases/"
 const STATES := ["hover", "active", "focus", "checked"]
 const CLEAR := {"": Color8(255, 255, 255), "dark": Color8(56, 56, 56), "light": Color8(200, 200, 200)}
 
 var _out := ""
 var _only := {}
 var _vp: SubViewport
+var _scaled := false
+# A scaled case: [crop size in pixels, wrapper host or null].
+var _crop := Vector2i.ZERO
+var _host_el: UxmlElement = null
 
 
 func _initialize() -> void:
@@ -37,6 +53,8 @@ func _initialize() -> void:
 	for i in args.size():
 		if args[i] == "--out" and i + 1 < args.size():
 			_out = args[i + 1]
+		elif args[i] == "--scaled":
+			_scaled = true
 		elif args[i] == "--only" and i + 1 < args.size():
 			for n in args[i + 1].split(",", false):
 				_only[n] = true
@@ -48,6 +66,9 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	if _scaled:
+		await _run_scaled()
+		return
 	var cases: Array = []
 	var data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(REF))
 	for c in data["cases"]:
@@ -77,6 +98,50 @@ func _run() -> void:
 		done += 1
 	print("PIXELS RENDER: %d cases -> %s" % [done, _out])
 	quit(0)
+
+
+func _run_scaled() -> void:
+	var d := DirAccess.open(SCALED_DIR)
+	var files: Array = []
+	if d != null:
+		for f in d.get_files():
+			if f.ends_with(".json"):
+				files.append(f)
+	files.sort()
+	var done := 0
+	for f in files:
+		var name := String(f).get_basename()
+		if not _only.is_empty() and not _only.has(name):
+			continue
+		var base := name.split("__")[0]
+		var dump: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(SCALED_DIR + f))
+		if not dump.has("scaling"):
+			continue
+		var dir := CASES_DIR if FileAccess.file_exists(CASES_DIR + base + ".uxml") else SCALED_CASES
+		var uss_path: String = dir + base + ".uss"
+		var c := {"name": name, "base": base, "dir": dir,
+			"uxml": FileAccess.get_file_as_string(dir + base + ".uxml"),
+			"uss": FileAccess.get_file_as_string(uss_path) if FileAccess.file_exists(uss_path) else "",
+			"files": _case_files(dir + base + ".files")}
+		await _render_case(c, dump)
+		done += 1
+	print("PIXELS RENDER: %d cases -> %s" % [done, _out])
+	quit(0)
+
+
+## A layout case of a scaled dump: the case inside a fixed host of its size
+## in points at the panel origin, as UxmlDump makes it.
+## The case sheet goes on the host (a <Style> in it), as the dumper attaches
+## it to the host: its `:root` is the host.
+static func _wrap_host(uxml: String, size: Vector2, sheet: String) -> String:
+	var open := uxml.find(">", uxml.find("<ui:UXML"))
+	var close := uxml.rfind("</ui:UXML>")
+	if open < 0 or close < 0:
+		return uxml
+	var style := '<Style src="%s" />' % sheet if not sheet.is_empty() else ""
+	return (uxml.substr(0, open + 1)
+		+ '<ui:VisualElement name="uxml-dump-host" style="position: absolute; left: 0; top: 0; width: %spx; height: %spx;">' % [size.x, size.y]
+		+ style + uxml.substr(open + 1, close - open - 1) + "</ui:VisualElement>" + uxml.substr(close))
 
 
 func _case_files(dir: String, rel: String = "") -> Dictionary:
@@ -184,7 +249,7 @@ func _paths(root: UxmlElement) -> Dictionary:
 func _render_case(c: Dictionary, dump: Dictionary) -> void:
 	var name: String = c["name"]
 	var sidecar := {}
-	var side := CASES_DIR + name + ".json"
+	var side: String = String(c.get("dir", CASES_DIR)) + String(c.get("base", name)) + ".json"
 	if FileAccess.file_exists(side):
 		var sj = JSON.parse_string(FileAccess.get_file_as_string(side))
 		if sj is Dictionary:
@@ -192,6 +257,19 @@ func _render_case(c: Dictionary, dump: Dictionary) -> void:
 	var actions: Array = sidecar.get("actions", [])
 	var skin := String(sidecar.get("editor", ""))
 	var panel := Vector2i(int(dump["panel"]["width"]), int(dump["panel"]["height"]))
+	var scaling: Dictionary = dump.get("scaling", {})
+	var host_pts := Vector2(float(dump["panel"]["width"]), float(dump["panel"]["height"]))
+	var fill := false
+	if not scaling.is_empty():
+		var scr: Array = scaling["screen"]
+		panel = Vector2i(int(scr[0]), int(scr[1]))
+		var root_pts := Vector2(float(scaling["root"]["width"]), float(scaling["root"]["height"]))
+		fill = host_pts.distance_to(root_pts) < 0.01
+		var ppp := float(scaling["pixelsPerPoint"])
+		# The host as Unity laid it out (on the pixel grid), in pixels.
+		var hx := UxmlPanelScale.pixel(host_pts.x, ppp)
+		var hy := UxmlPanelScale.pixel(host_pts.y, ppp)
+		_crop = Vector2i(mini(panel.x, ceili(hx * ppp - 0.01)), mini(panel.y, ceili(hy * ppp - 0.01)))
 	# Files as bench/parity.gd lays them out.
 	var root := "user://godot_uxml_pixels/cases/%s" % name
 	var dir := root + "/Assets/GoldenCases/"
@@ -202,6 +280,14 @@ func _render_case(c: Dictionary, dump: Dictionary) -> void:
 		_write(root + "/" + p if (p.begins_with("Packages/") or p.begins_with("Assets/")) else dir + p, files[path])
 	var uxml_path := dir + name + ".uxml"
 	var uxml: String = c["uxml"]
+	var case_uss: String = c["uss"]
+	if not scaling.is_empty() and not fill:
+		var sheet := ""
+		if not case_uss.is_empty():
+			sheet = name + ".uss"
+			_write(dir + sheet, case_uss)
+			case_uss = ""
+		uxml = _wrap_host(uxml, host_pts, sheet)
 	_write(uxml_path, uxml)
 
 	_vp = SubViewport.new()
@@ -217,10 +303,25 @@ func _render_case(c: Dictionary, dump: Dictionary) -> void:
 	if not skin.is_empty():
 		doc.editor_theme = "always"
 		doc.editor_skin = skin
+	if not scaling.is_empty():
+		var ps := UxmlPanelSettings.new()
+		var st := UxmlPanelScale.settings_from_unity(scaling["settings"])
+		ps.scale_mode = int(st["scale_mode"]) as UxmlPanelSettings.ScaleMode
+		ps.scale = float(st["scale"])
+		ps.reference_resolution = st["reference_resolution"]
+		ps.screen_match_mode = int(st["screen_match_mode"]) as UxmlPanelSettings.ScreenMatchMode
+		ps.match_width_or_height = float(st["match"])
+		ps.reference_dpi = float(st["reference_dpi"])
+		ps.fallback_dpi = float(st["fallback_dpi"])
+		doc.screen_dpi = float(scaling.get("screenDpi", 0.0))
+		doc.panel_settings = ps
 	doc.position = Vector2.ZERO
 	doc.size = Vector2(panel)
 	_vp.add_child(doc)
-	_load(doc, uxml, uxml_path, root, c["uss"], actions)
+	_load(doc, uxml, uxml_path, root, case_uss, actions)
+	_host_el = null
+	if not scaling.is_empty() and not fill:
+		_host_el = doc._doc.find_by_name("uxml-dump-host")
 	if sidecar.has("bind"):
 		doc.set_data_source(_bind_target(String(sidecar["bind"]), root))
 	doc.size = Vector2(panel)
@@ -275,6 +376,7 @@ func _load(doc: UxmlDocument, uxml: String, uxml_path: String, root: String, uss
 			el.set_attribute(attr, str(v).to_lower() if v is bool else str(v))
 	doc._effective_root = root
 	UxmlTheme.attach(doc._doc, doc.theme_path, doc.editor_theme, doc.editor_skin)
+	doc._update_scale()
 	doc._index()
 	doc._restyle_now()
 
@@ -306,6 +408,8 @@ func _initial_curve_gradient(el: UxmlElement, keys: Array) -> void:
 func _save(file: String) -> void:
 	var img := _vp.get_texture().get_image()
 	img.convert(Image.FORMAT_RGBA8)
+	if _scaled and _crop != Vector2i.ZERO and _crop != img.get_size():
+		img = img.get_region(Rect2i(Vector2i.ZERO, _crop))
 	img.save_png(_out.path_join(file))
 
 
@@ -313,16 +417,18 @@ func _save(file: String) -> void:
 ## what the runtime laid out (bench/pixels.py compares it with Unity's).
 func _save_rects(doc: UxmlDocument, file: String) -> void:
 	var out := {}
-	var ours := _paths(doc._doc.root)
+	var ours := _paths(_host_el if _host_el != null else doc._doc.root)
 	var origin := doc.get_global_transform()
+	# A scaled panel: rects in pixels of the document (the root box's scale).
+	var k := doc.get_pixels_per_point()
 	for p in ours:
 		var c = doc._controls.get(ours[p])
 		if not (c is Control) or not (c as Control).is_visible_in_tree():
 			continue
 		var t := origin.affine_inverse() * (c as Control).get_global_transform()
-		if t.x.distance_to(Vector2.RIGHT) > 1e-4 or t.y.distance_to(Vector2.DOWN) > 1e-4:
+		if t.x.distance_to(Vector2.RIGHT * k) > 1e-4 * k or t.y.distance_to(Vector2.DOWN * k) > 1e-4 * k:
 			continue  # rotated or scaled: Unity's worldBound is a bounding box
-		out[p] = [t.origin.x, t.origin.y, (c as Control).size.x, (c as Control).size.y]
+		out[p] = [t.origin.x, t.origin.y, (c as Control).size.x * k, (c as Control).size.y * k]
 	var f := FileAccess.open(_out.path_join(file), FileAccess.WRITE)
 	f.store_string(JSON.stringify(out))
 	f.close()
@@ -405,7 +511,7 @@ func _tree_ids(src: Array) -> Array:
 ## Unity's control values, pseudo-states, run-time state classes and
 ## selected tabs after the case's actions, at the same element paths.
 func _sync_unity_state(doc: UxmlDocument, dump: Dictionary) -> void:
-	var ours := _paths(doc._doc.root)
+	var ours := _paths(_host_el if _host_el != null else doc._doc.root)
 	for u in dump["elements"]:
 		_sync_el(doc, ours, u)
 	doc._restyle_now()

@@ -67,6 +67,7 @@ var _scroll_bar_width: float = 0.0
 ## options["pixel_grid"]: margins, padding and borders on the pixel grid
 ## (UxmlFlexLayout.grid_box), as the runtime lays them out.
 var _grid := false
+var _ppp := 1.0  # options["pixels_per_point"] (panel scaling)
 
 
 static func compute(
@@ -87,6 +88,7 @@ static func compute(
 	if options.has("warned"):
 		l._warned = options["warned"]
 	l._grid = bool(options.get("pixel_grid", false))
+	l._ppp = float(options.get("pixels_per_point", 1.0))
 	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
 	return {
 		"rects": l._rects,
@@ -193,7 +195,7 @@ func _edges(
 			_warn_once(el, name, "%s: negative values are invalid; 0 used" % name)
 			out[side[0]] = 0.0
 		else:
-			out[side[0]] = UxmlFlexLayout.grid_box(r["v"], false) if _grid else r["v"]
+			out[side[0]] = UxmlFlexLayout.grid_box(r["v"], false, _ppp) if _grid else r["v"]
 	return out
 
 
@@ -209,7 +211,7 @@ func _borders(el: UxmlElement, cb_width: float) -> Dictionary:
 			continue
 		var p := RefUssValues.parse_length(String(raw))
 		if p["kind"] == "px":
-			out[side[0]] = UxmlFlexLayout.grid_box(p["value"], true) if _grid else maxf(0.0, p["value"])
+			out[side[0]] = UxmlFlexLayout.grid_box(p["value"], true, _ppp) if _grid else maxf(0.0, p["value"])
 		else:
 			if p["kind"] == "invalid":
 				_warn_once(el, name, "%s: %s" % [name, p["problem"]])
@@ -440,6 +442,9 @@ func _measure(
 			# (unity/fidelity) text lays out in the width the container has.
 			hint = maxf(0.0, bx - in_w)
 		var intr: Vector2 = _measurer.call(el, _styles.get(el, {}), hint)
+		if _grid and _ppp != 1.0:
+			# (feat/panel-scaling) a leaf measure up to the pixel grid.
+			intr = Vector2(UxmlPanelScale.ceil_pixel(intr.x, _ppp), UxmlPanelScale.ceil_pixel(intr.y, _ppp))
 		# (unity/fidelity) Unity clamps a leaf measure to its bound.
 		var ix: float = intr.x
 		var iy: float = intr.y

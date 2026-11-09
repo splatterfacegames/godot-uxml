@@ -19,6 +19,16 @@ dumps that check a row; 177 of 178 cases match exactly. `bench/pixels.py`
 also compares what Unity and godot-uxml draw for every case (docs/parity.md,
 "Pixels"); the `px-*` cases cover the paint properties.
 
+## Panel settings
+
+| item | status | Unity cases |
+| --- | --- | --- |
+| `PanelSettings` scale modes: ConstantPixelSize (`scale`), ConstantPhysicalSize (`referenceDpi`, `fallbackDpi`, the screen DPI), ScaleWithScreenSize (`referenceResolution`, MatchWidthOrHeight with `match`, Expand, Shrink) | done: `UxmlDocument.panel_settings` (`UxmlPanelSettings`); the scale, pixels per point and panel size equal Unity's to the bit on 1032 settings and screens (`bench/parity/probes/panel-scale.json`); layout in points rounded on the pixel grid, text, boxes and images drawn at device resolution (docs/design.md, "Panel scaling") | the 172 dumps of `bench/parity/scaled/matrix.json` (`lay-*`, `px-border`, `px-background`, `px-clip`, `px-text`, `scl-settings` at 19 scales): all match on the model |
+| PanelSettings `.asset` (Unity YAML) | done: `UxmlPanelSettings.load_unity_asset`, `UxmlDocument.panel_settings_asset`; `themeUss` found by GUID | `tests/fixtures/panel_settings` (written by Unity) |
+| theme style sheet `.tss` | done: `@import url("unity-theme://default")` is the default theme, other imports and rules are theme sheets after it | `ScaledPanel.tss` |
+| ConstantPhysicalSize with an unknown screen DPI (`fallbackDpi`) | done (formula); not measured: Unity reports 96 dpi in batch mode, so the fallback path never runs there | |
+| `renderMode` WorldSpace, `targetTexture`, `targetDisplay`, `sortingOrder`, `clearColor`, dynamic atlas settings, `textSettings` | not mapped (a world-space panel lays out as a screen panel, with a warning) | |
+
 ## USS properties
 
 | Property | Status | Unity cases |

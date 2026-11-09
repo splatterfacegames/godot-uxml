@@ -55,6 +55,11 @@ func _init(p_host: Control) -> void:
 	_update_rect()
 
 
+## Device pixels per local unit of the rounded mask's edge (UxmlBoxStyle.px;
+## the applier sets it before set_radii).
+var px := 1.0
+
+
 func set_inset(v: Vector4) -> void:
 	if v == inset:
 		return
@@ -65,7 +70,7 @@ func set_inset(v: Vector4) -> void:
 ## Clip to the rounded inner outline of a box with these corner radii (or
 ## to the rectangle again with none).
 func set_radii(r: PackedFloat64Array) -> void:
-	if r == radii:
+	if r == radii and (_mask == null or _mask.px == px):
 		return
 	radii = r
 	var round := false
@@ -76,6 +81,7 @@ func set_radii(r: PackedFloat64Array) -> void:
 		_mask.bg_color = Color.WHITE
 		_mask.radii = r
 		_mask.fill_inner = true
+		_mask.px = px
 	else:
 		_mask = null
 	if round and _mask_material == null:

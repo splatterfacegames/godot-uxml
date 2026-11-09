@@ -30,14 +30,26 @@ extends SceneTree
 ## results that the comparison must reject, so a broken comparator cannot
 ## report parity.
 ##
+## Part 3 — panel scaling: every dump in bench/parity/unity-scaled/ (the
+## cases of bench/parity/scaled/matrix.json under Unity's PanelSettings at
+## several screens, tools/unity-dump/run.py --scaled). The scale must
+## resolve as Unity's (pixels per point and panel size, UxmlPanelScale);
+## the case is laid out in points at Unity's panel size and rounded on the
+## pixel grid at Unity's pixels per point, and compared as in part 2, the
+## geometry in pixels (0.1px).
+##
 ##   Godot --headless --path <project> -s res://bench/parity.gd [-- --verbose]
 
 const REF := "res://bench/parity/reference.json"
 const UNITY_DIR := "res://bench/parity/unity/"
 const CASES_DIR := "res://bench/parity/cases/"
+const SCALED_DIR := "res://bench/parity/unity-scaled/"
+const SCALED_CASES := "res://bench/parity/scaled/cases/"
 const STATES := ["hover", "active", "focus", "checked", "selected"]
 
 var _verbose := false
+## The pixel grid of the case being compared (panel scaling; 1 otherwise).
+var _ppp := 1.0
 
 
 func _initialize() -> void:
@@ -64,7 +76,8 @@ func _initialize() -> void:
 			"files": _case_files(CASES_DIR + n + ".files")})
 	_unity_project_data()
 	var unity_ok := _unity_section(unity_cases)
-	quit(0 if negatives_ok and unity_ok else 1)
+	var scaled_ok := _scaled_section()
+	quit(0 if negatives_ok and unity_ok and scaled_ok else 1)
 
 
 ## The other files of a corpus case (<name>.files/: templates, sheets),
@@ -540,6 +553,108 @@ func _unity_section(cases: Array) -> bool:
 	return negatives_ok
 
 
+## Part 3: the panel-scaling dumps (see the header). Prints one row per
+## dump and a summary per scale; returns false when a negative case is not
+## detected.
+func _scaled_section() -> bool:
+	var d := DirAccess.open(SCALED_DIR)
+	if d == null:
+		print("\nSCALED PARITY: no dumps in %s (run tools/unity-dump/run.py --scaled bench/parity/scaled/matrix.json)" % SCALED_DIR)
+		return true
+	var files: Array = []
+	for f in d.get_files():
+		if f.ends_with(".json"):
+			files.append(f)
+	files.sort()
+	var rows: Array = []
+	var per := {}   # "config screen ppp" -> totals
+	var tot := {"cases": 0, "match": 0, "elements": 0, "struct_ok": 0, "geo": 0, "geo_ok": 0,
+		"style": 0, "style_ok": 0, "props": 0, "props_ok": 0, "diag": 0, "diag_ok": 0, "scale": 0, "scale_ok": 0}
+	var negatives_ok := true
+	for f in files:
+		var name := String(f).get_basename()
+		var parts := name.split("__")
+		if parts.size() != 3:
+			continue
+		var base := parts[0]
+		var dump: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(SCALED_DIR + f))
+		var sc: Dictionary = dump.get("scaling", {})
+		# The staged case had the dump's name: its sheet's warnings are the
+		# base case's.
+		for w in dump.get("importWarnings", []):
+			w["file"] = String(w["file"]).replace(name, base)
+		if sc.is_empty():
+			continue
+		var dir := CASES_DIR if FileAccess.file_exists(CASES_DIR + base + ".uxml") else SCALED_CASES
+		var uss_path: String = dir + base + ".uss"
+		var c := {"name": base,
+			"uxml": FileAccess.get_file_as_string(dir + base + ".uxml"),
+			"uss": FileAccess.get_file_as_string(uss_path) if FileAccess.file_exists(uss_path) else "",
+			"files": _case_files(dir + base + ".files"),
+			"sidecar": dir + base + ".json"}
+		# The scale, as Unity resolved it.
+		var scr: Array = sc["screen"]
+		var res := UxmlPanelScale.resolve(UxmlPanelScale.settings_from_unity(sc["settings"]),
+			Vector2(float(scr[0]), float(scr[1])), float(sc.get("screenDpi", 0.0)))
+		var F := UxmlPanelScale.f32
+		var ps: Vector2 = res["panel_size"]
+		var scale_ok: bool = (F.call(float(res["pixels_per_point"])) == F.call(float(sc["pixelsPerPoint"]))
+			and F.call(ps.x) == F.call(float(sc["root"]["width"])) and F.call(ps.y) == F.call(float(sc["root"]["height"])))
+		_ppp = float(sc["pixelsPerPoint"])
+		var r := _run_unity(c, dump)
+		r["name"] = name
+		_ppp = 1.0
+		tot["scale"] += 1
+		if scale_ok:
+			tot["scale_ok"] += 1
+		else:
+			r["notes"].push_front("scale: ours %s pixels per point, panel %s; Unity %s, %s" % [res["pixels_per_point"], ps, sc["pixelsPerPoint"], sc["root"]])
+			r["status"] = "differs"
+		rows.append(r)
+		tot["cases"] += 1
+		for k in ["elements", "struct_ok", "geo", "geo_ok", "style", "style_ok", "props", "props_ok", "diag", "diag_ok"]:
+			tot[k] += r[k]
+		if r["status"] == "match":
+			tot["match"] += 1
+			_ppp = float(sc["pixelsPerPoint"])
+			negatives_ok = _unity_negative(r) and negatives_ok
+			_ppp = 1.0
+		var key := "%s %dx%d @%.4f" % [parts[1], int(scr[0]), int(scr[1]), float(sc["pixelsPerPoint"])]
+		var t: Dictionary = per.get(key, {"cases": 0, "match": 0, "geo": 0, "geo_ok": 0, "style": 0, "style_ok": 0})
+		t["cases"] += 1
+		t["match"] += 1 if r["status"] == "match" else 0
+		for k in ["geo", "geo_ok", "style", "style_ok"]:
+			t[k] += r[k]
+		per[key] = t
+	print("")
+	print("scaled parity vs Unity (PanelSettings; geometry in pixels)")
+	print("| case | status | structure | geometry | style | first differences |")
+	print("| --- | --- | ---: | ---: | ---: | --- |")
+	for r in rows:
+		var notes: Array = r["notes"]
+		var shown := "; ".join(notes.slice(0, 3 if not _verbose else notes.size()))
+		if notes.size() > 3 and not _verbose:
+			shown += " (+%d more)" % (notes.size() - 3)
+		print("| %s | %s | %d/%d | %d/%d | %d/%d | %s |" % [r["name"], r["status"],
+			r["struct_ok"], r["elements"], r["geo_ok"], r["geo"], r["style_ok"], r["style"], shown])
+	print("")
+	print("| config | screen | pixels per point | cases | geometry | style |")
+	print("| --- | --- | ---: | ---: | ---: | ---: |")
+	var keys := per.keys()
+	keys.sort()
+	for k in keys:
+		var t: Dictionary = per[k]
+		var kp := String(k).split(" ")
+		print("| %s | %s | %s | %d/%d | %d/%d | %d/%d |" % [kp[0], kp[1], kp[2].trim_prefix("@"),
+			t["match"], t["cases"], t["geo_ok"], t["geo"], t["style_ok"], t["style"]])
+	print("")
+	print("SCALED PARITY: %d/%d cases match; scale %d/%d; structure %d/%d, geometry %d/%d (pixels), style %d/%d, element properties %d/%d, import diagnostics %d/%d; negative cases %s" % [
+		tot["match"], tot["cases"], tot["scale_ok"], tot["scale"], tot["struct_ok"], tot["elements"],
+		tot["geo_ok"], tot["geo"], tot["style_ok"], tot["style"], tot["props_ok"], tot["props"],
+		tot["diag_ok"], tot["diag"], "detected" if negatives_ok else "NOT DETECTED"])
+	return negatives_ok
+
+
 func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	var name: String = c["name"]
 	var uels: Array = dump["elements"]
@@ -559,7 +674,7 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		elif ut == "MinMaxSlider" and props.has("minValue"):
 			values[n] = {"min-value": str(props["minValue"]), "max-value": str(props["maxValue"])}
 	var actions: Array = []
-	var side := CASES_DIR + name + ".json"
+	var side: String = c.get("sidecar", CASES_DIR + name + ".json")
 	var sidecar := {}
 	if FileAccess.file_exists(side):
 		var sj = JSON.parse_string(FileAccess.get_file_as_string(side))
@@ -657,7 +772,7 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 	if timed != null:
 		resolve_fn = timed
 	var layout_fn := func(st: Dictionary): return UxmlFlexLayout.compute(doc.root, st, panel, measurer, [],
-		{"pixel_grid": true})
+		{"pixel_grid": true, "pixels_per_point": _ppp})
 	var settled := _settle(doc, resolve_fn, layout_fn)
 	styles = settled[0]
 	var res: Dictionary = settled[1]
@@ -741,7 +856,8 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 		if not hidden_under.has(path) and (not hidden or r != null):
 			for k in 4:
 				out["geo"] += 1
-				var dv := absf(_r1(got[k]) - _r1(want[k]))
+				# In pixels (at 1 pixel per point, the points themselves).
+				var dv := absf(_r1(got[k] * _ppp) - _r1(want[k] * _ppp))
 				if dv <= 0.05:
 					out["geo_ok"] += 1
 				else:
@@ -764,7 +880,7 @@ func _run_unity(c: Dictionary, dump: Dictionary) -> Dictionary:
 				if pe != null:
 					var pl := UssValues.parse_length(String(pe["value"]))
 					if pl["kind"] == "px":
-						base_w -= UxmlFlexLayout.grid_box(float(pl["value"]), bp.begins_with("border"))
+						base_w -= UxmlFlexLayout.grid_box(float(pl["value"]), bp.begins_with("border"), _ppp)
 		for diff in _style_diffs(u["style"], st, out, base_w):
 			out["notes"].append("%s %s" % [label, diff])
 		var lr = res["rects"].get(el)
@@ -1071,7 +1187,7 @@ func _style_diffs(us: Dictionary, st: Dictionary, out: Dictionary, base_w: float
 			# The layout's pixel-grid value of a box length (Unity rounds
 			# margins, padding and borders).
 			if not is_nan(got) and not radius:
-				got = UxmlFlexLayout.grid_box(got, String(p).begins_with("border"))
+				got = UxmlFlexLayout.grid_box(got, String(p).begins_with("border"), _ppp)
 		if not is_nan(got) and absf(got - want) <= 0.05:
 			out["style_ok"] += 1
 		else:

@@ -295,6 +295,8 @@ pub struct LayoutIn {
     /// Round the output to the pixel grid (UxmlDocument.pixel_grid; Unity's
     /// RoundToPixelGrid). Same rule as UxmlFlexLayout.round_to_pixel_grid.
     pub pixel_grid: bool,
+    /// The pixel grid in pixels per point (UxmlPanelScale; panel scaling).
+    pub ppp: f64,
     /// UxmlField wrappers (insets via set_content_insets).
     pub fields: Vec<bool>,
     /// TextureRect natives (Image elements: anchor offsets follow insets).
@@ -476,6 +478,16 @@ impl Placement {
         }
         if c.get_size() != r.size {
             c.set_size(r.size);
+        }
+        if let Some(lbl) = &io.labels[i] {
+            // UxmlDocument._place_control: a wrapping Label in a box shorter
+            // than its lines gets the minimum size of the placed width.
+            if lbl.get_autowrap_mode() != godot::classes::text_server::AutowrapMode::OFF
+                && d(c.get_size().y) > d(r.size.y) + 0.01
+            {
+                c.update_minimum_size();
+                c.set_size(r.size);
+            }
         }
         if let (Some(lbl), Some(a)) = (&io.labels[i], applier) {
             // UxmlDocument._place_control: a Label narrower than its text
@@ -1056,7 +1068,7 @@ impl<'a> Pass<'a> {
         self.out.raw = self.out.rects.clone();
         if self.io.pixel_grid {
             let mut rounded = self.out.rects.clone();
-            round_node(self.c, 0, 0.0, 0.0, &self.out.raw, &mut rounded);
+            round_node(self.c, 0, 0.0, 0.0, &self.out.raw, &mut rounded, self.io.ppp);
             self.out.rects = rounded;
         }
         (self.out, carry)
@@ -1067,7 +1079,7 @@ impl<'a> Pass<'a> {
         self.out.raw = self.out.rects.clone();
         if self.io.pixel_grid {
             let mut rounded = self.out.rects.clone();
-            round_node(self.c, 0, 0.0, 0.0, &self.out.raw, &mut rounded);
+            round_node(self.c, 0, 0.0, 0.0, &self.out.raw, &mut rounded, self.io.ppp);
             self.out.rects = rounded;
         }
         self.out
@@ -1085,7 +1097,7 @@ impl<'a> Pass<'a> {
         if self.io.pixel_grid {
             let mut rounded = self.out.rects.clone();
             for &(i, _, _, al, at) in roots {
-                round_node(self.c, i, al, at, &self.out.raw, &mut rounded);
+                round_node(self.c, i, al, at, &self.out.raw, &mut rounded, self.io.ppp);
             }
             self.out.rects = rounded;
         }
@@ -1235,7 +1247,7 @@ impl<'a> Pass<'a> {
                 let name = LAYOUT_PROPS[pid];
                 self.warn_once(i, name, format!("{name}: negative values are invalid; 0 used"));
             } else {
-                out[k] = if self.io.pixel_grid { grid_box(r, false) } else { r };
+                out[k] = if self.io.pixel_grid { grid_box(r, false, self.io.ppp) } else { r };
             }
         }
         out
@@ -1273,7 +1285,7 @@ impl<'a> Pass<'a> {
             match self.recs[i].kinds[pid] {
                 K::Px => {
                     let v = self.recs[i].vals[pid];
-                    out[k] = if self.io.pixel_grid { grid_box(v, true) } else { gmax(0.0, v) };
+                    out[k] = if self.io.pixel_grid { grid_box(v, true, self.io.ppp) } else { gmax(0.0, v) };
                 }
                 K::Bad => {
                     let name = LAYOUT_PROPS[pid];
@@ -1633,6 +1645,18 @@ impl<'a> Pass<'a> {
             ms.x = f(gmax(0.0, d(ms.x) - m[0] - m[2]));
             ms.y = f(gmax(0.0, d(ms.y) - m[1] - m[3]));
         }
+        if self.io.ppp != 1.0 && c.has_meta("uxml_line_fix") {
+            // Unity's line height on a scaled panel (UxmlStyleApplier.line_fix).
+            if let Ok(lf) = c.get_meta("uxml_line_fix").try_to::<PackedFloat64Array>() {
+                let s = lf.as_slice();
+                if s.len() == 2 && s[0] > 0.0 {
+                    let n = (d(ms.y) / s[0]).round();
+                    if n > 0.0 {
+                        ms.y = f(n * s[1]);
+                    }
+                }
+            }
+        }
         ms
     }
 
@@ -1827,7 +1851,16 @@ impl<'a> Pass<'a> {
                 // Yoga AtMost: text lays out in the width the container has.
                 hint2 = gmax(0.0, bx - in_w);
             }
-            let intr = self.measure_call(i, hint2);
+            let mut intr = self.measure_call(i, hint2);
+            if self.io.pixel_grid && self.io.ppp != 1.0 {
+                // A scaled panel: Unity rounds a leaf measure up to the
+                // pixel grid (flex_layout.gd does the same).
+                let ppp = self.io.ppp;
+                intr = Vector2::new(
+                    f(crate::panel_scale::ceil_pixel(d(intr.x), ppp)),
+                    f(crate::panel_scale::ceil_pixel(d(intr.y), ppp)),
+                );
+            }
             // Unity clamps a leaf measure to the space the leaf has.
             let mut ix = d(intr.x);
             let mut iy = d(intr.y);
@@ -2714,11 +2747,11 @@ fn abs_free(mode: &str, reverse: bool, outer: f64, sz: f64, lead: f64) -> f64 {
 
 // ------------------------------------------------------------- pixel grid
 
-/// Yoga's RoundToPixelGrid at one pixel per point (UxmlFlexLayout.
+/// Yoga's RoundToPixelGrid at `ppp` pixels per point (UxmlFlexLayout.
 /// round_to_pixel_grid): a position rounds on its own, a size is the
 /// difference of the rounded absolute edges, children start from the
 /// unrounded absolute position.
-fn round_node(c: &Cascade, i: usize, abs_l: f64, abs_t: f64, src: &[Option<Rect2>], out: &mut [Option<Rect2>]) {
+fn round_node(c: &Cascade, i: usize, abs_l: f64, abs_t: f64, src: &[Option<Rect2>], out: &mut [Option<Rect2>], ppp: f64) {
     let Some(r) = src[i] else { return };
     let left = d(r.position.x);
     let top = d(r.position.y);
@@ -2726,37 +2759,15 @@ fn round_node(c: &Cascade, i: usize, abs_l: f64, abs_t: f64, src: &[Option<Rect2
     let at = abs_t + top;
     // Unity rounds a position from the absolute edges: the rounded
     // absolute position less the rounded absolute position of the parent.
+    let pl = pixel(al, ppp);
+    let pt = pixel(at, ppp);
     out[i] = Some(Rect2::new(
-        Vector2::new(f(pixel(al) - pixel(abs_l)), f(pixel(at) - pixel(abs_t))),
-        Vector2::new(f(pixel(al + d(r.size.x)) - pixel(al)), f(pixel(at + d(r.size.y)) - pixel(at))),
+        Vector2::new(f(pl - pixel(abs_l, ppp)), f(pt - pixel(abs_t, ppp))),
+        Vector2::new(f(pixel(al + d(r.size.x), ppp) - pl), f(pixel(at + d(r.size.y), ppp) - pt)),
     ));
     for ch in c.children(i) {
-        round_node(c, ch, al, at, src, out);
+        round_node(c, ch, al, at, src, out, ppp);
     }
 }
 
-/// A margin, padding or border width on the pixel grid (UxmlFlexLayout.
-/// grid_box): margins and padding round to the nearest pixel, halves up; a
-/// nonzero border is at least one pixel wide (measured in Unity).
-fn grid_box(v: f64, border: bool) -> f64 {
-    if border {
-        if v <= 0.0 { 0.0 } else { gmax(1.0, pixel(v)) }
-    } else {
-        pixel(v)
-    }
-}
-
-/// Yoga's roundValueToPixelGrid (no forced ceil/floor); C fmod semantics.
-fn pixel(v: f64) -> f64 {
-    let mut fr = v % 1.0;
-    if fr < 0.0 {
-        fr += 1.0;
-    }
-    if fr.abs() < 0.0001 {
-        return v - fr;
-    }
-    if (fr - 1.0).abs() < 0.0001 {
-        return v - fr + 1.0;
-    }
-    v - fr + if fr > 0.5 || (fr - 0.5).abs() < 0.0001 { 1.0 } else { 0.0 }
-}
+use crate::panel_scale::{grid_box, pixel};

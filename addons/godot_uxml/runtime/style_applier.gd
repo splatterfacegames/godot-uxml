@@ -105,6 +105,20 @@ static var _fit_fonts: Dictionary = {}
 ## How many controls carry clip_text for overflow: hidden text. While zero
 ## the measurers skip the clip-text check entirely.
 var clip_texts := 0
+## The pixel grid of the document (UxmlPanelScale; panel scaling): border
+## widths round on it, and boxes draw their antialiased edges one device
+## pixel wide (UxmlBoxStyle.px). Set through set_pixels_per_point().
+var pixels_per_point := 1.0
+
+
+## A new pixel grid: the boxes built for the old one are not reused (the
+## document applies every control again).
+func set_pixels_per_point(ppp: float) -> void:
+	if ppp == pixels_per_point:
+		return
+	pixels_per_point = ppp
+	_box_memo.clear()
+	_inset_memo.clear()
 ## How many Labels/Buttons have an active -unity-text-auto-size. While zero
 ## the measurers skip the auto-size check entirely.
 var auto_sizes := 0
@@ -511,6 +525,9 @@ func _apply_themed_inner(c: Control, style: Dictionary, el: UxmlElement, include
 	if unity_line_metrics and (c is Label or c is Button or c is LineEdit or c is TextEdit
 			or c is RichTextLabel) and not _has_url_font(style):
 		font = _line_font(c, font, style, el)
+		_set_line_fix(c, font, style, el)
+	elif c.has_meta(&"uxml_line_fix"):
+		c.remove_meta(&"uxml_line_fix")
 	if unity_line_metrics and (c is Label or c is TextEdit) and not c.has_theme_constant_override(&"line_spacing"):
 		# Unity's lines follow each other at the line height; Godot adds
 		# line_spacing (Label 3px, TextEdit 4px): a three-line TextField
@@ -1125,6 +1142,40 @@ func _line_font(c: Control, font: Font, style: Dictionary, el: UxmlElement) -> F
 	return hit
 
 
+## Unity's line height on a scaled panel: TextCore lays text out at the
+## whole pixel size round(font-size x pixels per point), a line
+## ceil(1.2099 x that) pixels high (measured on 40 sizes and scales, all
+## of them). The Godot font keeps its line height of one pixel per point
+## (_line_font), so a measure of n lines is n Unity lines: the
+## `uxml_line_fix` meta [Godot line height, Unity line height in points]
+## that both layouts read (line_fix(), layout.rs measure_leaf). Not set at
+## one pixel per point, where the two are equal.
+func _set_line_fix(c: Control, font: Font, style: Dictionary, el: UxmlElement) -> void:
+	if pixels_per_point == 1.0:
+		if c.has_meta(&"uxml_line_fix"):
+			c.remove_meta(&"uxml_line_fix")
+		return
+	var fs := _effective_font_size(c, style, el)
+	var f: Font = font if font != null else c.get_meta("uxml_base_font", null)
+	if fs <= 0 or f == null:
+		if c.has_meta(&"uxml_line_fix"):
+			c.remove_meta(&"uxml_line_fix")
+		return
+	var ppp := pixels_per_point
+	var unity_h := ceilf(UNITY_LINE_EM * floorf(float(fs) * ppp + 0.5) - 0.001) / ppp
+	c.set_meta(&"uxml_line_fix", PackedFloat64Array([f.get_height(fs), unity_h]))
+
+
+## A measured text height `h` (content, without padding) in Unity's lines
+## (see _set_line_fix): `h` when the control has no fix or no line.
+static func line_fix(c: Control, h: float) -> float:
+	var lf: PackedFloat64Array = c.get_meta(&"uxml_line_fix")
+	if lf[0] <= 0.0:
+		return h
+	var n := roundi(h / lf[0])
+	return h if n <= 0 else float(n) * lf[1]
+
+
 ## A cache key for a font by content: _font() makes a new FontVariation
 ## for a bold or italic style on each apply, so a key by instance would
 ## keep every one of them (and its TextServer caches) alive.
@@ -1574,7 +1625,8 @@ func _stylebox(style: Dictionary, el: UxmlElement, force_box := false) -> StyleB
 
 ## What _stylebox builds, as a record: [kind (0 none, 1 UxmlBoxStyle,
 ## 2 StyleBoxFlat), background colour (or null), widths, border colours,
-## radii, the StyleBoxFlat border colour, content margins (l, t, r, b)].
+## radii, the StyleBoxFlat border colour, content margins (l, t, r, b),
+## the pixels per point of the box (UxmlBoxStyle.px)].
 ## Records and their parts are shared: never written after the build.
 const _R_KIND := 0
 const _R_BG := 1
@@ -1583,7 +1635,8 @@ const _R_COLORS := 3
 const _R_RADII := 4
 const _R_FLAT_BORDER := 5
 const _R_MARGINS := 6
-const _NO_REC := [0, null, null, null, null, null, null]
+const _R_PX := 7
+const _NO_REC := [0, null, null, null, null, null, null, 1.0]
 ## The shape of a box: what the border widths, radii and padding give
 ## ([widths, radii, content margins, any border, any radius, any padding]),
 ## by their values (_BOX_KEYS less the colours). A shape is a function of
@@ -1608,7 +1661,7 @@ var _warns := 0
 func _box_rec(style: Dictionary, el: UxmlElement, force_box: bool, inputs = null) -> Array:
 	if not restyle_reuse:
 		return _box_rec_of(style, el, force_box, null)
-	var vals: Array = [force_box]
+	var vals: Array = [force_box, pixels_per_point]
 	if inputs != null:
 		for e in inputs:
 			vals.append(null if e == null else e["value"])
@@ -1635,7 +1688,8 @@ func _box_rec_of(style: Dictionary, el: UxmlElement, force_box: bool, vals) -> A
 	var key: Array = []
 	if vals != null:
 		for i in _SHAPE_AT:
-			key.append(vals[i + 1])
+			key.append(vals[i + 2])
+		key.append(pixels_per_point)
 		shape = _box_shapes.get(key)
 	var bg := _color(style, "background-color", el)
 	var shape_warns := 0
@@ -1692,9 +1746,16 @@ func _box_rec_of(style: Dictionary, el: UxmlElement, force_box: bool, vals) -> A
 	# Unity's elliptic corners, per-side colours and the background under
 	# the border (seen through a translucent border, or an opaque one at
 	# an opacity below 1) need UxmlBoxStyle.
-	if force_box or any_radius or mixed or (any_border and bg != null and bg.a > 0.0):
-		return [1, bg, widths, bcolors, shape[1], null, shape[2]]
-	return [2, bg, widths, bcolors, shape[1], first_bcolor, shape[2]]
+	# StyleBoxFlat has whole border widths: a border off the whole points
+	# of a scaled panel (0.75 points at 1.33 pixels per point) is a
+	# UxmlBoxStyle.
+	var fractional := false
+	if any_border and pixels_per_point != 1.0:
+		for k in 4:
+			fractional = fractional or widths[k] != floorf(widths[k])
+	if force_box or any_radius or mixed or fractional or (any_border and bg != null and bg.a > 0.0):
+		return [1, bg, widths, bcolors, shape[1], null, shape[2], pixels_per_point]
+	return [2, bg, widths, bcolors, shape[1], first_bcolor, shape[2], pixels_per_point]
 
 
 ## A new box from a record (null for none).
@@ -1711,6 +1772,7 @@ static func _make_box(rec: Array) -> StyleBox:
 		ub.widths = widths
 		ub.colors = (rec[_R_COLORS] as Array).duplicate()
 		ub.radii = rec[_R_RADII]
+		ub.px = rec[_R_PX]
 		_set_margins(ub, m)
 		return ub
 	var sb := StyleBoxFlat.new()
@@ -1757,7 +1819,7 @@ static func _recolor(sb: StyleBox, rec: Array) -> int:
 	if kind == 1:
 		var ub := sb as UxmlBoxStyle
 		if (ub == null or ub.image != null or ub.fill_inner or ub.widths != widths
-				or ub.radii != rec[_R_RADII]):
+				or ub.radii != rec[_R_RADII] or ub.px != rec[_R_PX]):
 			return -1
 		var nbg: Color = bg if bg != null else Color.TRANSPARENT
 		if ub.bg_color == nbg and ub.colors == rec[_R_COLORS]:
@@ -1798,7 +1860,7 @@ func _border_widths(style: Dictionary, el: UxmlElement) -> PackedFloat64Array:
 		if p["kind"] == "px":
 			# On the pixel grid, as the layout lays the border out (and
 			# Unity draws it: 1.5px draws 2px wide).
-			w = UxmlFlexLayout.grid_box(maxf(0.0, p["value"]), true)
+			w = UxmlPanelScale.grid_box(maxf(0.0, p["value"]), true, pixels_per_point)
 		elif p["kind"] == "invalid":
 			_warn(el, "border-width", "border-%s-width: %s" % [_SIDES[k], p["problem"]])
 		else:
@@ -2180,6 +2242,7 @@ func _apply_overflow(c: Control, style: Dictionary, el: UxmlElement) -> void:
 			clip = UxmlClip.new(c)
 			c.set_meta("uxml_clip", clip)
 		clip.set_inset(inset)
+		clip.px = pixels_per_point
 		clip.set_radii(radii)
 		if box == "content-box":
 			_clip_content[c] = true

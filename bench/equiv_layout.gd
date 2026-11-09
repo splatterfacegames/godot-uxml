@@ -38,13 +38,21 @@ func _initialize() -> void:
 			_compare(pair[1], d, host, {}, {})
 			_compare(pair[1] + " (cached)", d, host, records, xcache)
 			_compare(pair[1] + " (document path)", d, host, {}, {})
+		# Panel scaling: the document's own path (native when loaded) and the
+		# reference, both rounded on a pixel grid of several pixels per
+		# point, and the GDScript layout against the document's path.
+		for ppp in [1.3333333730697632, 0.5625, 2.0, 1.1701388359069824]:
+			for host in [Vector2(800, 600), Vector2(333, 1000)]:
+				_compare(pair[1] + " (document path, scaled)", d, host, {}, {}, ppp)
+				_compare(pair[1] + " (gdscript vs document, scaled)", d, host, {}, {}, ppp)
 		root.remove_child(d)
 		d.free()
 	print("EQUIV_LAYOUT %s: %d checks, %d failures" % ["OK" if _fails == 0 else "FAIL", _checks, _fails])
 	quit(0 if _fails == 0 else 1)
 
 
-func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary, xcache: Dictionary) -> void:
+func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary, xcache: Dictionary,
+		ppp: float = 1.0) -> void:
 	# The controls in the tree: a hidden subtree parked out of the tree
 	# (UxmlDocument._park_hidden) is never measured, and a size written to a
 	# control out of the tree is clamped to a minimum size the engine only
@@ -58,10 +66,17 @@ func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary,
 		snap[el] = ctl[el].size
 	var opts := {"source": d._doc.source, "file": d._doc.path,
 		"warned": {}}
-	if name.ends_with("(document path)") and d.pixel_grid:
+	var doc_path := name.ends_with("(document path)") or name.ends_with("(document path, scaled)") 		or name.ends_with("(gdscript vs document, scaled)")
+	if doc_path and d.pixel_grid:
 		opts["pixel_grid"] = true
+	if ppp != 1.0:
+		opts["pixels_per_point"] = ppp
 	var w1: Array = []
-	var a := RefFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w1, opts.duplicate())
+	var a: Dictionary
+	if name.ends_with("(gdscript vs document, scaled)"):
+		a = UxmlFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w1, opts.duplicate())
+	else:
+		a = RefFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w1, opts.duplicate())
 	var after_a := {}
 	for el in ctl:
 		after_a[el] = ctl[el].size
@@ -76,21 +91,32 @@ func _compare(name: String, d: UxmlDocument, host: Vector2, records: Dictionary,
 		opts2["hint_free"] = true
 	var w2: Array = []
 	var b: Dictionary
-	if name.ends_with("(document path)"):
+	if doc_path:
 		# The runtime's own path (native when the extension is loaded),
-		# with a fresh dedupe set and warnings array.
+		# with a fresh dedupe set and warnings array, on the pixel grid of
+		# `ppp`.
 		var keep_w = d._layout_warned
 		var keep_rt = d._rt_warnings
+		var keep_ppp := d._grid_ppp
+		var keep_xc := d._layout_xcache
 		d._layout_warned = {}
 		d._rt_warnings = w2
+		if ppp != keep_ppp:
+			# A new grid drops the cross-pass cache (UxmlDocument._update_scale).
+			d._layout_xcache = {}
+		d._grid_ppp = ppp
 		b = d._compute_layout(host)
+		d._grid_ppp = keep_ppp
+		d._layout_xcache = keep_xc if ppp == keep_ppp else {}
+		if d._native_layout():
+			d._cascade._native.call("set_pixels_per_point", keep_ppp)
 		d._layout_warned = keep_w
 		d._rt_warnings = keep_rt
-		if d.pixel_grid:
+		if d.pixel_grid and not name.ends_with("(gdscript vs document, scaled)"):
 			# The runtime rounds to the pixel grid (UxmlDocument.pixel_grid);
 			# the reference result gets the same rounding rule.
 			a = a.duplicate()
-			a["rects"] = UxmlFlexLayout.round_to_pixel_grid(d._doc.root, a["rects"])
+			a["rects"] = UxmlFlexLayout.round_to_pixel_grid(d._doc.root, a["rects"], ppp)
 	else:
 		b = UxmlFlexLayout.compute(d._doc.root, d._styles, host, d._measure_leaf, w2, opts2)
 	_checks += 1

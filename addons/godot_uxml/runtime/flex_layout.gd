@@ -129,6 +129,7 @@ static var _no_state := PackedFloat64Array()
 # a text change or a deferred theme update can never be served stale.
 var _xc = null
 var _grid := false           # options["pixel_grid"]: box lengths on the pixel grid
+var _ppp := 1.0              # options["pixels_per_point"]: the pixel grid (UxmlPanelScale)
 var _hint_free := false      # options["hint_free"]: only volatile measures read the hint
 ## options["hinted"]: non-volatile elements whose measure still reads the
 ## width hint (best-fit text, -unity-text-auto-size). A column with
@@ -188,7 +189,7 @@ static func compute(
 	l._layout(root, Rect2(Vector2.ZERO, host_size), host_size.x)
 	var rects: Dictionary = l._rects
 	if bool(options.get("pixel_grid", false)):
-		rects = round_to_pixel_grid(root, rects)
+		rects = round_to_pixel_grid(root, rects, float(options.get("pixels_per_point", 1.0)))
 	return {
 		"rects": rects,
 		"content_sizes": l._content_sizes,
@@ -219,7 +220,7 @@ static func compute_subtree(
 	var rects: Dictionary = l._rects
 	if bool(options.get("pixel_grid", false)):
 		rects = {}
-		_round_node(root, origin.x, origin.y, l._rects, rects)
+		_round_node(root, origin.x, origin.y, l._rects, rects, l._ppp)
 	return {
 		"rects": rects,
 		"content_sizes": l._content_sizes,
@@ -246,24 +247,25 @@ static func _make(styles: Dictionary, measurer: Callable, warnings: Array, optio
 	l._hinted = options.get("hinted", {})
 	l._text_controls = options.get("text_controls", {})
 	l._grid = bool(options.get("pixel_grid", false))
+	l._ppp = float(options.get("pixels_per_point", 1.0))
 	if options.has("warned"):
 		l._warned = options["warned"]
 	return l
 
 
-## Yoga's RoundToPixelGrid at one pixel per point, as Unity rounds every
-## layout: a position rounds on its own, a size is the difference of the
-## rounded absolute edges, and children start from the unrounded absolute
-## position. Halves round up. Returns a new Dictionary (the cross-pass
-## cache keeps the unrounded rects). The native layout does the same
-## (layout.rs, round_to_pixel_grid).
-static func round_to_pixel_grid(root: UxmlElement, rects: Dictionary) -> Dictionary:
+## Yoga's RoundToPixelGrid at `ppp` pixels per point (UxmlPanelScale), as
+## Unity rounds every layout: a position rounds on its own, a size is the
+## difference of the rounded absolute edges, and children start from the
+## unrounded absolute position. Halves round up. Returns a new Dictionary
+## (the cross-pass cache keeps the unrounded rects). The native layout does
+## the same (layout.rs, round_to_pixel_grid).
+static func round_to_pixel_grid(root: UxmlElement, rects: Dictionary, ppp: float = 1.0) -> Dictionary:
 	var out := rects.duplicate()
-	_round_node(root, 0.0, 0.0, rects, out)
+	_round_node(root, 0.0, 0.0, rects, out, ppp)
 	return out
 
 
-static func _round_node(el: UxmlElement, abs_l: float, abs_t: float, src: Dictionary, out: Dictionary) -> void:
+static func _round_node(el: UxmlElement, abs_l: float, abs_t: float, src: Dictionary, out: Dictionary, ppp: float) -> void:
 	var r = src.get(el)
 	if r == null:
 		return
@@ -272,31 +274,20 @@ static func _round_node(el: UxmlElement, abs_l: float, abs_t: float, src: Dictio
 	var top := float(rr.position.y)
 	var al := abs_l + left
 	var at := abs_t + top
-	out[el] = Rect2(_pixel(al) - _pixel(abs_l), _pixel(at) - _pixel(abs_t),
-		_pixel(al + float(rr.size.x)) - _pixel(al), _pixel(at + float(rr.size.y)) - _pixel(at))
+	var pl := UxmlPanelScale.pixel(al, ppp)
+	var pt := UxmlPanelScale.pixel(at, ppp)
+	out[el] = Rect2(pl - UxmlPanelScale.pixel(abs_l, ppp), pt - UxmlPanelScale.pixel(abs_t, ppp),
+		UxmlPanelScale.pixel(al + float(rr.size.x), ppp) - pl, UxmlPanelScale.pixel(at + float(rr.size.y), ppp) - pt)
 	for c in el.children:
-		_round_node(c, al, at, src, out)
+		_round_node(c, al, at, src, out, ppp)
 
 
-## A margin, padding or border width on the pixel grid, as Unity lays it
-## out (measured, lay-fraction): margins and padding round to the nearest
-## pixel (halves up), a nonzero border is at least one pixel wide.
-static func grid_box(v: float, border: bool) -> float:
-	if border:
-		return 0.0 if v <= 0.0 else maxf(1.0, _pixel(v))
-	return _pixel(v)
-
-
-## Yoga's roundValueToPixelGrid (no forced ceil/floor).
-static func _pixel(v: float) -> float:
-	var f := fmod(v, 1.0)
-	if f < 0.0:
-		f += 1.0
-	if absf(f) < 0.0001:
-		return v - f
-	if absf(f - 1.0) < 0.0001:
-		return v - f + 1.0
-	return v - f + (1.0 if (f > 0.5 or absf(f - 0.5) < 0.0001) else 0.0)
+## A margin, padding or border width on the pixel grid at `ppp` pixels per
+## point, as Unity lays it out (measured, lay-fraction, at every scale):
+## margins and padding round to the nearest pixel (halves up), a nonzero
+## border is at least one pixel wide (UxmlPanelScale.grid_box).
+static func grid_box(v: float, border: bool, ppp: float = 1.0) -> float:
+	return UxmlPanelScale.grid_box(v, border, ppp)
 
 
 # ---------------------------------------------------------------------------
@@ -561,7 +552,7 @@ func _edges(el: UxmlElement, base_pid: int, cb_width: float, allow_negative: boo
 			var name2: String = PNAMES[pid]
 			_warn_once(el, name2, "%s: negative values are invalid; 0 used" % name2)
 		else:
-			out[k] = grid_box(r, false) if _grid else r
+			out[k] = UxmlPanelScale.grid_box(r, false, _ppp) if _grid else r
 	return out
 
 
@@ -596,7 +587,7 @@ func _borders(el: UxmlElement) -> PackedFloat64Array:
 		var pid := P_BOR + k
 		match kinds[pid]:
 			K_PX:
-				out[k] = grid_box(rec[2][pid], true) if _grid else maxf(0.0, rec[2][pid])
+				out[k] = UxmlPanelScale.grid_box(rec[2][pid], true, _ppp) if _grid else maxf(0.0, rec[2][pid])
 			K_BAD:
 				var name: String = PNAMES[pid]
 				_warn_once(el, name, "%s: %s" % [name, rec[4][pid]])
@@ -826,6 +817,10 @@ func _measure(
 			# Yoga AtMost: text lays out in the width the container has.
 			hint = maxf(0.0, bx - in_w)
 		var intr := _measure_call(el, hint)
+		if _grid and _ppp != 1.0:
+			# A scaled panel: Unity rounds a leaf measure up to the pixel
+			# grid (at 1 pixel per point the measures are whole points).
+			intr = Vector2(UxmlPanelScale.ceil_pixel(intr.x, _ppp), UxmlPanelScale.ceil_pixel(intr.y, _ppp))
 		# Unity clamps a leaf measure to the space the leaf has (AtMost).
 		var ix: float = intr.x
 		var iy: float = intr.y
