@@ -4,8 +4,11 @@ extends SceneTree
 ##   Godot --path . -s res://bench/prof/ops.gd -- --op=<op> [--n=N]
 const ROOT := "user://godot_uxml_ucmp"
 var _n := 30
+var _noprof := false
 
 func _mark(on: bool) -> void:
+	if _noprof:
+		return
 	if ClassDB.class_exists("UxmlNative"):
 		if on:
 			ClassDB.class_call_static("UxmlNative", "prof_take")
@@ -25,6 +28,8 @@ func _initialize() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--op="): op = a.substr(5)
 		elif a.begins_with("--n="): _n = int(a.substr(4))
+		elif a == "--noprof": _noprof = true
+		elif a.begins_with("--runtime="): UxmlDocument.default_runtime = int(a.substr(10))
 		elif a == "--gdscript":
 			UxmlParser.use_native = false
 			UssParser.use_native = false
@@ -128,7 +133,11 @@ func _op(op: String) -> void:
 		"text":
 			var body := d.get_native("card-30-body") as Label
 			f = func(i):
-				body.text = "short" if i % 2 == 0 else "a much longer body text that wraps over lines"
+				var t := "short" if i % 2 == 0 else "a much longer body text that wraps over lines"
+				if body == null:
+					d.set_text("card-30-body", t)
+				else:
+					body.text = t
 				d.relayout()
 		"resize": f = func(i): d.size = Vector2(1024, 720) if i % 2 == 0 else Vector2(1280, 800)
 		"hud-frame":

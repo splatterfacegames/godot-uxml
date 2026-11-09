@@ -1099,8 +1099,13 @@ impl<'a> Pass<'a> {
 
     /// run() of a cached pass: the output and what the next pass starts from.
     pub fn run_cached(mut self, host: Vector2) -> (Out, Carry) {
+        let p0 = crate::prof::scope("rc.layout");
         self.layout(0, Rect2::new(Vector2::ZERO, host), d(host.x));
+        drop(p0);
+        let p0 = crate::prof::scope("rc.carry");
         let carry = self.carry_out();
+        drop(p0);
+        let _p0 = crate::prof::scope("rc.round");
         self.out.raw = self.out.rects.clone();
         if self.io.pixel_grid {
             let mut rounded = self.out.rects.clone();

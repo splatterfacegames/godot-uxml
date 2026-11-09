@@ -125,6 +125,9 @@ var _flags: Array = [PackedByteArray(), PackedByteArray(), PackedByteArray()]
 var _restyled: Dictionary = {}
 var _last_dis := PackedByteArray()
 var _hooked: Array = []
+## The interaction Controls in the order of _proxy_idx, and which are editors.
+var _proxy_ctls: Array = []
+var _proxy_edit := PackedByteArray()
 var _proxy_idx := PackedInt32Array()
 var _editor_shown: Dictionary = {}  # editor index -> shown at its last placement
 
@@ -450,37 +453,51 @@ func _place_proxies() -> void:
 		return
 	if _proxy_idx.size() != proxies.size():
 		_proxy_idx = PackedInt32Array(proxies.keys())
+		_proxy_ctls = []
+		_proxy_edit = PackedByteArray()
+		for i in _proxy_idx:
+			_proxy_ctls.append(proxies[i])
+			_proxy_edit.append(1 if editors.has(i) else 0)
 	var st: Array = rt.call("place_states", _proxy_idx)
 	var rects: PackedVector2Array = st[0]
 	var shown_f: PackedByteArray = st[1]
 	var ops: PackedFloat32Array = st[2]
 	var which: PackedInt32Array = st[3]
-	for k in which.size():
-		var i := _proxy_idx[which[k]]
-		var c: Control = proxies[i]
-		var pos := rects[k * 4]
-		var size := rects[k * 4 + 1]
-		var vsz := rects[k * 4 + 3]
-		var shown := shown_f[k] == 1 and vsz.x > 0.0 and vsz.y > 0.0
-		if c.position != pos:
-			c.position = pos
-		if c.size != size:
-			c.size = size
-		if editors.has(i):
-			# The editor draws: it stays at its rect (its own clip), with the
-			# opacity of its ancestors (v1 nests it in their Controls).
-			var a := ops[k]
-			if c.modulate.a != a:
-				c.modulate = Color(1, 1, 1, a)
-			_editor_shown[i] = shown_f[k] == 1
-			var want := shown_f[k] == 1 and bool(c.get_meta(&"uxml_v2_visible", true))
-			if c.visible != want:
-				c.visible = want
-			continue
+	if which.is_empty():
+		return
+	# Positions and sizes in one native call; what it leaves: the
+	# visibility changes, the editors.
+	var vis_k: PackedInt32Array = ClassDB.class_call_static(&"UxmlRuntimeV2", &"apply_rects", _proxy_ctls, rects, shown_f, which, _proxy_edit)
+	for k in vis_k:
+		var c: Control = _proxy_ctls[which[k]]
+		var shown := shown_f[k] == 1 and rects[k * 4 + 3].x > 0.0 and rects[k * 4 + 3].y > 0.0
 		if c.visible != shown:
 			c.visible = shown
 		if not shown and c.has_focus():
 			c.release_focus()
+	if editors.is_empty():
+		return
+	for k in which.size():
+		var w := which[k]
+		if _proxy_edit[w] == 0:
+			continue
+		var i := _proxy_idx[w]
+		var c: Control = _proxy_ctls[w]
+		var pos := rects[k * 4]
+		var size := rects[k * 4 + 1]
+		if c.position != pos:
+			c.position = pos
+		if c.size != size:
+			c.size = size
+		# The editor draws: it stays at its rect (its own clip), with the
+		# opacity of its ancestors (v1 nests it in their Controls).
+		var a := ops[k]
+		if c.modulate.a != a:
+			c.modulate = Color(1, 1, 1, a)
+		_editor_shown[i] = shown_f[k] == 1
+		var want := shown_f[k] == 1 and bool(c.get_meta(&"uxml_v2_visible", true))
+		if c.visible != want:
+			c.visible = want
 
 
 # ---------------------------------------------------------------------------
@@ -1289,12 +1306,22 @@ class V2SliderBehavior extends UxmlInputBehaviors.SliderBehavior:
 		return glue.is_disabled(el)
 
 	var _hook_key: Array = []
+	var _hook_idx := PackedInt32Array()
+	var _hook_ep := -1
 
 	## The layout hook (runtime v1's _after_layout): true when a style of
 	## the dragger changed. Runtime v1 runs it for the subtrees its
 	## placement changed (UxmlDocument._run_layout_hooks): here when the
 	## sizes it reads changed (a value change places the dragger itself).
 	func v2_after_layout() -> bool:
+		# The sizes it reads changed in no layout since its last run, and
+		# its dragger was not restyled: nothing to do (no GDScript reads).
+		if _hook_idx.is_empty():
+			_hook_idx = PackedInt32Array([glue.index_of(part("drag-container")), glue.index_of(part("dragger"))])
+		var ep: int = glue.rt.call("size_epoch", _hook_idx)
+		if ep == _hook_ep and not glue._restyled.has(_hook_idx[1]):
+			return false
+		_hook_ep = ep
 		var key := [size_of(part("drag-container")), size_of(part("dragger"))]
 		if key == _hook_key and not glue.restyled(part("dragger")):
 			return false
@@ -1553,6 +1580,8 @@ class V2ScrollViewBehavior extends UxmlContainerBehaviors.ScrollViewBehavior:
 class V2MinMaxBehavior extends UxmlInputBehaviors.MinMaxBehavior:
 	var glue
 	var _hook_key: Array = []
+	var _hook_idx := PackedInt32Array()
+	var _hook_ep := -1
 
 	func size_of(x: UxmlElement) -> Vector2:
 		return glue.size_of(x)
@@ -1564,6 +1593,12 @@ class V2MinMaxBehavior extends UxmlInputBehaviors.MinMaxBehavior:
 		return glue.is_disabled(el)
 
 	func v2_after_layout() -> bool:
+		if _hook_idx.is_empty():
+			_hook_idx = PackedInt32Array([glue.index_of(part("input")), glue.index_of(part("thumb-min")), glue.index_of(part("thumb-max")), glue.index_of(part("dragger"))])
+		var ep: int = glue.rt.call("size_epoch", _hook_idx)
+		if ep == _hook_ep and not glue._restyled.has(_hook_idx[3]):
+			return false
+		_hook_ep = ep
 		var key := [size_of(part("input")), size_of(part("thumb-min")), size_of(part("thumb-max"))]
 		if key == _hook_key and not glue.restyled(part("dragger")):
 			return false

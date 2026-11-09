@@ -266,6 +266,19 @@ struct St {
     /// A leaf measure changed since the last layout (a text shaped again,
     /// an image, a box padding, an editor): the layout must run.
     measure_dirty: bool,
+    /// Per element: a leaf measure of it changed since the last layout
+    /// (the cross-pass layout cache treats it as changed, XCache).
+    leaf_chg: Vec<bool>,
+    /// The cross-pass layout cache (layout.rs, XCache): what the last pass
+    /// hands to the next, its output, and the editors' measured sizes.
+    xcarry: Option<layout::Carry>,
+    last_out: Option<layout::Out>,
+    edit_nat: Vec<Option<Vector2>>,
+    /// The layout that last changed each element's size (`lay_ep` counts
+    /// the layouts that changed one): the layout hooks of the behaviors
+    /// run only when a size they read changed (size_epoch).
+    size_ep: Vec<i64>,
+    lay_ep: i64,
     /// A record's display, visibility, opacity, clip or translate changed
     /// since the last take (the interaction Controls follow them).
     vis_changed: bool,
@@ -536,6 +549,12 @@ impl UxmlRuntimeV2 {
             focused: vec![false; n],
             disabled: vec![false; n],
             measure_dirty: true,
+            leaf_chg: vec![true; n],
+            xcarry: None,
+            last_out: None,
+            edit_nat: vec![None; n],
+            size_ep: vec![0; n],
+            lay_ep: 0,
             vis_changed: true,
             placed: vec![None; n],
             elide_memo: vec![None; n],
@@ -607,64 +626,52 @@ impl UxmlRuntimeV2 {
     /// returned; `which` holds their positions in `idx`.
     #[func]
     fn place_states(&mut self, idx: PackedInt32Array) -> VarArray {
-        let mut out = VarArray::new();
-        let Some(st) = self.st.as_mut() else { return out };
-        let mut rects = PackedVector2Array::new();
-        let mut shown = PackedByteArray::new();
-        let mut op = PackedFloat32Array::new();
-        let mut which = PackedInt32Array::new();
-        let mut placed = std::mem::take(&mut st.placed);
-        let cb = st.casc.bind();
-        let c = cb.inner.as_ref().unwrap();
-        for (kk, &i) in idx.as_slice().iter().enumerate() {
-            let i = i as usize;
-            let r = st.host_rect(i);
-            let mut sh = i < st.n && st.rects[i].is_some();
-            let mut o = 1.0f32;
-            let mut vis = r;
-            if i < st.n {
-                let mut k = i as i32;
-                while k >= 0 {
-                    let ku = k as usize;
-                    let v = &st.vis[ku];
-                    if v.gone || v.hidden {
-                        sh = false;
-                    }
-                    o *= v.opacity;
-                    if ku != i && k > 0 && v.clip {
-                        let ar = st.host_rect(ku);
-                        let ins = st.clip_inset_of(ku);
-                        let cr = Rect2::new(
-                            ar.position + Vector2::new(ins[0], ins[1]),
-                            Vector2::new((ar.size.x - ins[0] - ins[2]).max(0.0), (ar.size.y - ins[1] - ins[3]).max(0.0)),
-                        );
-                        vis = vis.intersect(cr).unwrap_or(Rect2::new(vis.position, Vector2::ZERO));
-                    }
-                    k = c.parent_of(ku);
-                }
-            }
-            let now = Some((r, vis, sh, o));
-            if i < placed.len() && placed[i] == now {
+        let Some(st) = self.st.as_mut() else { return VarArray::new() };
+        let idx: Vec<i32> = idx.as_slice().to_vec();
+        let ch = st.placements(&idx);
+        St::pack_placements(&ch)
+    }
+
+    /// Places interaction Controls from place_states' output, without the
+    /// runtime borrowed (a Control's signals may call back into it):
+    /// `ctls[which[k]]` gets position and size `rects[4k]`, `rects[4k + 1]`,
+    /// except where `skip[which[k]]` (the text editors: the glue places
+    /// them). Returns the k whose Control must be shown or hidden (shown,
+    /// and its visible rect not empty), left to the glue (hiding a focused
+    /// Control releases its focus).
+    #[func]
+    fn apply_rects(ctls: VarArray, rects: PackedVector2Array, shown: PackedByteArray, which: PackedInt32Array, skip: PackedByteArray) -> PackedInt32Array {
+        let mut vis_out = PackedInt32Array::new();
+        let r = rects.as_slice();
+        let sh = shown.as_slice();
+        let sk = skip.as_slice();
+        for (k, &w) in which.as_slice().iter().enumerate() {
+            let w = w as usize;
+            if sk.get(w).copied().unwrap_or(0) != 0 || 4 * k + 3 >= r.len() {
                 continue;
             }
-            if i < placed.len() {
-                placed[i] = now;
+            let Some(mut c) = ctls.get(w).and_then(|v| v.try_to::<Gd<Control>>().ok()) else { continue };
+            let (pos, size, vsz) = (r[4 * k], r[4 * k + 1], r[4 * k + 3]);
+            if c.get_position() != pos {
+                c.set_position(pos);
             }
-            which.push(kk as i32);
-            rects.push(r.position);
-            rects.push(r.size);
-            rects.push(vis.position);
-            rects.push(vis.size);
-            shown.push(if sh { 1 } else { 0 });
-            op.push(o);
+            if c.get_size() != size {
+                c.set_size(size);
+            }
+            let want = sh.get(k).copied().unwrap_or(0) == 1 && vsz.x > 0.0 && vsz.y > 0.0;
+            if c.is_visible() != want || (!want && c.has_focus()) {
+                vis_out.push(k as i32);
+            }
         }
-        drop(cb);
-        st.placed = placed;
-        out.push(&rects.to_variant());
-        out.push(&shown.to_variant());
-        out.push(&op.to_variant());
-        out.push(&which.to_variant());
-        out
+        vis_out
+    }
+
+    /// The last layout that changed the size of one of `idx` (0: none
+    /// since the build).
+    #[func]
+    fn size_epoch(&self, idx: PackedInt32Array) -> i64 {
+        let Some(st) = self.st.as_ref() else { return 0 };
+        idx.as_slice().iter().filter(|&&i| i >= 0 && (i as usize) < st.n).map(|&i| st.size_ep[i as usize]).max().unwrap_or(0)
     }
 
     /// Records every element's canvas item again.
@@ -715,7 +722,7 @@ impl UxmlRuntimeV2 {
         let i = i as usize;
         if i < st.n {
             st.leaves_mut().ctls[i] = ctl;
-            st.measure_dirty = true;
+            st.mark_leaf(i);
         }
     }
 
@@ -1060,7 +1067,7 @@ impl St {
                 }
                 if self.leaves.hpad[i] != hp {
                     self.leaves_mut().hpad[i] = hp;
-                    self.measure_dirty = true;
+                    self.mark_leaf(i);
                 }
                 self.vis[i] = v;
                 self.dirty[i] = true;
@@ -1398,7 +1405,7 @@ impl St {
             let nat = v.image.as_ref().map(|x| x.0.get_size()).unwrap_or(Vector2::ZERO);
             if self.leaves.natural[i] != nat {
                 self.leaves_mut().natural[i] = nat;
-                self.measure_dirty = true;
+                self.mark_leaf(i);
             }
         }
         // translate (UxmlStyleApplier._apply_transform: an offset of the
@@ -1415,7 +1422,7 @@ impl St {
         let hp = if v.boxed { widths[3] + pads[3] + widths[1] + pads[1] } else { (self.theme.normal_margins[0] + self.theme.normal_margins[2]) as f64 };
         if self.leaves.hpad[i] != hp {
             self.leaves_mut().hpad[i] = hp;
-            self.measure_dirty = true;
+            self.mark_leaf(i);
         }
         if memo_ok {
             if self.vis_memo.len() > 4096 {
@@ -1435,6 +1442,79 @@ impl St {
     }
 
     /// What the interaction Controls follow differs between two records.
+    /// The placement of the interaction Control of each of `idx` (rect,
+    /// visible rect inside the clips of its clipping ancestors, shown,
+    /// opacity), for those whose placement changed since the last call:
+    /// (position in idx, rect, visible rect, shown, opacity).
+    fn placements(&mut self, idx: &[i32]) -> Vec<(usize, Rect2, Rect2, bool, f32)> {
+        let mut res = vec![];
+        let mut placed = std::mem::take(&mut self.placed);
+        {
+            let cb = self.casc.bind();
+            let c = cb.inner.as_ref().unwrap();
+            for (kk, &i) in idx.iter().enumerate() {
+                let i = i as usize;
+                let r = self.host_rect_c(c, i);
+                let mut sh = i < self.n && self.rects[i].is_some();
+                let mut o = 1.0f32;
+                let mut vis = r;
+                if i < self.n {
+                    let mut k = i as i32;
+                    while k >= 0 {
+                        let ku = k as usize;
+                        let v = &self.vis[ku];
+                        if v.gone || v.hidden {
+                            sh = false;
+                        }
+                        o *= v.opacity;
+                        if ku != i && k > 0 && v.clip {
+                            let ar = self.host_rect_c(c, ku);
+                            let ins = self.clip_inset_of(ku);
+                            let cr = Rect2::new(
+                                ar.position + Vector2::new(ins[0], ins[1]),
+                                Vector2::new((ar.size.x - ins[0] - ins[2]).max(0.0), (ar.size.y - ins[1] - ins[3]).max(0.0)),
+                            );
+                            vis = vis.intersect(cr).unwrap_or(Rect2::new(vis.position, Vector2::ZERO));
+                        }
+                        k = c.parent_of(ku);
+                    }
+                }
+                let now = Some((r, vis, sh, o));
+                if i < placed.len() && placed[i] == now {
+                    continue;
+                }
+                if i < placed.len() {
+                    placed[i] = now;
+                }
+                res.push((kk, r, vis, sh, o));
+            }
+        }
+        self.placed = placed;
+        res
+    }
+
+    fn pack_placements(ch: &[(usize, Rect2, Rect2, bool, f32)]) -> VarArray {
+        let mut out = VarArray::new();
+        let mut rects = PackedVector2Array::new();
+        let mut shown = PackedByteArray::new();
+        let mut op = PackedFloat32Array::new();
+        let mut which = PackedInt32Array::new();
+        for &(kk, r, vis, sh, o) in ch {
+            which.push(kk as i32);
+            rects.push(r.position);
+            rects.push(r.size);
+            rects.push(vis.position);
+            rects.push(vis.size);
+            shown.push(if sh { 1 } else { 0 });
+            op.push(o);
+        }
+        out.push(&rects.to_variant());
+        out.push(&shown.to_variant());
+        out.push(&op.to_variant());
+        out.push(&which.to_variant());
+        out
+    }
+
     fn placement_differs(a: &Vis, b: &Vis) -> bool {
         a.gone != b.gone || a.hidden != b.hidden || a.opacity != b.opacity || a.clip != b.clip
             || a.clip_inset != b.clip_inset || a.translate != b.translate
@@ -1459,7 +1539,7 @@ impl St {
             }
             t[i] = Some(ButtonText::new(text, ts, self.locale.clone()));
             drop(t);
-            self.measure_dirty = true;
+            self.mark_leaf(i);
             return;
         }
         let mut t = self.leaves.texts.borrow_mut();
@@ -1471,7 +1551,16 @@ impl St {
         }
         t[i] = Some(TextBlock::new(text, ts));
         drop(t);
+        self.mark_leaf(i);
+    }
+
+    /// A leaf measure of element i changed: the layout must run, and the
+    /// cross-pass cache does not reuse what i's subtree computed.
+    fn mark_leaf(&mut self, i: usize) {
         self.measure_dirty = true;
+        if let Some(x) = self.leaf_chg.get_mut(i) {
+            *x = true;
+        }
     }
 
     /// Whether a layout record changed since the last layout.
@@ -1489,8 +1578,23 @@ impl St {
         self.host_size = host;
         self.measure_dirty = false;
         let leaves = self.leaves.clone();
-        let src: Rc<dyn LeafSource> = leaves;
         let n = self.n;
+        if self.leaf_chg.len() != n {
+            self.leaf_chg = vec![true; n];
+        }
+        // The editors measure through their Controls: a fingerprint of what
+        // they measure (XCache's Fp of a control).
+        for i in 0..n {
+            if self.kind[i] == K_EDIT {
+                let m = Some(leaves.natural(i));
+                if self.edit_nat[i] != m {
+                    self.edit_nat[i] = m;
+                    self.leaf_chg[i] = true;
+                }
+            }
+        }
+        let p0 = crate::prof::scope("v2.lay.setup");
+        let src: Rc<dyn LeafSource> = leaves;
         let io = layout::LayoutIn {
             v2: Some(src),
             controls: vec![None; n],
@@ -1515,23 +1619,69 @@ impl St {
         let cb = self.casc.bind();
         let c: &Cascade = cb.inner.as_ref().unwrap();
         self.recs.refresh(c);
-        let out = layout::Pass::new(c, &io, &self.recs.recs, 0.0, self.warned.clone(), self.warnings.clone()).run(host);
-        let changed = out.rects != self.rects;
-        self.rects = out.rects;
-        for (k, r) in self.rects.iter().enumerate() {
-            if let Some(r) = r {
-                self.last_size[k] = r.size;
+        // The cross-pass cache (layout.rs, XCache): an element changed when
+        // its layout record or a leaf measure of it changed; a subtree
+        // without a changed element keeps its measures and its last layout
+        // call, and the pass takes its outputs from the last one.
+        let rec_changed = self.recs.take_changed();
+        let mut chg = std::mem::replace(&mut self.leaf_chg, vec![false; n]);
+        let fresh = self.xcarry.is_none() || self.last_out.as_ref().is_none_or(|o| o.rects.len() != n);
+        for i in 0..n {
+            if fresh || rec_changed.get(i).copied().unwrap_or(true) {
+                chg[i] = true;
             }
         }
-        self.insets = out.insets;
+        let mut sub = chg.clone();
+        for i in (1..n).rev() {
+            if sub[i] {
+                let p = c.parent_of(i);
+                if p >= 0 {
+                    sub[p as usize] = true;
+                }
+            }
+        }
+        let carry = if fresh { layout::Carry::default() } else { self.xcarry.take().unwrap_or_default() };
+        let prev = self.last_out.take();
+        let cached = layout::Cached { chg, sub, prev: if fresh { None } else { prev.as_ref() }, carry };
+        drop(p0);
+        let p1 = crate::prof::scope("v2.lay.pass_new");
+        let pass = layout::Pass::new_cached(c, &io, &self.recs.recs, self.warned.clone(), self.warnings.clone(), cached);
+        drop(p1);
+        let p1 = crate::prof::scope("v2.lay.run");
+        let (out, carry) = pass.run_cached(host);
+        drop(p1);
+        let _p2 = crate::prof::scope("v2.lay.out");
+        drop(prev);
+        self.xcarry = Some(carry);
+        let changed = out.rects != self.rects;
+        if changed {
+            self.rects.clone_from(&out.rects);
+            self.lay_ep += 1;
+            for (k, r) in self.rects.iter().enumerate() {
+                if let Some(r) = r {
+                    if self.last_size[k] != r.size {
+                        self.last_size[k] = r.size;
+                        self.size_ep[k] = self.lay_ep;
+                    }
+                }
+            }
+        }
+        if out.insets != self.insets {
+            self.insets.clone_from(&out.insets);
+        }
+        self.last_out = Some(out);
         drop(io);
         changed
     }
 
     fn host_rect(&self, i: usize) -> Rect2 {
-        let Some(r) = self.rects.get(i).copied().flatten() else { return Rect2::new(Vector2::ZERO, Vector2::ZERO) };
         let cb = self.casc.bind();
         let c = cb.inner.as_ref().unwrap();
+        self.host_rect_c(c, i)
+    }
+
+    fn host_rect_c(&self, c: &Cascade, i: usize) -> Rect2 {
+        let Some(r) = self.rects.get(i).copied().flatten() else { return Rect2::new(Vector2::ZERO, Vector2::ZERO) };
         let mut pos = r.position + self.tr_of(i);
         let mut p = c.parent_of(i);
         while p > 0 {
@@ -1689,7 +1839,17 @@ impl St {
         for i in 0..n {
             let at = self.rects[i].map(|r| (r, self.insets[i]));
             if self.dirty[i] || self.drawn[i] != at {
-                self.draw_one(i);
+                // Moved, same size and insets: only the item's transform.
+                let moved_only = !self.dirty[i]
+                    && match (&self.drawn[i], &at) {
+                        (Some((r0, i0)), Some((r1, i1))) => r0.size == r1.size && i0 == i1,
+                        _ => false,
+                    };
+                if moved_only && self.kind[i] != K_NONE {
+                    self.place_item(i);
+                } else {
+                    self.draw_one(i);
+                }
                 self.dirty[i] = false;
                 self.drawn[i] = at;
             }
@@ -1710,6 +1870,18 @@ impl St {
             return;
         };
         r.canvas_item_set_visible(it, !(v.gone || v.hidden));
+        self.place_item(i);
+        r.canvas_item_set_modulate(it, Color::from_rgba(1.0, 1.0, 1.0, v.opacity));
+        self.draw_rest(i, v, rect);
+    }
+
+    /// The transform of element i's item: its layout position (and its
+    /// translate).
+    fn place_item(&self, i: usize) {
+        let mut r = rs();
+        let it = self.items[i];
+        let Some(rect) = self.rects[i] else { return };
+        let v = &self.vis[i];
         if v.translate.is_some() && i > 0 {
             // UxmlStyleApplier._apply_transform: the Control's rotation of
             // 1e-5 rad (no pixel snap) times the offset transform.
@@ -1722,7 +1894,11 @@ impl St {
             let pos = if i == 0 { Vector2::ZERO } else { rect.position };
             r.canvas_item_set_transform(it, Transform2D::from_angle_origin(0.0, pos));
         }
-        r.canvas_item_set_modulate(it, Color::from_rgba(1.0, 1.0, 1.0, v.opacity));
+    }
+
+    fn draw_rest(&mut self, i: usize, v: Vis, rect: Rect2) {
+        let mut r = rs();
+        let it = self.items[i];
         // A Button is fitted into its box and never smaller than its
         // minimum size (UxmlStyleApplier.fit_button, Godot's floor).
         let mut bfit: Option<[f32; 4]> = None;
