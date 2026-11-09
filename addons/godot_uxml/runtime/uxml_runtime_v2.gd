@@ -1296,7 +1296,9 @@ func queue() -> void:
 	if _queued:
 		return
 	_queued = true
-	_flush.call_deferred()
+	# Bounded per frame as runtime v1's restyles (UxmlDocument._restyles_this_frame).
+	if doc._restyles_this_frame(_flush):
+		_flush.call_deferred()
 
 
 func _flush() -> void:

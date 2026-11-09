@@ -1184,3 +1184,37 @@ func test_list_view_virtualization() -> void:
 	h.eq((rows[2].get_element() as Control).visible, true, "used slots are visible")
 	_unload(doc)
 
+
+
+## A layout hook whose writes change the sizes it reads alternates between
+## two results (a MinMaxSlider's dragger given the min thumb's class, the max
+## thumb without its own): each write queued a deferred restyle that the
+## message queue ran in the same flush, forever, until the call queue
+## overflowed and the process crashed (bench/equiv_v2.gd, ctl-hover-minmax).
+## The restyles queued in one frame are bounded; the rest run one per frame.
+func test_alternating_layout_hook_is_bounded_per_frame() -> void:
+	var dir := "user://godot_uxml_runtime_tests/hook"
+	DirAccess.make_dir_recursive_absolute(dir + "/Assets")
+	var f := FileAccess.open(dir + "/Assets/mm.uxml", FileAccess.WRITE)
+	f.store_string('<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:MinMaxSlider name="h" label="Hover" min-value="2" max-value="6" low-limit="0" high-limit="10" /></ui:UXML>')
+	f.close()
+	var doc := UxmlDocument.new()
+	h.root.add_child(doc)
+	doc.size = Vector2(640, 480)
+	doc.load_document("Assets/mm.uxml", dir)
+	await h.process_frame
+	var mm := doc.get_element_model("h")
+	var dragger := UxmlParts.find_part(mm, "dragger")
+	var thumb := UxmlParts.find_part(mm, "thumb-max")
+	var label := UxmlParts.find_part(mm, "label")
+	label.set_attribute("class", "unity-base-field__label unity-min-max-slider__label unity-min-max-slider__max-thumb")
+	await h.process_frame
+	dragger.set_attribute("class", "unity-min-max-slider__dragger unity-min-max-slider__min-thumb")
+	await h.process_frame
+	thumb.set_attribute("class", "")
+	for k in 4:
+		await h.process_frame
+	h.check(doc._rq_count <= UxmlDocument._MAX_RESTYLES_PER_FRAME + 1, "restyles queued in a frame stay bounded (%d)" % doc._rq_count)
+	h.check(is_instance_valid(doc) and doc.get_element_model("h") != null, "the document survives the alternating hook")
+	h.root.remove_child(doc)
+	doc.queue_free()

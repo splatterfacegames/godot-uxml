@@ -440,6 +440,8 @@ func _apply(d: UxmlDocument, op: int, k: int, vocab: Array) -> void:
 			else:
 				list.append(cl)
 			el.set_attribute("class", " ".join(PackedStringArray(list)))
+			if OS.get_environment("EQUIV_V2_OPS") != "" and d.get_runtime() == 2:
+				print("    class now: ", el.get_attribute("class"))
 		2:
 			if el.part_of != null:
 				# A part's inline style is its control's (a dragger's
