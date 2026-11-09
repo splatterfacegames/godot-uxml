@@ -39,6 +39,9 @@ func _initialize() -> void:
 			out = a.substr(6)
 		elif a.begins_with("--iters="):
 			_iters = int(a.substr(8))
+		elif a.begins_with("--runtime="):
+			# Runtime v2 for the documents it covers (the others stay on v1).
+			UxmlDocument.default_runtime = int(a.substr(10))
 	_write_docs(ProjectSettings.globalize_path(ROOT + "/Assets/UI"))
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = 0
@@ -58,6 +61,7 @@ func _initialize() -> void:
 		"engine": Engine.get_version_info()["string"],
 		"debug_build": OS.is_debug_build(),
 		"native_core": ClassDB.class_exists("UxmlNativeCascade"),
+		"runtime": UxmlDocument.default_runtime if UxmlDocument.default_runtime != 0 else 1,
 		"executable": OS.get_executable_path().get_file(),
 		"cpu": OS.get_processor_name(),
 		"os": OS.get_name(),
@@ -94,6 +98,8 @@ func _write_docs(dir: String) -> void:
 	var w = Workloads.new()
 	var files := {
 		"big.uxml": b._big_uxml(),
+		"big-static.uxml": b._big_static_uxml(),
+		"static.uss": b._static_uss(),
 		"base.uss": b._base_uss(),
 		"components.uss": b._components_uss(),
 		"theme.uss": b._theme_uss(),
@@ -208,9 +214,37 @@ func _big() -> void:
 	await _time_op("big: resize", d, func(i):
 		d.size = Vector2(1024, 720) if i % 2 == 0 else Vector2(1280, 800))
 	_free_doc(d)
+	await _big_static()
+
+
+## The big document with static elements in place of its controls
+## (bench.gd _big_static_uxml): runtime v2 draws all of it.
+func _big_static() -> void:
+	await _time_load("big-static: load", "Assets/UI/big-static.uxml", Vector2(1280, 800), maxi(10, _iters / 4))
+	var s := PackedFloat64Array()
+	for i in maxi(10, _iters / 4) + 2:
+		var t0 := Time.get_ticks_usec()
+		var f := _new_doc(Vector2(1280, 800))
+		f.load_document("Assets/UI/big-static.uxml", ROOT)
+		await process_frame
+		var dt := (Time.get_ticks_usec() - t0) / 1000.0
+		if i >= 2:
+			s.append(dt)
+		_free_doc(f)
+		await process_frame
+	_record("big-static: load + first frame", s)
+	var d := _new_doc(Vector2(1280, 800))
+	d.load_document("Assets/UI/big-static.uxml", ROOT)
+	for k in 3:
+		await process_frame
+	print("  big-static: runtime %d%s; check card-0: %s, card-149: %s" % [d.get_runtime(),
+		"" if d.runtime_fallback.is_empty() else " (" + d.runtime_fallback + ")",
+		d.get_element_rect(d.get_element_model("card-0")), d.get_element_rect(d.get_element_model("card-149"))])
+	_free_doc(d)
 
 
 func _hud() -> void:
+	await _time_load("hud: load", "Assets/UI/hud.uxml", Vector2(640, 360), _iters)
 	var d := _new_doc(Vector2(640, 360))
 	d.load_document("Assets/UI/hud.uxml", ROOT)
 	for k in 3:
@@ -220,7 +254,10 @@ func _hud() -> void:
 		labels.append(d.get_native("val-%d" % i))
 	await _time_op("hud: frame, 8 labels + layout", d, func(i):
 		for k in labels.size():
-			(labels[k] as Label).text = str((i * 37 + k * 101) % 100000)
+			if d.get_runtime() == 2:
+				d.set_text("val-%d" % k, str((i * 37 + k * 101) % 100000))
+			else:
+				(labels[k] as Label).text = str((i * 37 + k * 101) % 100000)
 		d.relayout(), _iters * 3)
 	await _time_op("hud: hover toggle", d, func(i):
 		d.set_element_state("bar-0", "hover", i % 2 == 0), _iters * 3)
@@ -255,7 +292,10 @@ func _inventory() -> void:
 		d.set_class("slot-%d" % (i % 80), "slot rarity-%d slot--selected" % (i % 4))
 		d.set_class("slot-%d" % ((i + 79) % 80), "slot rarity-%d" % ((i + 79) % 4)))
 	await _time_op("inventory: count change + layout", d, func(i):
-		(d.get_native("count-%d" % (i % 80)) as Label).text = str(i * 7 % 999)
+		if d.get_runtime() == 2:
+			d.set_text("count-%d" % (i % 80), str(i * 7 % 999))
+		else:
+			(d.get_native("count-%d" % (i % 80)) as Label).text = str(i * 7 % 999)
 		d.relayout())
 	_free_doc(d)
 

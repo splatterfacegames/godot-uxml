@@ -186,12 +186,16 @@ struct Inline {
 
 /// A for_children entry: computed {value, origin} plus the entry Dictionary.
 #[derive(Clone)]
-struct Item {
-    pid: u32,
+pub struct Item {
+    pub pid: u32,
     /// Shared (Rc): the wrap of an inherited item keeps the value without an
     /// engine copy of the Variant.
-    value: Rc<Variant>,
-    origin: Variant,
+    pub value: Rc<Variant>,
+    pub origin: Variant,
+    /// Table mode (runtime v2): the element whose declaration this is; the
+    /// origin is that declaration's own and the `{kind: inherited}` wraps of
+    /// the output are made on request (`Cascade::style_dict`). -1 otherwise.
+    pub decl: i32,
 }
 
 /// An expanded longhand: (property id, value, KW_INITIAL / KW_UNSET / 0).
@@ -340,6 +344,24 @@ pub struct Cascade {
     empty_fc: Rc<Vec<Rc<Item>>>,
     empty_customs: Rc<Customs>,
     pub last_old: VarArray,
+    /// Runtime v2: the output is the computed items per element
+    /// (`out_items`), not Dictionaries; see `set_table_mode`.
+    pub table: bool,
+    pub out_items: Vec<Rc<Vec<Rc<Item>>>>,
+    /// Table mode: one value per (expansion, longhand); the expansion is
+    /// kept so its address stays its own.
+    val_rc: HashMap<(usize, usize), (Rc<Vec<Pair>>, Rc<Variant>)>,
+}
+
+/// Two item lists with the same properties, values and origins, in order.
+fn same_items(a: &Rc<Vec<Rc<Item>>>, b: &Rc<Vec<Rc<Item>>>) -> bool {
+    if Rc::ptr_eq(a, b) {
+        return true;
+    }
+    a.len() == b.len()
+        && a.iter().zip(b.iter()).all(|(x, y)| {
+            Rc::ptr_eq(x, y) || (x.pid == y.pid && x.decl == y.decl && (Rc::ptr_eq(&x.value, &y.value) || *x.value == *y.value) && x.origin == y.origin)
+        })
 }
 
 /// The compiled rule tables of the GDScript cascade (read in setup).
@@ -679,6 +701,9 @@ impl Cascade {
             empty_fc: Rc::new(vec![]),
             empty_customs: Rc::new(Customs { id: 0, dict: VarDictionary::new() }),
             last_old: VarArray::new(),
+            table: false,
+            out_items: vec![],
+            val_rc: HashMap::new(),
         };
 
         // The GDScript rule tables, and the theme blocks among them:
@@ -807,6 +832,7 @@ impl Cascade {
         c.own_bloom = vec![0; n];
         c.fc = vec![c.empty_fc.clone(); n];
         c.fc_dict = vec![VarDictionary::new(); n];
+        c.out_items = vec![c.empty_fc.clone(); n];
         c.fc_customs = vec![c.empty_customs.clone(); n];
         c.warn = vec![vec![]; n];
         c.lay_vals = vec![vec![None; crate::layout::LAYOUT_PROPS.len()]; n];
@@ -1264,6 +1290,25 @@ impl Cascade {
             if !own && !inh_dirty[i] && (i as i32) >= anc_until && !(has_forced && forced[i]) {
                 continue;
             }
+            if self.table {
+                let old_items = self.out_items[i].clone();
+                let old_fc = self.fc[i].clone();
+                let pc = crate::prof::scope("cu.compute");
+                let _ = self.compute(i);
+                drop(pc);
+                if full || !same_items(&old_items, &self.out_items[i]) {
+                    changed.push(i as i32);
+                }
+                if full || !same_items(&old_fc, &self.fc[i]) {
+                    let mut ch = i + 1;
+                    let e = self.end[i] as usize;
+                    while ch < e {
+                        inh_dirty[ch] = true;
+                        ch = self.end[ch] as usize;
+                    }
+                }
+                continue;
+            }
             let el_var = self.els[i].var.clone();
             let old = styles.get(&el_var);
             let old_fc = self.fc_dict[i].clone();
@@ -1596,8 +1641,12 @@ impl Cascade {
         let _s_build = crate::prof::scope("c.build");
         let fpid = self.props.index.get("font-size").copied();
         let mut own_pct = false;
+        let table = self.table;
         let (mut computed, mut comp): (VarDictionary, Vec<Rc<Item>>) = if p >= 0 {
-            (self.fc_dict[p as usize].duplicate_shallow(), (*self.fc[p as usize]).clone())
+            (
+                if table { VarDictionary::new() } else { self.fc_dict[p as usize].duplicate_shallow() },
+                (*self.fc[p as usize]).clone(),
+            )
         } else {
             (VarDictionary::new(), vec![])
         };
@@ -1620,7 +1669,13 @@ impl Cascade {
             };
             // A static declaration of a rule shares its {value, origin}
             // entries (entries_for); others get a new one.
-            let shared = if c_shared[b.j] { c_ent[b.j].as_ref().map(|e| e[b.pk].clone()) } else { None };
+            let shared = if table {
+                Some(Variant::nil())
+            } else if c_shared[b.j] {
+                c_ent[b.j].as_ref().map(|e| e[b.pk].clone())
+            } else {
+                None
+            };
             let entry = match shared {
                 Some(e) => e,
                 None => {
@@ -1655,7 +1710,9 @@ impl Cascade {
             // `initial` (also what `all: initial` expands to): the property
             // is dropped, inherited value included (uss_cascade.gd _compute).
             if kw == KW_INITIAL {
-                computed.remove(&self.props.keys[pidx]);
+                if !table {
+                    computed.remove(&self.props.keys[pidx]);
+                }
                 comp.retain(|it| it.pid != b.pid);
                 continue;
             }
@@ -1663,13 +1720,36 @@ impl Cascade {
             // other one takes its initial value.
             if kw == KW_UNSET {
                 if !self.props.inherited[pidx] {
-                    computed.remove(&self.props.keys[pidx]);
+                    if !table {
+                        computed.remove(&self.props.keys[pidx]);
+                    }
                     comp.retain(|it| it.pid != b.pid);
                 }
                 continue;
             }
-            computed.set(&self.props.keys[pidx], &entry);
-            let item = Rc::new(Item { pid: b.pid, value: Rc::new(val.clone()), origin: origin.clone() });
+            if !table {
+                computed.set(&self.props.keys[pidx], &entry);
+            }
+            // Table mode: the value of a shared expansion is shared by the
+            // elements it reaches (runtime v2 keys its records on it).
+            let value = if table {
+                let pr = c_pairs[b.j].clone().unwrap();
+                let k = (Rc::as_ptr(&pr) as usize, b.pk);
+                match self.val_rc.get(&k) {
+                    Some((_, v)) => v.clone(),
+                    None => {
+                        let v = Rc::new(val.clone());
+                        if self.val_rc.len() > 65536 {
+                            self.val_rc.clear();
+                        }
+                        self.val_rc.insert(k, (pr, v.clone()));
+                        v
+                    }
+                }
+            } else {
+                Rc::new(val.clone())
+            };
+            let item = Rc::new(Item { pid: b.pid, value, origin: origin.clone(), decl: i as i32 });
             match comp.iter_mut().find(|it| it.pid == b.pid) {
                 Some(it) => *it = item,
                 None => comp.push(item),
@@ -1680,7 +1760,23 @@ impl Cascade {
         // Unity computes it (uss_cascade.gd _font_percent).
         // Only the element's own winner can be a percentage (the inherited
         // size is computed): the check reads no Dictionary otherwise.
-        if let (Some(fpid), true) = (fpid, own_pct) {
+        if let (Some(fpid), true, true) = (fpid, own_pct, table) {
+            let own = comp.iter().find(|it| it.pid == fpid).map(|it| gs(&it.value).to_string());
+            if let Some(own) = own {
+                if own.trim_end().ends_with('%') && p >= 0 {
+                    let pv = self.fc[p as usize].iter().find(|it| it.pid == fpid).map(|it| gs(&it.value).to_string());
+                    if let (Some(base), Some(pct)) = (pv.as_deref().and_then(px_of), pct_of(&own)) {
+                        let val = GString::from(format!("{}px", fmt_number(base * pct / 100.0)).as_str()).to_variant();
+                        if let Some(it) = comp.iter_mut().find(|it| it.pid == fpid) {
+                            let origin = it.origin.clone();
+                            let decl = it.decl;
+                            *it = Rc::new(Item { pid: fpid, value: Rc::new(val), origin, decl });
+                        }
+                    }
+                }
+            }
+        }
+        if let (Some(fpid), true, false) = (fpid, own_pct, table) {
             let fkey = self.props.keys[fpid as usize].clone();
             if let Some(e) = computed.get(&fkey) {
                 let ed = e.try_to::<VarDictionary>().unwrap_or_default();
@@ -1698,7 +1794,7 @@ impl Cascade {
                         ne.set(&self.k_origin, &origin);
                         let nev = ne.to_variant();
                         computed.set(&fkey, &nev);
-                        let item = Rc::new(Item { pid: fpid, value: Rc::new(val), origin });
+                        let item = Rc::new(Item { pid: fpid, value: Rc::new(val), origin, decl: i as i32 });
                         match comp.iter_mut().find(|it| it.pid == fpid) {
                             Some(it) => *it = item,
                             None => comp.push(item),
@@ -1711,7 +1807,7 @@ impl Cascade {
         self.warn[i] = warns;
         // Computed overrides (transitions) replace the cascade result last,
         // so inheritance, layout values and the output all see them.
-        if !self.ov.is_empty() {
+        if !self.ov.is_empty() && !table {
             if let Some(ov) = self.ov.get(&i).cloned() {
                 self.tgt.insert(i, computed.clone());
                 computed = computed.duplicate_shallow();
@@ -1723,6 +1819,7 @@ impl Cascade {
                         pid,
                         value: Rc::new(ed.get(&self.k_value).unwrap_or_default()),
                         origin: ed.get(&self.k_origin).unwrap_or_default(),
+                        decl: i as i32,
                     });
                     match comp.iter_mut().find(|it| it.pid == pid) {
                         Some(it) => *it = item,
@@ -1755,6 +1852,9 @@ impl Cascade {
             }
             None => 0,
         };
+        if table {
+            self.out_items[i] = Rc::new(comp.clone());
+        }
         if self.els[i].leaf {
             self.fc[i] = self.empty_fc.clone();
             self.fc_dict[i] = VarDictionary::new();
@@ -1768,6 +1868,12 @@ impl Cascade {
             if !self.props.inherited[it.pid as usize] {
                 continue;
             }
+            if table {
+                // The item itself: its origin and declaring element are kept,
+                // the wrap is made on request (style_dict).
+                fc_list.push(it.clone());
+                continue;
+            }
             let mut wrap = VarDictionary::new();
             wrap.set(&self.k_kind, &self.v_inherited);
             wrap.set(&self.k_from, &node);
@@ -1778,7 +1884,7 @@ impl Cascade {
             e.set(&self.k_origin, &wrap_v);
             let ev = e.to_variant();
             fc_dict.set(&self.props.keys[it.pid as usize], &ev);
-            fc_list.push(Rc::new(Item { pid: it.pid, value: it.value.clone(), origin: wrap_v }));
+            fc_list.push(Rc::new(Item { pid: it.pid, value: it.value.clone(), origin: wrap_v, decl: -1 }));
         }
         if !any_custom {
             self.fc_customs[i] = cpair;
@@ -1799,6 +1905,64 @@ impl Cascade {
 
     pub fn len(&self) -> usize {
         self.els.len()
+    }
+
+    /// Table mode (runtime v2): `update` keeps the computed items per
+    /// element in `out_items` and builds no Dictionaries.
+    pub fn set_table(&mut self, on: bool) {
+        self.table = on;
+    }
+
+    /// The name of property id `pid`.
+    pub fn prop_name(&self, pid: u32) -> &GString {
+        &self.props.names[pid as usize]
+    }
+
+    /// The id of a property (None when no rule or element uses it).
+    pub fn prop_id(&self, name: &str) -> Option<u32> {
+        self.props.index.get(name).copied()
+    }
+
+    pub fn prop_count(&self) -> usize {
+        self.props.names.len()
+    }
+
+    /// The computed items of element i (table mode).
+    pub fn items(&self, i: usize) -> &Rc<Vec<Rc<Item>>> {
+        &self.out_items[i]
+    }
+
+    /// The origin of an item of element `e` as the Dictionary output has
+    /// it: the declaration's own origin, wrapped in `{kind: inherited, from,
+    /// origin}` per inheritance step (table mode).
+    pub fn origin_of(&self, e: usize, it: &Item) -> Variant {
+        if it.decl < 0 || it.decl as usize == e {
+            return it.origin.clone();
+        }
+        let p = self.parent[e];
+        if p < 0 {
+            return it.origin.clone();
+        }
+        let inner = self.origin_of(p as usize, it);
+        let mut wrap = VarDictionary::new();
+        wrap.set(&self.k_kind, &self.v_inherited);
+        wrap.set(&self.k_from, &self.els[p as usize].var);
+        wrap.set(&self.k_origin, &inner);
+        wrap.to_variant()
+    }
+
+    /// The computed style Dictionary of element i ({prop: {value, origin}},
+    /// in the order of the Dictionary output), built from the items (table
+    /// mode).
+    pub fn style_dict(&self, i: usize) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        for it in self.out_items[i].iter() {
+            let mut e = VarDictionary::new();
+            e.set(&self.k_value, &*it.value);
+            e.set(&self.k_origin, &self.origin_of(i, it));
+            d.set(&self.props.keys[it.pid as usize], &e);
+        }
+        d
     }
 
     /// Computed overrides for element i (empty clears them); see
@@ -1998,6 +2162,27 @@ impl Cascade {
         self.els[i].var.clone()
     }
 
+    /// The local name (tag) of element i.
+    pub fn local_name(&self, i: usize) -> &str {
+        &self.els[i].local_name
+    }
+
+    /// The `attributes` of element i's UxmlElement ([{name, value}]).
+    pub fn attributes(&self, i: usize) -> VarArray {
+        self.els[i].obj.get(&self.sn_attributes).try_to::<VarArray>().unwrap_or_default()
+    }
+
+    /// The first value of attribute `name` of element i.
+    pub fn attr_str(&self, i: usize, name: &str) -> Option<String> {
+        for a in self.attributes(i).iter_shared() {
+            let Ok(d) = a.try_to::<VarDictionary>() else { continue };
+            if gs(&d.get(&self.k_name).unwrap_or_default()).to_string() == name {
+                return Some(gs(&d.get(&self.k_value).unwrap_or_default()).to_string());
+            }
+        }
+        None
+    }
+
     pub fn non_visual(&self, i: usize) -> bool {
         self.els[i].local_name == "UXML" || self.els[i].local_name == "Style"
     }
@@ -2073,7 +2258,7 @@ impl Cascade {
 #[class(init, base = RefCounted)]
 pub struct UxmlNativeCascade {
     base: Base<RefCounted>,
-    inner: Option<Cascade>,
+    pub(crate) inner: Option<Cascade>,
     layout_in: Option<crate::layout::LayoutIn>,
     recs: crate::layout::RecCache,
     placement: crate::layout::Placement,
@@ -2134,6 +2319,7 @@ impl UxmlNativeCascade {
         }
         let ks = kinds.as_slice();
         self.layout_in = Some(crate::layout::LayoutIn {
+            v2: None,
             controls: ctl,
             boxed: ks.iter().map(|&b| b & 1 != 0).collect(),
             labels,
@@ -2413,6 +2599,17 @@ impl UxmlNativeCascade {
     /// the whole subtree as clean. Empty before a layout_place. The layout
     /// hooks of the behaviors run for the subtrees that changed
     /// (UxmlDocument._run_layout_hooks).
+    /// The rect of element i (relative to its parent) in the last placing
+    /// layout: what the layout computed, before a Control clamps its size
+    /// to its minimum (bench/equiv_v2.gd).
+    #[func]
+    fn placed_rect(&self, i: i64) -> Variant {
+        match self.placement.last.as_ref().and_then(|o| o.rects.get(i as usize).copied().flatten()) {
+            Some(r) => r.to_variant(),
+            None => Variant::nil(),
+        }
+    }
+
     #[func]
     fn placed_subtrees(&self) -> PackedByteArray {
         let mut out = PackedByteArray::new();
@@ -2520,6 +2717,25 @@ impl UxmlNativeCascade {
         match self.inner.as_ref().and_then(|c| if i >= 0 { c.target_style(i as usize) } else { None }) {
             Some(d) => d.to_variant(),
             None => Variant::nil(),
+        }
+    }
+
+    /// Runtime v2: the output of `update` is the computed items per
+    /// element (read natively), not Dictionaries.
+    #[func]
+    fn set_table_mode(&mut self, on: bool) {
+        if let Some(c) = self.inner.as_mut() {
+            c.set_table(on);
+        }
+    }
+
+    /// Table mode: the computed style of element i ({prop: {value,
+    /// origin}}, built on request).
+    #[func]
+    fn style_of(&self, i: i64) -> VarDictionary {
+        match self.inner.as_ref() {
+            Some(c) if i >= 0 && (i as usize) < c.len() => c.style_dict(i as usize),
+            _ => VarDictionary::new(),
         }
     }
 

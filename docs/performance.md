@@ -2651,3 +2651,109 @@ the layout its host size. Interleaved A/A/B rounds against a worktree of
 A scaled panel costs what its pixel grid costs: a resize that changes the
 pixels per point (scale with screen size) applies every control again,
 like `refresh()`; a resize that keeps it only lays out.
+
+## Runtime v2, phase 1 (`runtime/v2`)
+
+Runtime v2 draws a document with the native core: an element table, a
+visual record and a retained canvas item per element, no Control per element
+(`docs/design.md`, "Runtime v2"; the phases in `docs/roadmap.md`). Phase 1
+covers static documents. It is selected per document (`UxmlDocument.runtime
+= 2`); v1 stays the default.
+
+### Method
+
+- `python tools/unity-bench/run.py --arms godot-release,unity-il2cpp,godot-release-v2`
+  (5 rounds, 60 iterations, release builds, the order rotated per round).
+  `godot-release-v2` is the same export with `--runtime=2`: the documents
+  that v2 covers load on it, the others on v1. New ops on both sides:
+  `big-static: load` (and `+ first frame`), the big document with static
+  elements in place of its controls (`bench.gd _big_static_uxml`: Buttons
+  as styled Labels, the ScrollView a clipping box, Toggles, Sliders and
+  TextFields as boxes; 1,758 elements, 1,756 in Unity), and `hud: load`.
+- The steps of a v2 load: `bench/v2/load_cost.gd` on the release template
+  (`tools/prof_release.py --script res://bench/v2/load_cost.gd -- --native`;
+  median of 15 loads, v1 and v2 interleaved, native timers from one more
+  load).
+
+### Results (ms, release template)
+
+| Operation | v1 | v2 | Unity (IL2CPP) | v1 / Unity | v2 / Unity |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| big-static: load | 522 (518–527) | **146** (144–149) | 33.3 | 15.7 | 4.4 |
+| big-static: load + first frame | 553 | **142** | 54.4 | 10.2 | 2.6 |
+| inventory: load | 57.5 | **17.8** | 2.92 | 19.7 | 6.1 |
+| hud: load | 10.8 | **4.70** | 0.62 | 17.4 | 7.6 |
+| inventory: select slot | 0.758 | **0.375** | 0.309 | 2.5 | 1.2 |
+| hud: hover toggle | 0.174 | **0.111** | 0.069 | 2.5 | 1.6 |
+| hud: frame, 8 labels + layout | 0.401 | 0.387 | 0.247 | 1.6 | 1.6 |
+| inventory: count change + layout | 0.417 | 0.466 | 0.267 | 1.6 | 1.7 |
+| big: load (falls back to v1) | 624 | 625 | 42.9 | 14.5 | 14.6 |
+
+The documents with controls (big, settings, dialog, listview) load on v1 in
+the v2 arm, at v1's times (the check that sends them back is a walk of the
+model before any cascade). v2's `+ first frame` is below its load: the
+load includes the draw, and the frame after it has nothing to record. A
+count change on v2 is a little slower than on v1: phase 1 lays the whole
+document out again after every change (v1 lays out the subtree).
+
+`big-static` geometry: Unity's `card-0` is 200 x 175 px, v2's 200 x 175, v1's
+200 x 159 (v1 measures the wrapping card text at a stale width and the
+Label's Control grows past the height its card was given; see "Where v1 and
+v2 differ" in `docs/design.md`).
+
+### Where a v2 load goes (big-static, release template, ms)
+
+| Step | ms |
+| --- | ---: |
+| parse, theme attach, rest (GDScript: `UxmlLoader`, `UxmlTheme.attach`) | 34.7 |
+| cascade setup (GDScript `UssCascade.new`: index, rule compilation, native setup) | 21.3 |
+| first cascade, table mode (native: 14.7 compute, 10 attribute reads of the model) | 24.4 |
+| build (native: checks, names, 1,758 records of which most shared, 882 texts shaped; 7.5 records) | 15.5 |
+| layout (native flex; the text measures 21 of it, line breaking 15) | 31.3 |
+| draw (1,758 canvas items; 4.3 text) | 11.4 |
+| total | 139.7 (v1 514.5) |
+
+On v1 the same document spends 370 ms on its Controls (creation, entering
+the tree, first apply) and 96 ms in the GDScript steps that v2 does not have
+(part trees, signal wiring, behaviors, attributes, bindings). What remains
+on v2 is half GDScript (parse, theme and cascade setup: 56 ms; phase 5 moves
+the model native) and half native work that Unity also does (cascade,
+layout with text shaping, draw: 84 ms against Unity's 33 ms in total).
+
+### Equivalence
+
+- `bench/equiv_v2.gd` (windowed): 1,638 checks, 0 failures; 61 of 215
+  documents covered (the parity cases, the fixtures and the generated
+  documents), 113 of 113 pixel comparisons identical (each document drawn by
+  both runtimes, after the load and after 24 random changes: class toggles,
+  inline styles, text edits, `set_enabled`, pseudo-states, resizes).
+  Geometry is not counted as a failure in 84 checks of 8 documents where v1
+  floors a Label's Control above the layout's rect (an empty Label, a Label
+  narrower than its text, a wrapping Label at a stale width); everything
+  else is compared there too.
+- `python bench/pixels.py --runtime 2`: the same summary as v1 (box
+  99.806% exact, text IoU 0.917, runtime rects 3369/3551), 46 cases on v2,
+  their renders (with and without text) and runtime rects identical to
+  v1's.
+
+### Other benchmarks (geomean of the medians, branch / main, A/A in brackets)
+
+v1's code paths changed in a few places, each a test of `_v2` or of the
+cascade's table mode: `UxmlDocument._start_runtime()` (the same calls as
+before when `runtime` is 1), the native cascade's `Item` (one more field) and
+the native layout's leaf measure (a test of `LayoutIn::v2`). Interleaved
+A/A/B rounds against two worktrees of `main` (`a13141b`), editor binary:
+
+| Suite | 3 rounds | 5 rounds |
+| --- | ---: | ---: |
+| `bench.gd --quick` (25 ops) | 1.018 / 1.014 (1.004) | 0.998 / 1.010 (0.988) |
+| `workloads.gd --quick` (17 ops) | 1.030 / 0.999 (1.031) | 0.982 / 1.035 (1.055) |
+
+No op was above its A/A spread in both runs except `hud hover toggle`
+(1.15 in both), and `load_document(Menu.uxml)` was 1.05 and 1.17. Measured
+again with the full iteration counts (`bench.gd --only=hud`, `--only=Menu`,
+three interleaved rounds, main / branch): the hover toggle 0.389 / 0.391,
+0.368 / 0.371, 0.327 / 0.318 ms; the Menu load 24.6 / 6.4 (a slow round),
+4.59 / 7.74, 4.66 / 4.59 ms. Neither is slower. The `godot-release` column of
+the run above is at the times of step 0 (the big load 624 ms against 682 and
+637 to 743 in the runs of step 0).

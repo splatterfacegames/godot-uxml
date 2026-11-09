@@ -216,6 +216,16 @@ godot --path . --script res://examples/minimal/minimal.gd
 recorded with Godot's Movie Maker at 60 fps, 1920x1080
 (`GODOT=<godot> tools/record_reel.sh <out dir>`).
 
+### Runtime v2 (preview)
+
+`doc.runtime = 2` before a load draws the document with the native core:
+no Godot Control per element. Phase 1 covers static documents
+(VisualElement, Label, Image, boxes, borders, radii, backgrounds, clipping,
+opacity, text). Other documents load on the default runtime, and
+`doc.runtime_fallback` says why; `doc.get_runtime()` tells which runtime a
+document is on. On runtime 2, `get_element()` and `get_native()` return
+null. See docs/design.md ("Runtime v2") and docs/roadmap.md.
+
 ### Editor APIs
 
 Tools such as a UXML editor use these calls. The calls take a
@@ -334,6 +344,9 @@ godot --headless --path . -s res://bench/equiv.gd
 ```
 
 Add `-- --gdscript` to an equivalence check to test the GDScript path.
+`bench/equiv_v2.gd` compares runtime v2 with runtime v1 (windowed, it also
+compares pixels), and `python bench/pixels.py --runtime 2` renders the
+pixel cases on runtime v2.
 
 ## Build the native core
 
@@ -351,6 +364,7 @@ The script makes a release build and copies the binary into
 - [docs/design.md](docs/design.md): architecture, supported subset,
   diagnostics and API.
 - [docs/performance.md](docs/performance.md): benchmarks and method.
+- [docs/roadmap.md](docs/roadmap.md): the phases of runtime v2.
 - [docs/parity.md](docs/parity.md): comparison with Unity and with the
   reference engine.
 - [docs/unity-coverage.md](docs/unity-coverage.md): status of each Unity

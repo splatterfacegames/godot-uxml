@@ -121,7 +121,7 @@ fn scan_number(s: &[u8]) -> Option<usize> {
     }
 }
 
-enum Len {
+pub enum Len {
     Px(f64),
     Pct(f64),
     Auto,
@@ -129,7 +129,7 @@ enum Len {
 }
 
 /// UssValues.parse_length.
-fn parse_length(text: &str) -> Len {
+pub fn parse_length(text: &str) -> Len {
     let v = strip(text);
     if v.is_empty() {
         return Len::Bad("empty value".into());
@@ -185,7 +185,7 @@ fn parse_ratio(text: &str) -> f64 {
     a / b
 }
 
-fn parse_number(text: &str) -> f64 {
+pub fn parse_number(text: &str) -> f64 {
     let v = strip(text);
     match scan_number(v.as_bytes()) {
         Some(ne) if ne == v.len() => v.parse().unwrap_or(f64::NAN),
@@ -279,7 +279,27 @@ enum CtlKind {
     Boxed,
 }
 
+/// Runtime v2: the leaves of the element table, measured without Controls.
+pub trait LeafSource {
+    /// 0: nothing to measure, 1: text, 2: a natural size (Image).
+    fn kind(&self, i: usize) -> u8;
+    /// A text whose lines wrap (Label autowrap on).
+    fn wraps(&self, i: usize) -> bool;
+    fn empty(&self, i: usize) -> bool;
+    /// The horizontal border and padding of the element's box (a Label's
+    /// stylebox content margins, `uxml_margins`).
+    fn hpad(&self, i: usize) -> f64;
+    /// The text's minimum size (Label.get_minimum_size less its box) with
+    /// its lines broken at the content width `width`.
+    fn text_min(&self, i: usize, width: f64) -> Vector2;
+    /// The longest paragraph as one line (label_max_content less the box).
+    fn max_content(&self, i: usize) -> f64;
+    fn natural(&self, i: usize) -> Vector2;
+}
+
 pub struct LayoutIn {
+    /// Runtime v2: leaves measured by the core (every control is None).
+    pub v2: Option<Rc<dyn LeafSource>>,
     pub controls: Vec<Option<Gd<Control>>>,
     pub boxed: Vec<bool>,
     pub labels: Vec<Option<Gd<Label>>>,
@@ -923,6 +943,22 @@ impl<'a> Pass<'a> {
             if only.is_some_and(|o| !o[i]) {
                 continue;
             }
+            if let Some(src) = &io.v2 {
+                match src.kind(i) {
+                    1 => {
+                        kinds[i] = CtlKind::Plain;
+                        if src.wraps(i) {
+                            volatile[i] = true;
+                            // A Label enters the tree at its minimum width: one
+                            // pixel of text (autowrap) and its box.
+                            vw[i] = d(f(1.0 + src.hpad(i))) - src.hpad(i);
+                        }
+                    }
+                    2 => kinds[i] = CtlKind::Boxed,
+                    _ => {}
+                }
+                continue;
+            }
             if let Some(ctl) = &io.controls[i] {
                 kinds[i] = if io.boxed[i] { CtlKind::Boxed } else { CtlKind::Plain };
                 if let Some((chg, vol)) = &keep {
@@ -1522,6 +1558,9 @@ impl<'a> Pass<'a> {
     /// UxmlDocument._measure_leaf.
     fn measure_leaf(&mut self, i: usize, content_w: f64) -> Vector2 {
         let _p = crate::prof::scope(if self.volatile[i] { "measure_leaf.volatile" } else { "measure_leaf" });
+        if let Some(src) = self.io.v2.clone() {
+            return self.measure_v2(&*src, i, content_w);
+        }
         let Some(c) = self.io.controls[i].clone() else { return Vector2::ZERO };
         if self.volatile[i] && content_w >= 0.0 {
             // UxmlDocument._measure_leaf: the content width plus the USS
@@ -1660,6 +1699,31 @@ impl<'a> Pass<'a> {
         ms
     }
 
+    /// measure_leaf of a v2 leaf: what UxmlDocument._measure_leaf reads from
+    /// a Label (or an Image's natural size), without the Label.
+    fn measure_v2(&mut self, src: &dyn LeafSource, i: usize, content_w: f64) -> Vector2 {
+        match src.kind(i) {
+            2 => src.natural(i),
+            1 => {
+                if src.empty(i) {
+                    return Vector2::ZERO;
+                }
+                let w = if self.volatile[i] {
+                    let cw = if content_w >= 0.0 { content_w } else { self.vw[i] };
+                    v2_width(cw, src.hpad(i))
+                } else {
+                    0.0
+                };
+                let mut ms = src.text_min(i, w);
+                if self.volatile[i] {
+                    ms.x = f(src.max_content(i));
+                }
+                ms
+            }
+            _ => Vector2::ZERO,
+        }
+    }
+
     /// The `uxml_margins` of element i's control, once per pass (and across
     /// passes through LayoutIn::margins_of).
     fn sb_margins(&mut self, i: usize, c: &Gd<Control>) -> Option<[f64; 4]> {
@@ -1691,8 +1755,12 @@ impl<'a> Pass<'a> {
                 return res;
             }
             let res = self.measure_leaf(i, hint);
-            let ctl = self.io.controls[i].clone().unwrap();
-            let actual = d(ctl.get_size().x) - hpad_of(self.sb_margins(i, &ctl));
+            let actual = if let Some(src) = self.io.v2.clone() {
+                v2_width(hint, src.hpad(i))
+            } else {
+                let ctl = self.io.controls[i].clone().unwrap();
+                d(ctl.get_size().x) - hpad_of(self.sb_margins(i, &ctl))
+            };
             self.vset[i].insert(hint.to_bits(), (actual, res));
             self.vread[i].insert(actual.to_bits(), res);
             self.vw[i] = actual;
@@ -1895,7 +1963,10 @@ impl<'a> Pass<'a> {
             let (nat, mtx, mty) = self.measure_content(i, Vector2::new(f(cw), f(ch)), lx, ly);
             // UxmlDocument._measure_leaf: a text control with children
             // measures nothing (Unity measures text on leaves only).
-            let textish = self.io.labels[i].is_some() || self.io.rich[i].is_some() || self.io.buttons[i];
+            let textish = self.io.labels[i].is_some()
+                || self.io.rich[i].is_some()
+                || self.io.buttons[i]
+                || self.io.v2.as_ref().is_some_and(|s| s.kind(i) == 1);
             let chrome = if textish { Vector2::ZERO } else { self.measure_call(i, cw) };
             bw = if w >= 0.0 { w } else { gmax(d(nat.x), d(chrome.x)) + in_w };
             bh = if h >= 0.0 { h } else { gmax(d(nat.y), d(chrome.y)) + in_h };
@@ -2623,6 +2694,15 @@ impl RecCache {
         let n = self.recs.len();
         std::mem::replace(&mut self.changed, vec![false; n])
     }
+}
+
+/// The content width a wrapping Label has after its control was given
+/// `content_w` plus its box (`hpad`): Control clamps the width to its
+/// minimum, one pixel of text and the box.
+pub fn v2_width(content_w: f64, hpad: f64) -> f64 {
+    let s = f(content_w + hpad);
+    let min = f(1.0 + hpad);
+    d(if s < min { min } else { s }) - hpad
 }
 
 /// flex_layout.gd _abs_free.

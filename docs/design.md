@@ -2193,6 +2193,106 @@ runtime does not allow today: the measures of the first layout of a load would
 differ from a Label's.
 
 
+### Runtime v2 (`runtime/v2`)
+
+Two rounds tried to make elements core-drawn inside runtime v1 and could
+not: the 28,600 lines of GDScript of the runtime assume one Godot Control
+per element and key every structure on `UxmlElement` objects (`_controls`,
+`_natives`, `_states`, the behaviors, the applier's memos, the bindings,
+the collection pools). Runtime v2 is built beside v1 instead, and selected
+per document:
+
+- `UxmlDocument.runtime` (1 by default, 2 for v2; `@export_enum`) or the
+  static `UxmlDocument.default_runtime` (nonzero overrides it for every
+  document: the benchmarks, `bench/pixels_render.gd --runtime 2`).
+  `get_runtime()` tells which runtime the loaded document is on and
+  `runtime_fallback` why a document asked for v2 is on v1.
+- `UxmlDocument._start_runtime()` builds the runtime of a loaded model:
+  v2 when it is asked for and covers the document, else v1's `_index()` and
+  first restyle. v1 is the reference: every v2 check compares with it.
+- A change that v2 cannot take (a class that brings a transition, an
+  element it does not draw) moves the document to v1 on the same model
+  (`_v2_fallback`): the result is v1's, never a half-drawn document.
+
+The pieces:
+
+- **The element table** is the native cascade's: preorder index, parent,
+  subtree end, local name, and per element the computed items. In table
+  mode (`UxmlNativeCascade.set_table_mode`) `update()` keeps the items
+  (`Cascade::out_items`) and builds none of the output Dictionaries: no
+  per-element `{value, origin}` entries and no `{kind: inherited, from,
+  origin}` wraps per inherited property (about half of a v1 first cascade).
+  An item keeps the element whose declaration it is (`Item::decl`), and
+  `style_of(i)` / `Cascade::style_dict` makes the Dictionary of v1 on
+  request, wraps included (`get_computed_style_for` on v2 is equal to v1's:
+  `bench/equiv_v2.gd`). A value of a shared expansion is one `Rc` for all
+  the elements it reaches, so records can be keyed on it.
+- **UxmlRuntimeV2** (`native/src/v2.rs`) keeps per element its kind (box,
+  Label, Image), a visual record (`Vis`: display and visibility, opacity,
+  the clip and its inset and radii, the box StyleBox, the background
+  image, the text style, the image), the layout result and a retained
+  canvas item. `build` checks what the document uses and returns why it
+  is not covered ("" when it is): the tags, the attributes, every computed
+  property against the set v2 draws, rich text, escapes. Records are memoized
+  by the values they read (150 cards with the same rules share one).
+- **Values and resources** are read with runtime v1's functions, called
+  once per distinct value (`UxmlRuntimeV2Glue`, `runtime/uxml_runtime_v2.gd`):
+  `UssValues.parse_color` / `parse_opacity`, `UxmlStyleApplier._make_box`
+  for a box record, `_font` / `_line_font` / `_effective_font_size` for the
+  font of a text, `_apply_box` / `_apply_themed_inner`'s image paths for a
+  background image, `UxmlControlFactory._load_texture` and `_apply_image` for
+  an Image. The two runtimes therefore read every value and make every
+  StyleBox the same way; a value that v1 reports (an invalid colour) keeps
+  the document on v1, which reports it per element.
+- **Layout** is the native flex pass (`layout.rs`), run against the table:
+  `LayoutIn::v2` is a `LeafSource` that measures the leaves without
+  Controls (the text's minimum size at a content width, its max-content
+  width, an Image's natural size), and the same emulation of v1's
+  wrapping-Label measure runs on it. The output rects, insets and content
+  sizes stay native; nothing is placed.
+- **Text** (`native/src/v2text.rs`) is the port of Godot's Label measured
+  pixel-exact in `perf/core-text-wip` (144/144), without a Control: the
+  paragraphs are shaped once per (text, font, size, wrap, spacing), the
+  line breaks are cached per width (a one-line paragraph is its own line,
+  no substring), and the draw records into the element's canvas item with
+  the content margins of its box. There is no settling: a text is shaped
+  after its record is made and measured by the layout at the widths the
+  layout asks for.
+- **Drawing**: one canvas item per element under the document's root box,
+  in the tree of the elements, the draw index of the sibling position,
+  the transform of the layout position. The box is the StyleBox v1 would
+  install (StyleBoxFlat or UxmlBoxStyle, shared per record) drawn into the
+  item, then the background image, the Image's texture (TextureRect's
+  stretch modes, ported) and the text. `overflow: hidden` clips the item;
+  an inset or rounded clip of the children is a child clip item, as
+  UxmlClip makes it (the same mask StyleBox and shader). Opacity is the
+  item's modulate, visibility and display its visibility.
+- **Input**: `:hover` and `:active` come from the core's hit test
+  (`pick`: the last element in preorder whose border box holds the point,
+  inside the clip of its clipping ancestors, as `UxmlDocument._pick`
+  walks it) on the root box's mouse events; the chain of ancestors gets the
+  state, the cascade runs for those elements, and the document is laid out
+  and drawn again. `element_at`, `get_element_rect`, `get_element_transform`
+  use the table.
+- **Handles**: phase 1 keeps the parser's `UxmlElement` objects (the cascade
+  reads its inputs from them); the API returns them. `get_element`,
+  `get_native`, `get_control_for` and `get_native_for` return null on v2:
+  an element has no Control (phase 2 hands out behaviour Controls).
+
+What runtime v2 does not do yet (phase 1), and the phases that add it, are
+in `docs/roadmap.md`. The checks: `bench/equiv_v2.gd` (v2 against v1:
+structure, computed styles, geometry, hits, diagnostics and pixels after
+the load and after random changes) and `python bench/pixels.py --runtime 2`.
+
+Where v1 and v2 differ: runtime v1 reports a Control's size, and Godot floors
+a Control at its minimum size: an empty Label is one line high, a one-line
+Label is as wide as its text until the placement fits it, and a wrapping
+Label measured at a stale width grows past its layout rect while its
+parent keeps the height the layout gave it (`gen:static-cards`: a card 75 px
+high around a Label 83 px high). Runtime v2 reports and draws the layout's
+rects. `bench/equiv_v2.gd` counts these checks separately (geometry that
+differs where a v1 Label is floored) and compares everything else.
+
 ### Native core
 
 `native/` is a Rust crate (godot-rust `godot` 0.5, `api-4-7`). Build and

@@ -177,6 +177,8 @@ def compare(name, udir, gdir, ddir, tol, dumps=DUMPS):
     ppp = dump_ppp(name, dumps)
     if os.path.exists(rp):
         ours = json.load(open(rp, encoding="utf-8"))
+        r["runtime"] = ours.pop("__runtime", 1)
+        r["fallback"] = ours.pop("__fallback", "")
         for e in unity_dump_elements(name, dumps):
             if e["path"] not in ours or e.get("style", {}).get("display") == "none":
                 continue
@@ -267,10 +269,12 @@ def explain(r, dumps=DUMPS):
     return lines
 
 
-def render(godot, names, gdir, scaled=False):
+def render(godot, names, gdir, scaled=False, runtime=1):
     os.makedirs(gdir, exist_ok=True)
     cmd = [godot, "--path", REPO, "--resolution", "64x64", "-s", "res://bench/pixels_render.gd",
            "--", "--out", gdir] + (["--scaled"] if scaled else [])
+    if runtime != 1:
+        cmd += ["--runtime", str(runtime)]
     if names:
         cmd += ["--only", ",".join(names)]
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -336,9 +340,9 @@ def run_set(args, only, udir, dumps, out, scaled, label):
         names = [n for n in names if n in only]
         if not names:
             return [], [], ""
-    gdir = os.path.join(out, "godot")
-    ddir = os.path.join(out, "diff")
-    if not args.no_render and not render(args.godot, only, gdir, scaled):
+    gdir = os.path.join(out, "godot" if args.runtime == 1 else "godot-v%d" % args.runtime)
+    ddir = os.path.join(out, "diff" if args.runtime == 1 else "diff-v%d" % args.runtime)
+    if not args.no_render and not render(args.godot, only, gdir, scaled, args.runtime):
         return None, None, None
     rows = [compare(n, udir, gdir, ddir, args.tol, dumps) for n in names]
     lines = HEAD + [fmt(r) for r in rows]
@@ -351,6 +355,9 @@ def run_set(args, only, udir, dumps, out, scaled, label):
                 for g in r.get("geo_notes", []):
                     print("    rect " + g)
     summary = summarize(label, rows)
+    if args.runtime != 1:
+        on = [r for r in rows if r.get("runtime") == args.runtime]
+        summary += "; runtime v%d: %d cases" % (args.runtime, len(on))
     if scaled:
         print("")
         table = per_scale(rows)
@@ -370,6 +377,8 @@ def main():
     ap.add_argument("--out", default=OUT)
     ap.add_argument("--tol", type=int, default=8)
     ap.add_argument("--markdown", default="")
+    ap.add_argument("--runtime", type=int, default=1,
+                    help="2: runtime v2 for the cases it covers (the others stay on v1); renders into godot-v2")
     ap.add_argument("--json", default="")
     ap.add_argument("--no-scaled", action="store_true", help="skip the panel-scaling renders")
     ap.add_argument("--scaled-only", action="store_true", help="only the panel-scaling renders")

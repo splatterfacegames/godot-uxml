@@ -108,6 +108,17 @@ signal tab_reordered(element_name, from_index, to_index)
 ## document reach the menu.
 var shared_sheets: UxmlDocumentModel = null
 
+## The runtime the next load uses: 1, one Godot Control per element (the
+## default), or 2, the document drawn by the native core (docs/design.md,
+## "Runtime v2"). A document that runtime v2 does not cover yet loads on
+## runtime v1; `runtime_fallback` then says why, and get_runtime() is 1.
+@export_enum("v1:1", "v2:2") var runtime: int = 1
+## Why the last load with runtime 2 is on runtime v1 ("" when it is not).
+var runtime_fallback := ""
+## Overrides `runtime` for every document when nonzero (benchmarks, tests).
+static var default_runtime := 0
+var _v2: UxmlRuntimeV2Glue = null
+
 ## Every diagnostic produced by the last load: parse/cascade warnings plus
 ## runtime `unsupported-value`/`duplicate-name`/`missing-file` entries.
 var diagnostics: Array = []
@@ -379,7 +390,9 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_RESIZED:
+	if what == NOTIFICATION_RESIZED and _v2 != null:
+		_v2.relayout()
+	elif what == NOTIFICATION_RESIZED:
 		# A scaled panel resolves its scale for the new size; a new pixel
 		# grid applies every control again (see _on_panel_settings_changed).
 		var regrid := panel_settings != null and _update_scale()
@@ -411,6 +424,9 @@ func _notification(what: int) -> void:
 		if what == NOTIFICATION_EXIT_TREE:
 			_hold_unsnap(false)
 	elif what == NOTIFICATION_PREDELETE:
+		if _v2 != null:
+			_v2.dispose()
+			_v2 = null
 		_binding.clear()
 		_free_parked()
 
@@ -467,10 +483,31 @@ func _finish_load(adopt: bool) -> void:
 		theme_sheet = panel_settings.theme_style_sheet
 	UxmlTheme.attach(_doc, theme_sheet, editor_theme, editor_skin)
 	_update_scale()
-	_index()
-	_restyle_now()
+	if _start_runtime():
+		loaded.emit(true)
+		return
 	_attrs.restore_view_data()
 	loaded.emit(true)
+
+
+## Builds the runtime of the loaded model: runtime v2 when `runtime` (or
+## `default_runtime`) asks for it and covers the document (true), else
+## runtime v1's controls and their first restyle (false).
+func _start_runtime() -> bool:
+	runtime_fallback = ""
+	if (default_runtime if default_runtime != 0 else runtime) == 2 and panel_settings != null:
+		runtime_fallback = "panel settings (scaling)"
+	elif (default_runtime if default_runtime != 0 else runtime) == 2:
+		var g := UxmlRuntimeV2Glue.new(self)
+		var why := g.load()
+		if why.is_empty():
+			_v2 = g
+			diagnostics = g.diagnostics()
+			return true
+		runtime_fallback = why
+	_index()
+	_restyle_now()
+	return false
 
 
 ## The author stylesheets of `src` that style its whole document (no scope,
@@ -1062,6 +1099,9 @@ func reload() -> int:
 
 
 func _clear() -> void:
+	if _v2 != null:
+		_v2.dispose()
+		_v2 = null
 	if not _dnd.is_empty():
 		cancel_drag()
 	close_context_menu()
@@ -1307,6 +1347,9 @@ func _set_state(el: UxmlElement, state: String, on: bool) -> void:
 
 func _queue_restyle() -> void:
 	_opt_rev += 1
+	if _v2 != null:
+		_v2.queue()
+		return
 	if _restyle_queued:
 		return
 	_restyle_queued = true
@@ -1325,6 +1368,9 @@ func _queue_restyle() -> void:
 ## elements' subtrees.
 func _restyle_now(only_transitions: bool = false) -> void:
 	_restyle_queued = false
+	if _v2 != null:
+		_v2.restyle()
+		return
 	if _doc == null:
 		return
 	if not only_transitions and _quiet():
@@ -2867,6 +2913,8 @@ func _free_parked() -> void:
 ## The element's outer control, or null. For labeled fields this is the
 ## UxmlField wrapper; for Image the host box.
 func get_element(element_name: String) -> Control:
+	if _v2 != null:
+		return null  # runtime v2: the core draws the elements, no Control
 	var el := _named(element_name)
 	return null if el == null else _controls.get(el)
 
@@ -2880,6 +2928,8 @@ func get_element_by_name(element_name: String) -> Control:
 ## get_element for unwrapped controls and for part-tree containers
 ## (ScrollView, ListView, TabView, ...).
 func get_native(element_name: String) -> Control:
+	if _v2 != null:
+		return null
 	var el := _named(element_name)
 	if el == null:
 		return null
@@ -2891,11 +2941,15 @@ func get_native(element_name: String) -> Control:
 
 ## The semantic element, for attribute/structure access.
 func get_element_model(element_name: String) -> UxmlElement:
+	if _v2 != null:
+		return _v2.named(element_name)
 	return _by_name.get(element_name)
 
 
 ## The last computed style for the element (property -> {value, origin}).
 func get_computed_style(element_name: String) -> Dictionary:
+	if _v2 != null:
+		return _v2.computed_style(_v2.named(element_name))
 	var el: UxmlElement = _by_name.get(element_name)
 	return {} if el == null else _styles.get(el, {})
 
@@ -2905,7 +2959,7 @@ func get_computed_style(element_name: String) -> Dictionary:
 ## The state descends the whole subtree — native disabled flags plus the
 ## :disabled pseudo — until called again. A disabled ancestor still wins.
 func set_enabled(element_name: String, enabled: bool) -> void:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _v2.named(element_name) if _v2 != null else _by_name.get(element_name)
 	if el == null:
 		return
 	_disabled_rt[el] = not enabled
@@ -2934,6 +2988,23 @@ func set_element_state(element_name: String, state: String, on: bool) -> void:
 ## The model of the last load: the element tree (control parts included),
 ## the stylesheets and the loader diagnostics. null before a load. Read
 ## the model; change elements only through UxmlElement.set_attribute().
+## The runtime the loaded document is on: 2 when the native core draws it
+## (see `runtime`), else 1.
+func get_runtime() -> int:
+	return 2 if _v2 != null else 1
+
+
+## Runtime v2 cannot keep the document (a change it does not cover): the
+## same model loads on runtime v1.
+func _v2_fallback(why: String) -> void:
+	var g := _v2
+	_v2 = null
+	g.dispose()
+	runtime_fallback = why
+	_index()
+	_restyle_now()
+
+
 func get_document_model() -> UxmlDocumentModel:
 	return _doc
 
@@ -2942,6 +3013,8 @@ func get_document_model() -> UxmlDocumentModel:
 ## for an element without a control (a <Style>, the <UXML> root's
 ## non-visual children) or of another load.
 func get_control_for(element: UxmlElement) -> Control:
+	if _v2 != null:
+		return null
 	var c = _controls.get(element)
 	if c != null and not _parked.is_empty():
 		_expose(element)
@@ -2951,6 +3024,8 @@ func get_control_for(element: UxmlElement) -> Control:
 ## The interactive native inside the box of `element` (as get_native() for
 ## a name), or null.
 func get_native_for(element: UxmlElement) -> Control:
+	if _v2 != null:
+		return null
 	if element == null or not _controls.has(element):
 		return null
 	if not _parked.is_empty():
@@ -2979,12 +3054,16 @@ func get_element_for(control: Control) -> UxmlElement:
 ## The parent of `element` in the document tree (control parts included),
 ## or null for the root.
 func get_parent_element(element: UxmlElement) -> UxmlElement:
+	if _v2 != null:
+		return _v2.parent_of(element)
 	return _parents.get(element)
 
 
 ## The last computed style of `element` (property -> {value, origin}), as
 ## get_computed_style() for a name.
 func get_computed_style_for(element: UxmlElement) -> Dictionary:
+	if _v2 != null:
+		return _v2.computed_style(element)
 	return _styles.get(element, {})
 
 
@@ -3151,6 +3230,8 @@ func _hold_unsnap(on: bool) -> void:
 func element_at(point: Vector2, respect_picking: bool = false, include_parts: bool = false) -> UxmlElement:
 	if _doc == null:
 		return null
+	if _v2 != null:
+		return _v2.element_at(point, respect_picking)
 	if _restyle_queued:
 		_restyle_now()
 	var gp := get_global_transform() * point
@@ -3213,6 +3294,17 @@ func get_element_transform(element: UxmlElement, space: UxmlElement = null) -> T
 	var none := Transform2D(Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
 	if _doc == null or not is_inside_tree():
 		return none
+	if _v2 != null:
+		var er = _v2.host_rect(element)
+		if er == null:
+			return none
+		var at: Vector2 = _root_box.position + (er as Rect2).position
+		if space != null:
+			var sr = _v2.host_rect(space)
+			if sr == null:
+				return none
+			at -= _root_box.position + (sr as Rect2).position
+		return Transform2D(0.0, at)
 	if _restyle_queued:
 		_restyle_now()
 	var c := _laid_out_control(element)
@@ -3240,8 +3332,11 @@ func get_element_rect(element: UxmlElement, space: UxmlElement = null, box: Stri
 	var t := get_element_transform(element, space)
 	if t.x == Vector2.ZERO and t.y == Vector2.ZERO:
 		return Rect2()
-	var c: Control = _controls[element]
-	var r := Rect2(Vector2.ZERO, c.size)
+	var r: Rect2
+	if _v2 != null:
+		r = Rect2(Vector2.ZERO, (_v2.host_rect(element) as Rect2).size)
+	else:
+		r = Rect2(Vector2.ZERO, (_controls[element] as Control).size)
 	match box:
 		"border":
 			pass
@@ -3290,7 +3385,7 @@ func _laid_out_control(element: UxmlElement) -> Control:
 ## Resolved border widths [left, top, right, bottom] of `element`, as the
 ## layout reads them (px only; on the pixel grid when pixel_grid is on).
 func _border_widths(element: UxmlElement) -> PackedFloat64Array:
-	var st: Dictionary = _styles.get(element, {})
+	var st: Dictionary = _v2.computed_style(element) if _v2 != null else _styles.get(element, {})
 	var out := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 	var k := 0
 	for p in ["border-left-width", "border-top-width", "border-right-width", "border-bottom-width"]:
@@ -3307,6 +3402,8 @@ func _border_widths(element: UxmlElement) -> PackedFloat64Array:
 ## The content-box insets [start, end] (border + padding) of the last
 ## layout of `element`.
 func _layout_insets(element: UxmlElement) -> Array:
+	if _v2 != null:
+		return _v2.insets(element)
 	if _native_layout():
 		var i = _cascade.index.get(element)
 		if i != null:
@@ -3583,6 +3680,9 @@ func _merge_forced(element_states: Dictionary, runtime_disabled: Dictionary, run
 ## control directly would bypass the Unity tags. The next restyle lays out
 ## the document only when the text can move an element (_text_stable).
 func set_text(element_name: String, text: String) -> void:
+	if _v2 != null:
+		_v2.set_text(_v2.named(element_name), text)
+		return
 	var el: UxmlElement = _by_name.get(element_name)
 	if el == null:
 		return
@@ -3932,6 +4032,9 @@ func _sync_own_text(el: UxmlElement) -> void:
 ## Re-resolve and re-lay out after changes the runtime cannot see — e.g.
 ## code mutating a Label's text directly.
 func refresh() -> void:
+	if _v2 != null:
+		_v2.refresh()
+		return
 	_full_apply = true
 	_force_layout = true
 	_scan_all = true  # also picks up direct edits of UxmlElement.attributes
@@ -4602,6 +4705,9 @@ func set_imgui_handler(element_name: String, draw: Callable, input: Callable = C
 ## not re-applied unless their computed style actually changed. Coalesced
 ## with other pending restyles like every other mutation.
 func relayout() -> void:
+	if _v2 != null:
+		_v2.queue()
+		return
 	_force_layout = true
 	_queue_restyle()
 

@@ -53,6 +53,9 @@ func _initialize() -> void:
 	for i in args.size():
 		if args[i] == "--out" and i + 1 < args.size():
 			_out = args[i + 1]
+		elif args[i] == "--runtime" and i + 1 < args.size():
+			# Runtime v2 for the cases it covers (UxmlDocument.runtime).
+			UxmlDocument.default_runtime = int(args[i + 1])
 		elif args[i] == "--scaled":
 			_scaled = true
 		elif args[i] == "--only" and i + 1 < args.size():
@@ -377,8 +380,7 @@ func _load(doc: UxmlDocument, uxml: String, uxml_path: String, root: String, uss
 	doc._effective_root = root
 	UxmlTheme.attach(doc._doc, doc.theme_path, doc.editor_theme, doc.editor_skin)
 	doc._update_scale()
-	doc._index()
-	doc._restyle_now()
+	doc._start_runtime()
 
 
 ## A CurveField's or GradientField's `set-value` ([[time, value], ...] or
@@ -421,7 +423,15 @@ func _save_rects(doc: UxmlDocument, file: String) -> void:
 	var origin := doc.get_global_transform()
 	# A scaled panel: rects in pixels of the document (the root box's scale).
 	var k := doc.get_pixels_per_point()
-	for p in ours:
+	if doc.get_runtime() == 2:
+		for p in ours:
+			var r := doc.get_element_rect(ours[p])
+			if r != Rect2() and doc._v2.rt.call("is_shown", doc._v2.index_of(ours[p])):
+				out[p] = [r.position.x, r.position.y, r.size.x, r.size.y]
+		out["__runtime"] = 2
+	elif UxmlDocument.default_runtime == 2:
+		out["__fallback"] = doc.runtime_fallback
+	for p in ([] if doc.get_runtime() == 2 else ours):
 		var c = doc._controls.get(ours[p])
 		if not (c is Control) or not (c as Control).is_visible_in_tree():
 			continue
@@ -568,6 +578,9 @@ func _set_attr(e: UxmlElement, k: String, v: String) -> void:
 ## (their shaping and size stay), inputs and buttons get transparent font,
 ## outline, caret and selection colours.
 func _hide_text(n: Node) -> void:
+	if n is UxmlDocument and n.get_runtime() == 2:
+		n._v2.rt.call("set_text_hidden", true)
+		n._v2.rt.call("draw")
 	for ch in n.get_children(true):
 		_hide_text(ch)
 	if n is Label:

@@ -340,6 +340,8 @@ func _write(path: String, text: String) -> void:
 func _write_fixtures() -> void:
 	var ui := BENCH_ROOT + "/Assets/UI/"
 	_write(ui + "big.uxml", _big_uxml())
+	_write(ui + "big-static.uxml", _big_static_uxml())
+	_write(ui + "static.uss", _static_uss())
 	_write(ui + "base.uss", _base_uss())
 	_write(ui + "components.uss", _components_uss())
 	_write(ui + "theme.uss", _theme_uss())
@@ -401,6 +403,86 @@ func _big_uxml() -> String:
 	o.append('  </ui:VisualElement>')
 	o.append('</ui:UXML>')
 	return "\n".join(o)
+
+
+## The big document with its controls drawn as static elements (runtime v2
+## phase 1 draws VisualElement, Label and Image): the same structure, the
+## same classes and about as many elements; Buttons are styled Labels, the
+## ScrollView a clipping box, a Toggle a box with a check, a Slider a track
+## with a dragger, a TextField a label and an input box.
+func _big_static_uxml() -> String:
+	var o := PackedStringArray()
+	o.append('<ui:UXML xmlns:ui="UnityEngine.UIElements">')
+	o.append('  <Style src="base.uss" />')
+	o.append('  <Style src="static.uss" />')
+	o.append('  <ui:VisualElement name="screen" class="screen col">')
+	o.append('    <ui:VisualElement name="header" class="header row">')
+	o.append('      <ui:Label name="title" class="title h1" text="Benchmark" />')
+	o.append('      <ui:VisualElement class="spacer" />')
+	for i in 5:
+		o.append('      <ui:Label name="nav-%d" class="btn nav" text="Nav %d" />' % [i, i])
+	o.append('    </ui:VisualElement>')
+	o.append('    <ui:VisualElement name="body" class="body row">')
+	o.append('      <ui:VisualElement name="sidebar" class="sidebar col">')
+	o.append('        <ui:VisualElement name="list" class="list scroll">')
+	for i in LIST_ITEMS:
+		o.append('          <ui:VisualElement name="item-%d" class="list-item row%s">' % [i, " list-item--odd" if i % 2 == 1 else ""])
+		o.append('            <ui:VisualElement class="icon" />')
+		o.append('            <ui:Label class="list-label" text="Item %d" />' % i)
+		o.append('            <ui:VisualElement class="list-toggle toggle%s"><ui:VisualElement class="toggle-check" /></ui:VisualElement>' % (" toggle--on" if i % 3 == 0 else ""))
+		o.append('          </ui:VisualElement>')
+	o.append('        </ui:VisualElement>')
+	o.append('      </ui:VisualElement>')
+	o.append('      <ui:VisualElement name="content" class="content col">')
+	o.append('        <ui:VisualElement name="grid" class="grid row wrap">')
+	for i in CARDS:
+		var extra := ""
+		if i % 7 == 3:
+			extra = " card--alt"
+		var inline := ' style="margin-left: %dpx;"' % (i % 5) if i % 9 == 0 else ""
+		o.append('          <ui:VisualElement name="card-%d" class="card%s"%s>' % [i, extra, inline])
+		o.append('            <ui:VisualElement class="card-header row">')
+		o.append('              <ui:Label class="card-title title" text="Card %d" />' % i)
+		o.append('              <ui:Label class="badge" text="new" />')
+		o.append('            </ui:VisualElement>')
+		o.append('            <ui:Label name="card-%d-body" class="card-body body-text" text="Body text for card %d with a few words" />' % [i, i])
+		o.append('            <ui:VisualElement class="card-actions row">')
+		o.append('              <ui:Label name="card-%d-ok" class="btn btn-primary" text="OK" />' % i)
+		o.append('              <ui:Label class="btn" text="Cancel" />')
+		o.append('            </ui:VisualElement>')
+		if i % 4 == 0:
+			o.append('            <ui:VisualElement class="card-slider slider"><ui:VisualElement class="slider-track"><ui:VisualElement class="slider-dragger" style="left: %d%%;" /></ui:VisualElement></ui:VisualElement>' % ((i % 10) * 10))
+		if i % 5 == 0:
+			o.append('            <ui:VisualElement class="card-field field row"><ui:Label class="field-label" text="Name" /><ui:VisualElement class="field-input"><ui:Label class="field-text" text="card %d" /></ui:VisualElement></ui:VisualElement>' % i)
+		o.append('          </ui:VisualElement>')
+	o.append('        </ui:VisualElement>')
+	o.append('      </ui:VisualElement>')
+	o.append('    </ui:VisualElement>')
+	o.append('    <ui:VisualElement name="footer" class="footer row">')
+	for i in 6:
+		o.append('      <ui:Label class="footer-label" text="Status %d" />' % i)
+	o.append('    </ui:VisualElement>')
+	o.append('  </ui:VisualElement>')
+	o.append('</ui:UXML>')
+	return "\n".join(o)
+
+
+func _static_uss() -> String:
+	return """
+.btn { color: var(--text); background-color: #3c3c3c; border-radius: var(--radius); padding: 2px 6px; -unity-text-align: middle-center; }
+.btn.btn-primary { background-color: var(--accent); color: white; }
+.scroll { overflow: hidden; }
+.toggle { width: 16px; height: 16px; border-width: 1px; border-color: #666; border-radius: 2px; background-color: #1e1e1e; padding: 3px; }
+.toggle-check { flex-grow: 1; border-radius: 1px; }
+.toggle--on > .toggle-check { background-color: var(--accent); }
+.slider { height: 18px; justify-content: center; }
+.slider-track { height: 4px; background-color: #555; border-radius: 2px; }
+.slider-dragger { position: absolute; top: -5px; width: 10px; height: 14px; margin-left: -5px; background-color: #aaa; border-radius: 3px; }
+.field { align-items: center; }
+.field-label { width: 60px; }
+.field-input { flex-grow: 1; height: 20px; border-width: 1px; border-color: #555; background-color: #1a1a1a; padding: 0 4px; justify-content: center; }
+.field-text { margin: 0; padding: 0; }
+"""
 
 
 func _base_uss() -> String:

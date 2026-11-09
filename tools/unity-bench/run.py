@@ -19,7 +19,9 @@ Steps:
  5. Summary: per op and arm, the median of all samples and the range of the
     round medians. out/summary.md, out/summary.json.
 
-Arms: godot-release (release template + native core), godot-editor (the
+Arms: godot-release (release template + native core), godot-release-v2 (the
+same export with --runtime=2: documents that runtime v2 covers load on it,
+the others on runtime v1), godot-editor (the
 editor binary, the harness of the earlier figures), unity-il2cpp,
 unity-mono. Every window is 640x400 in the bottom-right corner of the work
 area and does not take focus; each process exits at the end of its run, and
@@ -40,7 +42,7 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 DEFAULT_UNITY = r"C:/Program Files/Unity/Hub/Editor/6000.3.24f1/Editor/Unity.exe"
 DEFAULT_GODOT = r"B:/dev/games/godot-builds/Godot_v4.7.1-stable_win64_console.exe"
 WIN_W, WIN_H = 640, 400
-ARMS = ["godot-release", "unity-il2cpp", "godot-editor", "unity-mono"]
+ARMS = ["godot-release", "unity-il2cpp", "godot-release-v2", "godot-editor", "unity-mono"]
 
 
 def corner():
@@ -128,6 +130,9 @@ def arm_cmd(arm, args, out_json):
     user = ["--", "--iters=%d" % args.iters, "--out=" + out_json]
     if arm == "godot-release":
         return [os.path.join(HERE, "Builds", "godot-release", "GodotBench.exe")] + pos + user
+    if arm == "godot-release-v2":
+        # The same export; documents that runtime v2 covers load on it.
+        return [os.path.join(HERE, "Builds", "godot-release", "GodotBench.exe")] + pos + user + ["--runtime=2"]
     if arm == "godot-editor":
         return [args.godot, "--path", REPO] + pos + ["-s", "res://bench/unity_compare.gd"] + user
     backend = arm.split("-")[1]
@@ -199,7 +204,7 @@ def main():
             if "unity-" + backend in arms:
                 print("building Unity player (%s)..." % backend, flush=True)
                 build_unity(args.unity, backend)
-        if "godot-release" in arms:
+        if "godot-release" in arms or "godot-release-v2" in arms:
             print("exporting Godot release build...", flush=True)
             export_godot(args.godot)
     failures = []

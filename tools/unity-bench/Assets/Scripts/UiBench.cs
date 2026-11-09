@@ -88,6 +88,7 @@ public class UiBench : MonoBehaviour
         for (int k = 0; k < 10; k++) yield return null;
 
         yield return Big();
+        yield return BigStatic();
         yield return Hud();
         yield return Settings();
         yield return Inventory();
@@ -304,8 +305,36 @@ public class UiBench : MonoBehaviour
         FreeHost(d);
     }
 
+    // The big document with static elements in place of its controls
+    // (bench.gd _big_static_uxml).
+    IEnumerator BigStatic()
+    {
+        yield return TimeLoad("big-static: load", "big-static", 1280, 800, Math.Max(10, iters / 4));
+        var vta = Asset("big-static");
+        var fs = new List<double>();
+        for (int i = 0; i < Math.Max(10, iters / 4) + 2; i++)
+        {
+            long t0 = Stopwatch.GetTimestamp();
+            var f = NewHost(1280, 800);
+            vta.CloneTree(f);
+            yield return new WaitForEndOfFrame();
+            long t1 = Stopwatch.GetTimestamp();
+            if (i >= 2) fs.Add(Ms(t1 - t0));
+            FreeHost(f);
+            yield return null;
+        }
+        Record("big-static: load + first frame", fs);
+        var d = Load("big-static", 1280, 800);
+        for (int k = 0; k < 3; k++) yield return null;
+        Note("big-static: " + Count(d) + " visual elements");
+        Check("card-0", Q(d, "card-0"));
+        Check("card-149", Q(d, "card-149"));
+        FreeHost(d);
+    }
+
     IEnumerator Hud()
     {
+        yield return TimeLoad("hud: load", "hud", 640, 360, iters);
         var d = Load("hud", 640, 360);
         for (int k = 0; k < 3; k++) yield return null;
         var labels = new Label[8];
