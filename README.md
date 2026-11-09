@@ -184,6 +184,28 @@ doc.set_list_source("items", items.size(), func(row: UxmlListRow, i: int):
     row.get_native("title").text = items[i].name)
 ```
 
+Scale the UI with the screen as Unity's PanelSettings does (the formulas
+are Unity 6000.3's, checked against Unity on 1032 settings and screens):
+
+```gdscript
+var ps := UxmlPanelSettings.new()
+ps.scale_mode = UxmlPanelSettings.ScaleMode.SCALE_WITH_SCREEN_SIZE
+ps.reference_resolution = Vector2i(1920, 1080)
+ps.match_width_or_height = 0.5
+doc.panel_settings = ps
+# or the asset Unity wrote (its .tss theme comes along):
+doc.panel_settings_asset = "res://ui/PanelSettings.asset"
+
+doc.get_pixels_per_point()   # 1.33 on a 2560x1440 document
+doc.get_panel_size()         # (1920, 1080) points
+```
+
+The layout runs in points and rounds on the screen's pixel grid; text,
+borders and images draw at device resolution. `element_at()` and
+`get_element_rect()` take and give the document Control's pixels (panel
+points with the root element as `space`). With Godot's `canvas_items`
+stretch the two scales multiply (docs/design.md, "Panel scaling").
+
 Run the example:
 
 ```
@@ -239,6 +261,10 @@ attribute, every USS property, templates, transitions, data binding and
 the editor controls. [docs/unity-coverage.md](docs/unity-coverage.md)
 gives the status of each item. A summary:
 
+- **Panel scaling:** Unity's `PanelSettings` (constant pixel size,
+  constant physical size, scale with screen size and its match modes),
+  from a resource or a Unity `.asset` with its `.tss` theme; geometry
+  equal to Unity at 19 scales from 0.56 to 2 pixels per point.
 - **Templates, transitions and data binding:** `<Template>`/`<Instance>`
   with attribute overrides and slots, USS `transition-*`, `<Bindings>`
   and `binding-path`, two-way for value controls.

@@ -134,6 +134,17 @@ public static class UxmlDump
         public string editor = "";
         public string bind = "";
         public List<Dictionary<string, object>> actions = new List<Dictionary<string, object>>();
+        // Panel scaling (bench/parity/scaled): PanelSettings fields
+        // ("scaleMode", "scale", "referenceResolution" [w, h],
+        // "screenMatchMode", "match", "referenceDpi", "fallbackDpi"), the
+        // render texture ("screen" [w, h], the screen the scale is resolved
+        // for) and "fill" (the case host fills the panel root instead of the
+        // fixed case size, in points). Without "panel": constant pixel size,
+        // scale 1, a texture of the case size.
+        public Dictionary<string, object> panel = null;
+        public int screenW = 0;
+        public int screenH = 0;
+        public bool fill = false;
     }
 
     static Sidecar ReadSidecar(string path)
@@ -146,6 +157,13 @@ public static class UxmlDump
         if (obj.TryGetValue("height", out var h)) sc.height = Convert.ToInt32(h, CultureInfo.InvariantCulture);
         if (obj.TryGetValue("editor", out var ed)) sc.editor = Convert.ToString(ed, CultureInfo.InvariantCulture);
         if (obj.TryGetValue("bind", out var bd)) sc.bind = Convert.ToString(bd, CultureInfo.InvariantCulture);
+        if (obj.TryGetValue("panel", out var pn) && pn is Dictionary<string, object> pd) sc.panel = pd;
+        if (obj.TryGetValue("screen", out var scr) && scr is List<object> sl && sl.Count == 2)
+        {
+            sc.screenW = Convert.ToInt32(sl[0], CultureInfo.InvariantCulture);
+            sc.screenH = Convert.ToInt32(sl[1], CultureInfo.InvariantCulture);
+        }
+        if (obj.TryGetValue("fill", out var fl)) sc.fill = Convert.ToBoolean(fl, CultureInfo.InvariantCulture);
         if (obj.TryGetValue("actions", out var a) && a is List<object> list)
             foreach (var x in list)
                 if (x is Dictionary<string, object> d) sc.actions.Add(d);
@@ -216,6 +234,7 @@ public static class UxmlDump
             IPanel panel;
             string themeName;
             RenderTexture renderTarget = null;
+            PanelSettings caseSettings = null;
             if (sc.editor.Length > 0)
             {
                 // An editor panel (EditorPanel.FindOrCreate, as a GUIView
@@ -246,17 +265,21 @@ public static class UxmlDump
                 var theme = AssetDatabase.LoadAssetAtPath<ThemeStyleSheet>(ThemePath);
                 if (theme == null) throw new Exception("no default runtime theme at " + ThemePath);
                 // Depth and stencil: a rounded overflow clip draws a stencil mask.
-                var rt = new RenderTexture(sc.width, sc.height, 24);
+                int texW = sc.screenW > 0 ? sc.screenW : sc.width;
+                int texH = sc.screenH > 0 ? sc.screenH : sc.height;
+                var rt = new RenderTexture(texW, texH, 24);
                 var ps = ScriptableObject.CreateInstance<PanelSettings>();
                 ps.themeStyleSheet = theme;
                 ps.scaleMode = PanelScaleMode.ConstantPixelSize;
                 ps.scale = 1f;
                 ps.referenceDpi = 96f;
                 ps.fallbackDpi = 96f;
+                if (sc.panel != null) ApplySettings(ps, sc.panel);
                 ps.targetTexture = rt;
                 ps.clearColor = true;
                 ps.colorClearValue = RenderClear;
                 renderTarget = rt;
+                caseSettings = ps;
                 var go = new GameObject("uxml-dump");
                 cleanup.Add(() => UnityEngine.Object.DestroyImmediate(go));
                 cleanup.Add(() => UnityEngine.Object.DestroyImmediate(ps));
@@ -276,8 +299,16 @@ public static class UxmlDump
             host.style.position = Position.Absolute;
             host.style.left = 0;
             host.style.top = 0;
-            host.style.width = sc.width;
-            host.style.height = sc.height;
+            if (sc.fill)
+            {
+                host.style.width = Length.Percent(100);
+                host.style.height = Length.Percent(100);
+            }
+            else
+            {
+                host.style.width = sc.width;
+                host.style.height = sc.height;
+            }
             docRoot.Add(host);
             InstallClock(panel, cleanup);
             vta.CloneTree(host);
@@ -303,7 +334,10 @@ public static class UxmlDump
             w.BeginObject();
             w.Key("case"); w.Value(name);
             w.Key("metadata"); WriteMetadata(w, panel, themeName);
-            w.Key("panel"); w.BeginObject(); w.Key("width"); w.Value(sc.width); w.Key("height"); w.Value(sc.height); w.EndObject();
+            // The case host's size in points (the panel size of the case).
+            var hostSize = host.layout.size;
+            w.Key("panel"); w.BeginObject(); w.Key("width"); w.Value(sc.fill ? hostSize.x : sc.width); w.Key("height"); w.Value(sc.fill ? hostSize.y : sc.height); w.EndObject();
+            if (sc.panel != null) { w.Key("scaling"); WriteScaling(w, panel, sc, renderTarget, caseSettings); }
             if (sc.editor.Length > 0) { w.Key("editor"); w.Value(sc.editor); }
             w.Key("actions"); w.BeginArray(); foreach (var l in log) w.Value(l); w.EndArray();
             // Pseudo-states of the case host and of its ancestors (:root).
@@ -418,8 +452,20 @@ public static class UxmlDump
                 GL.PopMatrix();
             }
             RenderTexture.active = rt;
-            var tex = new Texture2D(sc.width, sc.height, TextureFormat.RGBA32, false, false);
-            tex.ReadPixels(new Rect(0, 0, sc.width, sc.height), 0, 0, false);
+            // A scaled case: the host's pixels (its size in points times
+            // pixelsPerPoint, rounded up, inside the texture).
+            int outW = sc.width, outH = sc.height;
+            if (sc.panel != null)
+            {
+                float ppp = PixelsPerPoint(panel);
+                var hs = host.layout.size;
+                outW = Math.Min(rt.width, (int)Math.Ceiling(hs.x * ppp - 0.01));
+                outH = Math.Min(rt.height, (int)Math.Ceiling(hs.y * ppp - 0.01));
+            }
+            var tex = new Texture2D(outW, outH, TextureFormat.RGBA32, false, false);
+            // ReadPixels counts rows from the bottom of the target: the
+            // host's pixels are the top rows.
+            tex.ReadPixels(new Rect(0, rt.height - outH, outW, outH), 0, 0, false);
             tex.Apply();
             File.WriteAllBytes(path, tex.EncodeToPNG());
             UnityEngine.Object.DestroyImmediate(tex);
@@ -480,6 +526,154 @@ public static class UxmlDump
             var u = panel.GetType().GetMethod("UpdateForRepaint", Any, null, Type.EmptyTypes, null);
             if (u != null) { try { u.Invoke(panel, null); } catch { } }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Panel scaling
+
+    static float F(object v) { return Convert.ToSingle(v, CultureInfo.InvariantCulture); }
+
+    // PanelSettings fields from a sidecar or probe row (enum names as in C#).
+    static void ApplySettings(PanelSettings ps, Dictionary<string, object> p)
+    {
+        if (p.TryGetValue("scaleMode", out var m)) ps.scaleMode = (PanelScaleMode)Enum.Parse(typeof(PanelScaleMode), Convert.ToString(m, CultureInfo.InvariantCulture));
+        if (p.TryGetValue("scale", out var s)) ps.scale = F(s);
+        if (p.TryGetValue("referenceResolution", out var r) && r is List<object> rl && rl.Count == 2)
+            ps.referenceResolution = new Vector2Int(Convert.ToInt32(rl[0], CultureInfo.InvariantCulture), Convert.ToInt32(rl[1], CultureInfo.InvariantCulture));
+        if (p.TryGetValue("screenMatchMode", out var sm)) ps.screenMatchMode = (PanelScreenMatchMode)Enum.Parse(typeof(PanelScreenMatchMode), Convert.ToString(sm, CultureInfo.InvariantCulture));
+        if (p.TryGetValue("match", out var mt)) ps.match = F(mt);
+        if (p.TryGetValue("referenceDpi", out var rd)) ps.referenceDpi = F(rd);
+        if (p.TryGetValue("fallbackDpi", out var fd)) ps.fallbackDpi = F(fd);
+    }
+
+    static float PixelsPerPoint(IPanel panel)
+    {
+        var ppp = panel.GetType().GetProperty("scaledPixelsPerPoint", Any);
+        return ppp != null ? Convert.ToSingle(ppp.GetValue(panel), CultureInfo.InvariantCulture) : 1f;
+    }
+
+    static void WriteSettings(JsonWriter w, PanelSettings ps)
+    {
+        w.BeginObject();
+        w.Key("scaleMode"); w.Value(ps.scaleMode.ToString());
+        w.Key("scale"); w.Value(ps.scale);
+        w.Key("referenceResolution"); w.BeginArray(); w.Value(ps.referenceResolution.x); w.Value(ps.referenceResolution.y); w.EndArray();
+        w.Key("screenMatchMode"); w.Value(ps.screenMatchMode.ToString());
+        w.Key("match"); w.Value(ps.match);
+        w.Key("referenceDpi"); w.Value(ps.referenceDpi);
+        w.Key("fallbackDpi"); w.Value(ps.fallbackDpi);
+        w.EndObject();
+    }
+
+    // What the panel resolved: the settings as Unity holds them, the screen
+    // (texture) size, Screen.dpi, pixelsPerPoint (the panel's
+    // scaledPixelsPerPoint), PanelSettings.m_ResolvedScale (points per
+    // pixel) and the size of the panel root in points.
+    static void WriteResolved(JsonWriter w, IPanel panel, PanelSettings ps, int texW, int texH)
+    {
+        w.BeginObject();
+        w.Key("settings"); WriteSettings(w, ps);
+        w.Key("screen"); w.BeginArray(); w.Value(texW); w.Value(texH); w.EndArray();
+        w.Key("screenDpi"); w.Exact(Screen.dpi);
+        w.Key("pixelsPerPoint"); w.Exact(PixelsPerPoint(panel));
+        var rs = typeof(PanelSettings).GetField("m_ResolvedScale", Any);
+        w.Key("resolvedScale"); if (rs != null) w.Exact(Convert.ToSingle(rs.GetValue(ps), CultureInfo.InvariantCulture)); else w.Null();
+        var root = panel.visualTree.layout;
+        w.Key("root"); w.BeginObject(); w.Key("width"); w.Exact(root.width); w.Key("height"); w.Exact(root.height); w.EndObject();
+        w.EndObject();
+    }
+
+    static void WriteScaling(JsonWriter w, IPanel panel, Sidecar sc, RenderTexture rt, PanelSettings ps)
+    {
+        WriteResolved(w, panel, ps, rt != null ? rt.width : sc.width, rt != null ? rt.height : sc.height);
+    }
+
+    // -probeIn <json> -probeOut <json>: how a runtime panel resolves its
+    // scale. Input {"rows": [{"panel": {...settings}, "screen": [w, h]}],
+    // "assets": [{"name": "X", "panel": {...}, "theme": "<tss text>"}]};
+    // every row gets the panel's resolved values (WriteResolved). Each
+    // asset is saved as Assets/Fixtures/<name>.asset (with its theme
+    // Assets/Fixtures/<name>.tss when given) through the AssetDatabase, and
+    // copied with its .meta files to -fixtureOut, so the importer of
+    // godot-uxml reads files that Unity wrote.
+    public static void ScaleProbe()
+    {
+        int exit = 0;
+        try
+        {
+            var input = MiniJson.Parse(File.ReadAllText(Arg("-probeIn", ""))) as Dictionary<string, object>;
+            var theme = AssetDatabase.LoadAssetAtPath<ThemeStyleSheet>(ThemePath);
+            var w = new JsonWriter();
+            w.BeginObject();
+            w.Key("unityVersion"); w.Value(Application.unityVersion);
+            w.Key("screenDpi"); w.Value(Screen.dpi);
+            w.Key("rows"); w.BeginArray();
+            foreach (var o in (List<object>)input["rows"])
+            {
+                var row = (Dictionary<string, object>)o;
+                var scr = (List<object>)row["screen"];
+                int tw = Convert.ToInt32(scr[0], CultureInfo.InvariantCulture), th = Convert.ToInt32(scr[1], CultureInfo.InvariantCulture);
+                var rt = new RenderTexture(tw, th, 0);
+                var ps = ScriptableObject.CreateInstance<PanelSettings>();
+                ps.themeStyleSheet = theme;
+                ps.targetTexture = rt;
+                ApplySettings(ps, (Dictionary<string, object>)row["panel"]);
+                var go = new GameObject("uxml-scale-probe");
+                try
+                {
+                    var docu = go.AddComponent<UIDocument>();
+                    docu.panelSettings = ps;
+                    var panel = docu.rootVisualElement.panel;
+                    Validate(panel);
+                    WriteResolved(w, panel, ps, tw, th);
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(go);
+                    UnityEngine.Object.DestroyImmediate(ps);
+                    rt.Release();
+                    UnityEngine.Object.DestroyImmediate(rt);
+                }
+            }
+            w.EndArray();
+            w.EndObject();
+            File.WriteAllText(Arg("-probeOut", "scale-probe.json"), w.ToString() + "\n", new UTF8Encoding(false));
+            Debug.Log("[uxml-dump] wrote scale probe");
+            string fixtureOut = Arg("-fixtureOut", "");
+            if (input.TryGetValue("assets", out var assets) && fixtureOut.Length > 0)
+            {
+                Directory.CreateDirectory("Assets/Fixtures");
+                Directory.CreateDirectory(fixtureOut);
+                foreach (var o in (List<object>)assets)
+                {
+                    var a = (Dictionary<string, object>)o;
+                    string name = Convert.ToString(a["name"], CultureInfo.InvariantCulture);
+                    string ap = "Assets/Fixtures/" + name + ".asset";
+                    AssetDatabase.DeleteAsset(ap);
+                    var ps = ScriptableObject.CreateInstance<PanelSettings>();
+                    ApplySettings(ps, (Dictionary<string, object>)a["panel"]);
+                    if (a.TryGetValue("theme", out var tt))
+                    {
+                        string tp = "Assets/Fixtures/" + name + ".tss";
+                        File.WriteAllText(tp, Convert.ToString(tt, CultureInfo.InvariantCulture), new UTF8Encoding(false));
+                        AssetDatabase.ImportAsset(tp, ImportAssetOptions.ForceSynchronousImport);
+                        ps.themeStyleSheet = AssetDatabase.LoadAssetAtPath<ThemeStyleSheet>(tp);
+                        if (ps.themeStyleSheet == null) throw new Exception("no theme at " + tp);
+                    }
+                    AssetDatabase.CreateAsset(ps, ap);
+                    AssetDatabase.SaveAssets();
+                    foreach (var f in new[] { ap, ap + ".meta", "Assets/Fixtures/" + name + ".tss", "Assets/Fixtures/" + name + ".tss.meta" })
+                        if (File.Exists(f)) File.Copy(f, Path.Combine(fixtureOut, Path.GetFileName(f)), true);
+                    Debug.Log("[uxml-dump] wrote fixture " + name);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            exit = 2;
+            Debug.LogError("[uxml-dump] " + e);
+        }
+        EditorApplication.Exit(exit);
     }
 
     static void WriteMetadata(JsonWriter w, IPanel panel, string theme)
@@ -1182,6 +1376,8 @@ public static class UxmlDump
         public void Null() { Sep(); sb.Append("null"); }
         public void Value(bool b) { Sep(); sb.Append(b ? "true" : "false"); }
         public void Value(int i) { Sep(); sb.Append(i.ToString(CultureInfo.InvariantCulture)); }
+        // A float as the exact double it is (no rounding): the scale probe.
+        public void Exact(float f) { Sep(); sb.Append(((double)f).ToString("R", CultureInfo.InvariantCulture)); }
         public void Value(double d)
         {
             Sep();

@@ -71,6 +71,17 @@ static func attach(doc: UxmlDocumentModel, path: String, editor_theme: String = 
 		editor_skin: String = "dark") -> void:
 	if doc == null:
 		return
+	if path.get_extension().to_lower() == "tss":
+		# A Unity theme style sheet: its `@import url("unity-theme://default")`
+		# is the default theme; its other imports and its own rules are
+		# theme sheets after it, in their order.
+		var t := tss_parts(path)
+		attach(doc, DEFAULT if bool(t[0]) else "", editor_theme, editor_skin)
+		for sp in t[1]:
+			_attach_sheet(doc, sp, _theme_roots(doc))
+		for w in t[2]:
+			doc.warnings.append(w)
+		return
 	var want_editor := path == DEFAULT and editor_theme == "auto"
 	var scan := _scan(doc, want_editor)
 	var editor: bool = path == DEFAULT and (editor_theme == "always" or (want_editor and bool(scan[1])))
@@ -85,6 +96,54 @@ static func attach(doc: UxmlDocumentModel, path: String, editor_theme: String = 
 	doc.set_meta(&"uxml_theme_path", path)
 	if bool(scan[0]):
 		_attach_container_sheets(doc)
+
+
+## A Unity theme style sheet (`.tss`): [imports unity-theme://default
+## (bool), the other theme sheets in cascade order (its imports, then the
+## file itself when it has rules), diagnostics]. Imported `.tss` files are
+## read the same way; a cycle stops at the first visit.
+static func tss_parts(path: String, seen: Dictionary = {}) -> Array:
+	var with_default := false
+	var sheets: Array = []
+	var warns: Array = []
+	if seen.has(path):
+		return [false, sheets, warns]
+	seen[path] = true
+	if not FileAccess.file_exists(path):
+		warns.append(UxmlDiagnostic.make("missing-file",
+			'theme style sheet "%s" does not exist; no theme applied' % path, "", 0, path))
+		return [false, sheets, warns]
+	var text := FileAccess.get_file_as_string(path)
+	var parsed := UssParser.new().parse(text, path)
+	var rules := false
+	for item in parsed["items"]:
+		if String(item.get("kind", "")) != "import":
+			rules = true
+			continue
+		var url := String(item.get("url", ""))
+		if url == "unity-theme://default":
+			with_default = true
+			continue
+		var at := url if (url.begins_with("res://") or url.begins_with("user://")) else path.get_base_dir().path_join(url).simplify_path()
+		if at.get_extension().to_lower() == "tss":
+			var sub := tss_parts(at, seen)
+			with_default = with_default or bool(sub[0])
+			sheets.append_array(sub[1])
+			warns.append_array(sub[2])
+		elif FileAccess.file_exists(at):
+			sheets.append(at)
+		else:
+			warns.append(UxmlDiagnostic.make("missing-file",
+				'@import "%s" of theme style sheet "%s" does not exist' % [url, path], "", 0, path))
+	if rules:
+		sheets.append(path)
+	return [with_default, sheets, warns]
+
+
+## True when the document's theme is godot-uxml's default theme (directly or
+## through a `.tss` import of unity-theme://default).
+static func uses_default(doc: UxmlDocumentModel) -> bool:
+	return doc != null and String(doc.get_meta(&"uxml_theme_path", "")) == DEFAULT
 
 
 ## The editor skin of a document with the editor theme ("dark", "light"),

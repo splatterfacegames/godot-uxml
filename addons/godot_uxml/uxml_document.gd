@@ -249,6 +249,59 @@ var _transitions: UssTransitions = null  # running USS transitions (per load)
 ## every layout.
 var pixel_grid := true
 
+## Unity's PanelSettings: how the panel scales with the size of this
+## Control (its "screen", in pixels) — constant pixel size with a scale,
+## constant physical size (the screen DPI) or scale with screen size (a
+## reference resolution). The layout runs in panel points (this Control's
+## size times the resolved scale) and rounds on the pixel grid of the
+## screen; the controls draw at the scale (text, borders, radii, slices
+## and images at device resolution). null (the default): no panel
+## scaling, one point per pixel, the panel the size of this Control. See
+## docs/design.md, "Panel scaling".
+@export var panel_settings: UxmlPanelSettings = null:
+	set(v):
+		if v == panel_settings:
+			return
+		if panel_settings != null and panel_settings.changed.is_connected(_on_panel_settings_changed):
+			panel_settings.changed.disconnect(_on_panel_settings_changed)
+		panel_settings = v
+		if v != null:
+			v.changed.connect(_on_panel_settings_changed)
+		_on_panel_settings_changed()
+
+## A Unity PanelSettings asset (`.asset`): read into panel_settings when set
+## (UxmlPanelSettings.load_unity_asset; its theme style sheet, when found,
+## becomes the panel's theme). A file that is not a PanelSettings asset
+## leaves panel_settings as it was, with a diagnostic.
+@export_file("*.asset") var panel_settings_asset: String = "":
+	set(v):
+		panel_settings_asset = v
+		if v.is_empty():
+			return
+		var ps := UxmlPanelSettings.load_unity_asset(v, project_root)
+		if ps == null:
+			diagnostics.append(UxmlDiagnostic.make("missing-file",
+				'"%s" is not a Unity PanelSettings asset; panel_settings unchanged' % v, "", 0, v))
+			return
+		for w in ps.import_warnings:
+			diagnostics.append(UxmlDiagnostic.make("unsupported-value", w, "", 0, v))
+		panel_settings = ps
+
+## The screen DPI for UxmlPanelSettings.CONSTANT_PHYSICAL_SIZE. 0 (the
+## default): DisplayServer.screen_get_dpi() of this Control's screen, over
+## the scale of the canvas (Godot's stretch), so that a point keeps its
+## physical size.
+@export var screen_dpi: float = 0.0:
+	set(v):
+		screen_dpi = v
+		_on_panel_settings_changed()
+
+var _ppp := 1.0                 # pixels per point of the panel (UxmlPanelScale)
+var _grid_ppp := 1.0            # the pixel grid: _ppp times the device scale
+var _panel_size := Vector2.ZERO # the panel in points (with panel_settings)
+var _scaled := false            # panel_settings in effect
+var _unsnap_vp: Viewport = null # the viewport whose control snapping this document holds off
+
 ## When true, transitions advance only through advance_transitions() —
 ## deterministic time for tests and tools. When false (default) they follow
 ## the frame clock (_process delta).
@@ -339,8 +392,17 @@ func _ready() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED and _v2 != null:
 		_v2.relayout()
-	elif what == NOTIFICATION_RESIZED and _doc != null:
-		_do_layout()
+	elif what == NOTIFICATION_RESIZED:
+		# A scaled panel resolves its scale for the new size; a new pixel
+		# grid applies every control again (see _on_panel_settings_changed).
+		var regrid := panel_settings != null and _update_scale()
+		if _doc != null:
+			if regrid:
+				_full_apply = true
+				_force_layout = true
+				_restyle_now()
+			else:
+				_do_layout()
 	elif what == NOTIFICATION_ENTER_TREE or what == NOTIFICATION_EXIT_TREE:
 		_binding.set_active(what == NOTIFICATION_ENTER_TREE)
 		var vp := get_viewport()
@@ -350,6 +412,17 @@ func _notification(what: int) -> void:
 				vp.gui_focus_changed.connect(cb)
 			elif what == NOTIFICATION_EXIT_TREE and vp.gui_focus_changed.is_connected(cb):
 				vp.gui_focus_changed.disconnect(cb)
+			# Godot's stretch (the viewport's size and scale) changes the
+			# device pixel grid of a scaled panel.
+			var sc := Callable(self, "_on_panel_settings_changed")
+			if what == NOTIFICATION_ENTER_TREE and not vp.size_changed.is_connected(sc):
+				vp.size_changed.connect(sc)
+			elif what == NOTIFICATION_EXIT_TREE and vp.size_changed.is_connected(sc):
+				vp.size_changed.disconnect(sc)
+		if what == NOTIFICATION_ENTER_TREE and panel_settings != null:
+			_on_panel_settings_changed()
+		if what == NOTIFICATION_EXIT_TREE:
+			_hold_unsnap(false)
 	elif what == NOTIFICATION_PREDELETE:
 		if _v2 != null:
 			_v2.dispose()
@@ -405,7 +478,11 @@ func _finish_load(adopt: bool) -> void:
 	_loader_warnings = _doc.warnings.size()
 	if adopt and shared_sheets != null:
 		_adopt_sheets(shared_sheets)
-	UxmlTheme.attach(_doc, theme_path, editor_theme, editor_skin)
+	var theme_sheet := theme_path
+	if panel_settings != null and not panel_settings.theme_style_sheet.is_empty():
+		theme_sheet = panel_settings.theme_style_sheet
+	UxmlTheme.attach(_doc, theme_sheet, editor_theme, editor_skin)
+	_update_scale()
 	if _start_runtime():
 		loaded.emit(true)
 		return
@@ -418,7 +495,9 @@ func _finish_load(adopt: bool) -> void:
 ## runtime v1's controls and their first restyle (false).
 func _start_runtime() -> bool:
 	runtime_fallback = ""
-	if (default_runtime if default_runtime != 0 else runtime) == 2:
+	if (default_runtime if default_runtime != 0 else runtime) == 2 and panel_settings != null:
+		runtime_fallback = "panel settings (scaling)"
+	elif (default_runtime if default_runtime != 0 else runtime) == 2:
 		var g := UxmlRuntimeV2Glue.new(self)
 		var why := g.load()
 		if why.is_empty():
@@ -1376,7 +1455,8 @@ func _restyle_now(only_transitions: bool = false) -> void:
 			_resolver, _doc.path, _doc.source, _rt_warnings
 		)
 		_applier.element_paths = _doc.element_paths
-		_applier.unity_line_metrics = theme_path == UxmlTheme.DEFAULT
+		_applier.unity_line_metrics = UxmlTheme.uses_default(_doc)
+		_applier.set_pixels_per_point(_grid_ppp)
 	var need_layout := _force_layout or _full_apply or _unsettled
 	# Non-empty while the layout would run only to settle the last pass.
 	var settle_layout_only: Array = _settle_ms if _unsettled and not (_force_layout or _full_apply) else []
@@ -2168,6 +2248,9 @@ func _measure_leaf(el: UxmlElement, _style: Dictionary, content_w: float) -> Vec
 			var m: Array = sb.get_meta("uxml_margins")
 			ms.x = maxf(0.0, ms.x - m[0] - m[2])
 			ms.y = maxf(0.0, ms.y - m[1] - m[3])
+	if _grid_ppp != 1.0 and c.has_meta(&"uxml_line_fix"):
+		# Unity's line height on a scaled panel (UxmlStyleApplier.line_fix).
+		ms.y = UxmlStyleApplier.line_fix(c, ms.y)
 	return ms
 
 
@@ -2230,6 +2313,7 @@ func _volatile_width(el: UxmlElement) -> float:
 func _compute_layout(host: Vector2) -> Dictionary:
 	if _cascade != null and _cascade._native != null and use_native_layout:
 		_cascade._native.call("set_pixel_grid", pixel_grid)
+		_cascade._native.call("set_pixels_per_point", _grid_ppp)
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var r: Array = _cascade._native.call(
@@ -2251,7 +2335,8 @@ func _layout_options() -> Dictionary:
 		 # (the volatile set); every other measure is hint-independent.
 		 "hint_free": true,
 		 "text_controls": _text_controls(),
-		 "pixel_grid": pixel_grid}
+		 "pixel_grid": pixel_grid,
+		 "pixels_per_point": _grid_ppp}
 
 
 ## Elements with children whose control draws text (Label, RichTextLabel,
@@ -2293,6 +2378,7 @@ func _do_layout() -> void:
 	if _native_layout():
 		# Native layout + placement; results stay native.
 		_cascade._native.call("set_pixel_grid", pixel_grid)
+		_cascade._native.call("set_pixels_per_point", _grid_ppp)
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var force := PackedInt32Array()
@@ -2301,7 +2387,7 @@ func _do_layout() -> void:
 			force.append(cidx[el])
 		_cascade._native.call("set_natural_epoch", UxmlBox.natural_epoch)
 		var r: Array = _cascade._native.call(
-			"layout_place", size, 0.0, _layout_warned, _rt_warnings,
+			"layout_place", _layout_host(), 0.0, _layout_warned, _rt_warnings,
 			_applier, force, _placed_force.size() == _controls.size())
 		_unsettled = _pending_fresh or bool(r[0])
 		_pending_fresh = false
@@ -2318,7 +2404,7 @@ func _do_layout() -> void:
 			_settle_skip = false
 		return
 	var prev := _rects
-	var res := _compute_layout(size)
+	var res := _compute_layout(_layout_host())
 	_rects = res["rects"]
 	_insets = res["insets"]
 	_raw_rects = res["raw"]
@@ -2512,6 +2598,7 @@ func _do_local_layout(local: Dictionary, applied: Array) -> void:
 	var placed: Array = []
 	if _native_layout():
 		_cascade._native.call("set_pixel_grid", pixel_grid)
+		_cascade._native.call("set_pixels_per_point", _grid_ppp)
 		_cascade._native.call("set_text_clip", _applier != null and _applier.clip_texts > 0)
 		_cascade._native.call("set_auto_size", _applier if _applier != null and _applier.auto_sizes > 0 else null)
 		var idx := PackedInt32Array()
@@ -2617,6 +2704,12 @@ func _place_control(el: UxmlElement) -> void:
 		UxmlStyleApplier.autosize_place(c, cs)
 	c.position = r.position
 	c.size = r.size
+	if c is Label and c.autowrap_mode != TextServer.AUTOWRAP_OFF and c.size.y > r.size.y + 0.01:
+		# A wrapping Label in a box shorter than its lines: Godot floors it at
+		# the minimum size it had at a width a measure gave it; the minimum
+		# at the placed width (the native placement does the same).
+		c.update_minimum_size()
+		c.size = r.size
 	if _applier != null and c is Label and c.size.x > r.size.x + 0.01:
 		# Narrower than its text (UxmlStyleApplier.fit_label_width; the
 		# native placement does the same).
@@ -2994,6 +3087,146 @@ func set_element_state_for(element: UxmlElement, state: String, on: bool) -> voi
 ## as in Unity. Without `include_parts`, a hit on a control part gives the
 ## control element that owns the part (the authored element). A pending
 ## restyle and layout run first.
+# ---------------------------------------------------------------------------
+# Panel scaling (panel_settings)
+# ---------------------------------------------------------------------------
+
+## The pixels per point of the panel (Unity's scaledPixelsPerPoint): 1
+## without panel_settings. A point of the layout is this many pixels of this
+## Control.
+func get_pixels_per_point() -> float:
+	return _ppp
+
+
+## The size of the panel in points: the size the layout lays the root out
+## at (this Control's size without panel_settings).
+func get_panel_size() -> Vector2:
+	return _layout_host()
+
+
+## A point of the panel (points, the coordinates of the root element, Unity's
+## panel space) in this Control's coordinates (pixels; element_at(),
+## get_element_rect() with no space).
+func panel_to_document(point: Vector2) -> Vector2:
+	return _root_box.position + point * _root_box.scale
+
+
+## A point of this Control (pixels) in panel points.
+func document_to_panel(point: Vector2) -> Vector2:
+	var s := _root_box.scale
+	return (point - _root_box.position) / Vector2(maxf(s.x, 1e-9), maxf(s.y, 1e-9))
+
+
+## The host size of the layout: the panel in points.
+func _layout_host() -> Vector2:
+	return _panel_size if _scaled else size
+
+
+## Device pixels per unit of this Control: Godot's stretch and the scales of
+## the canvas above it (1 in a plain window).
+func _device_scale() -> float:
+	if not is_inside_tree():
+		return 1.0
+	var t := get_viewport().get_final_transform() * get_global_transform_with_canvas()
+	var sc := t.get_scale()
+	var v := maxf(absf(sc.x), absf(sc.y))
+	return v if v > 0.0 else 1.0
+
+
+func _screen_dpi() -> float:
+	if not is_inside_tree() or DisplayServer.get_name() == "headless":
+		return 0.0
+	var w := get_window()
+	var screen := w.current_screen if w != null else DisplayServer.SCREEN_OF_MAIN_WINDOW
+	return float(DisplayServer.screen_get_dpi(screen))
+
+
+func _on_panel_settings_changed() -> void:
+	var old := _layout_host()
+	if not _update_scale() or _doc == null:
+		if _doc != null and _scaled and _layout_host() != old:
+			_do_layout()
+		return
+	# A new pixel grid: every box is built again (border widths, the
+	# antialiased edges) and the layout runs without the cross-pass cache
+	# (its box lengths were rounded on the old grid).
+	_full_apply = true
+	_force_layout = true
+	_queue_restyle()
+
+
+## Resolves the panel scale for this Control's size; places the root box
+## (scaled by the pixels per point) and gives the grid to the applier and
+## the layout. Returns true when the pixel grid changed.
+func _update_scale() -> bool:
+	var old_grid := _grid_ppp
+	var ps := panel_settings
+	if ps == null:
+		_ppp = 1.0
+		_grid_ppp = 1.0
+		_scaled = false
+		_root_box.scale = Vector2.ONE
+		_root_box.visible = true
+		_root_box.oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_PARENT_NODE
+		_root_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_root_box.offset_left = 0.0
+		_root_box.offset_top = 0.0
+		_root_box.offset_right = 0.0
+		_root_box.offset_bottom = 0.0
+	else:
+		var dev := _device_scale()
+		var dpi := screen_dpi if screen_dpi > 0.0 else _screen_dpi()
+		var r := ps.resolve(size, dpi / dev if dpi > 0.0 else 0.0)
+		var ppp := float(r["pixels_per_point"])
+		_scaled = true
+		# Unity draws nothing at a scale of 0 or less.
+		_root_box.visible = ppp > 0.0
+		_ppp = ppp if ppp > 0.0 else 1.0
+		_grid_ppp = _ppp * dev
+		_panel_size = r["panel_size"] if ppp > 0.0 else size
+		_root_box.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		_root_box.position = Vector2.ZERO
+		_root_box.size = _panel_size
+		_root_box.scale = Vector2(_ppp, _ppp)
+		# Text drawn at the scale: Godot rasterizes the glyphs at the font
+		# size times the canvas scale (CanvasItem.oversampling_with_scale).
+		_root_box.oversampling_with_scale = CanvasItem.OVERSAMPLING_WITH_SCALE_ENABLED
+	_hold_unsnap(_scaled and _grid_ppp != 1.0 and is_inside_tree())
+	if _grid_ppp == old_grid:
+		return false
+	_layout_xcache = {}
+	if _applier != null:
+		_applier.set_pixels_per_point(_grid_ppp)
+	return true
+
+
+## Godot snaps every Control's position to whole units of its parent
+## (Viewport.gui_snap_controls_to_pixels). Under a scaled panel those units
+## are points, not pixels: a control at 8.25 points (11 pixels at 1.33
+## pixels per point) would draw at 8 points. While a scaled document is in
+## a viewport, that viewport does not snap (the panel's own pixel grid does
+## the job); the setting comes back when the last one leaves.
+func _hold_unsnap(on: bool) -> void:
+	var vp: Viewport = get_viewport() if on else _unsnap_vp
+	if on == (_unsnap_vp != null) or vp == null:
+		return
+	var n := int(vp.get_meta(&"uxml_unsnap", 0))
+	if on:
+		if n == 0:
+			vp.set_meta(&"uxml_snap_was", vp.gui_snap_controls_to_pixels)
+			vp.gui_snap_controls_to_pixels = false
+		vp.set_meta(&"uxml_unsnap", n + 1)
+		_unsnap_vp = vp
+	else:
+		_unsnap_vp = null
+		if n <= 1:
+			vp.gui_snap_controls_to_pixels = bool(vp.get_meta(&"uxml_snap_was", true))
+			vp.remove_meta(&"uxml_unsnap")
+			vp.remove_meta(&"uxml_snap_was")
+		else:
+			vp.set_meta(&"uxml_unsnap", n - 1)
+
+
 func element_at(point: Vector2, respect_picking: bool = false, include_parts: bool = false) -> UxmlElement:
 	if _doc == null:
 		return null
@@ -3161,7 +3394,7 @@ func _border_widths(element: UxmlElement) -> PackedFloat64Array:
 			var l := UssValues.parse_length(String(e["value"]))
 			if l["kind"] == "px":
 				var v := float(l["value"])
-				out[k] = UxmlFlexLayout.grid_box(v, true) if pixel_grid else maxf(0.0, v)
+				out[k] = UxmlPanelScale.grid_box(v, true, _grid_ppp) if pixel_grid else maxf(0.0, v)
 		k += 1
 	return out
 

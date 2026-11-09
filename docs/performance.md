@@ -2630,6 +2630,28 @@ behaviour. What the checks cost, measured on the release template:
 `tools/unity-bench/run.py` creates `Logs/` before the Godot export (a run
 with only Godot arms failed without it).
 
+## Panel scaling at scale 1 (`feat/panel-scaling`)
+
+Panel scaling adds, at one pixel per point, a few comparisons per layout
+and apply (the pixels per point in the box record keys, the line-height
+check of text controls, the scaled-measure checks in both layouts) and
+nothing else: without `panel_settings` the root box keeps its anchors and
+the layout its host size. Interleaved A/A/B rounds against a worktree of
+`main` (`a13141b`), console binary, the native release core of each:
+
+- three rounds of `bench/bench.gd --quick`, `bench/load_cost.gd` (native
+  and `--gdscript`) and `bench/update_cost.gd`: every op within its A/A
+  spread except five `update_cost.gd` ops of about 1 ms (forced states,
+  model toggle, toggle, select scroll: 7 to 16% above `main`);
+- those again in five rounds, native and GDScript: branch / main 0.95 to
+  1.03, A/A 0.96 to 1.04 (`forced` 0.917 / 0.963 / 0.996 ms, `model toggle`
+  0.848 / 0.872 / 0.903 ms, branch / main / main again). No op is slower
+  than the noise allows.
+
+A scaled panel costs what its pixel grid costs: a resize that changes the
+pixels per point (scale with screen size) applies every control again,
+like `refresh()`; a resize that keeps it only lays out.
+
 ## Runtime v2, phase 1 (`runtime/v2`)
 
 Runtime v2 draws a document with the native core: an element table, a

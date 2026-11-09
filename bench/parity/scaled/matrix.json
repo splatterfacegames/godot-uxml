@@ -1,0 +1,46 @@
+{
+ "about": "Panel-scaling parity: every case under every config and screen (tools/unity-dump/run.py --scaled, bench/parity.gd, bench/pixels.py). Layout cases keep their size in points (the render is cropped to it); a fill case fills the panel root.",
+ "cases": {
+  "lay-percent": {},
+  "lay-minmax": {},
+  "lay-wrap": {},
+  "lay-fraction": {},
+  "lay-absolute": {},
+  "px-border": {},
+  "px-background": {},
+  "px-clip": {},
+  "px-text": {},
+  "scl-settings": {"dir": "bench/parity/scaled/cases", "fill": true}
+ },
+ "configs": [
+  {"id": "cps-s2", "panel": {"scaleMode": "ConstantPixelSize", "scale": 2}, "screens": [[800, 600], [1920, 1080]]},
+  {"id": "cps-s1", "panel": {"scaleMode": "ConstantPixelSize", "scale": 1}, "screens": [[400, 300], [960, 540]], "cases": ["scl-settings"]},
+  {"id": "cph-r72", "panel": {"scaleMode": "ConstantPhysicalSize", "referenceDpi": 72, "fallbackDpi": 96}, "screens": [[1280, 720]]},
+  {"id": "sws-m05", "panel": {"scaleMode": "ScaleWithScreenSize", "referenceResolution": [1920, 1080], "screenMatchMode": "MatchWidthOrHeight", "match": 0.5},
+   "screens": [[1280, 720], [1920, 1080], [2560, 1440], [3840, 2160], [1080, 1920], [2560, 1080]]},
+  {"id": "sws-m0", "panel": {"scaleMode": "ScaleWithScreenSize", "referenceResolution": [1920, 1080], "screenMatchMode": "MatchWidthOrHeight", "match": 0},
+   "screens": [[1080, 1920], [2560, 1080]]},
+  {"id": "sws-m1", "panel": {"scaleMode": "ScaleWithScreenSize", "referenceResolution": [1920, 1080], "screenMatchMode": "MatchWidthOrHeight", "match": 1},
+   "screens": [[1080, 1920], [2560, 1080]]},
+  {"id": "sws-expand", "panel": {"scaleMode": "ScaleWithScreenSize", "referenceResolution": [1920, 1080], "screenMatchMode": "Expand"},
+   "screens": [[1080, 1920], [2560, 1080]]},
+  {"id": "sws-shrink", "panel": {"scaleMode": "ScaleWithScreenSize", "referenceResolution": [1920, 1080], "screenMatchMode": "Shrink"},
+   "screens": [[1080, 1920], [2560, 1080]]}
+ ],
+ "probe": {
+  "screens": [[1280, 720], [1920, 1080], [2560, 1440], [3840, 2160], [1080, 1920], [2560, 1080], [800, 600], [1366, 768], [1024, 768], [3440, 1440], [1179, 2556], [333, 777]],
+  "pixelScales": [1, 2, 1.5, 0.75, 1.25, 3],
+  "referenceDpis": [96, 144, 72, 120],
+  "fallbackDpis": [96, 150],
+  "referenceResolutions": [[1920, 1080], [1200, 800], [1280, 720], [0, 0]],
+  "screenScales": [1, 2],
+  "matches": [0, 0.25, 0.5, 0.75, 1, -0.5, 1.5]
+ },
+ "assets": [
+  {"name": "ScaledPanel", "panel": {"scaleMode": "ScaleWithScreenSize", "referenceResolution": [1920, 1080], "screenMatchMode": "MatchWidthOrHeight", "match": 0.5},
+   "theme": "@import url(\"unity-theme://default\");\n.unity-label { color: rgb(255, 0, 0); }\n"},
+  {"name": "ExpandPanel", "panel": {"scaleMode": "ScaleWithScreenSize", "referenceResolution": [1280, 720], "screenMatchMode": "Expand", "match": 0.25}},
+  {"name": "PhysicalPanel", "panel": {"scaleMode": "ConstantPhysicalSize", "referenceDpi": 144, "fallbackDpi": 120}},
+  {"name": "PixelPanel", "panel": {"scaleMode": "ConstantPixelSize", "scale": 2}}
+ ]
+}

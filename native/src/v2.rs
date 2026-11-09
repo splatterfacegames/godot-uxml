@@ -702,7 +702,7 @@ impl St {
         for k in 0..4 {
             if let Some(x) = &vals[P_BW + k] {
                 match layout::parse_length(&s(x)) {
-                    Len::Px(w) => widths[k] = layout::grid_box(w.max(0.0), true),
+                    Len::Px(w) => widths[k] = crate::panel_scale::grid_box(w.max(0.0), true, 1.0),
                     _ => return Err("border width".into()),
                 }
             }
@@ -819,6 +819,9 @@ impl St {
                         m.push(&x.to_variant());
                     }
                     rec.push(&m.to_variant());
+                    // _R_PX: the antialiased edge, one device pixel (pixels
+                    // per point 1: runtime v2 has no panel scaling).
+                    rec.push(&1.0f64.to_variant());
                     let b = self.helper.call("v2_make_box", &[rec.to_variant()]).try_to::<Gd<StyleBox>>().ok();
                     self.box_memo.insert(key, b.clone());
                     b
@@ -1030,6 +1033,7 @@ impl St {
             buttons: vec![false; n],
             text_clip: false,
             pixel_grid: true,
+            ppp: 1.0,
             auto_size: None,
             fields: vec![false; n],
             texrects: vec![None; n],

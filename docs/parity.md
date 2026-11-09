@@ -693,6 +693,100 @@ Not reproduced, with the measured size of the difference:
 | `all: initial` resets `-unity-font-definition`: Unity has no font, measures the text 0 and draws none | `uss-all` | godot-uxml keeps the default font (boxes match; the runtime rects of the text elements are 20px high) |
 | the corners of rotated boxes | `px-transform` (`r45`, `round-rot`) | 0.39% of the pixels; largest error 255 at a 45-degree corner pixel |
 
+## Panel scaling
+
+Every case above runs at pixelsPerPoint 1 (ConstantPixelSize, scale 1).
+The panel-scaling parity runs cases under Unity's other `PanelSettings`
+(docs/design.md, "Panel scaling"):
+
+```
+python tools/unity-dump/run.py --scale-probe bench/parity/probes/panel-scale.json
+python tools/unity-dump/run.py --scaled bench/parity/scaled/matrix.json --render bench/pixels/unity-scaled
+Godot --headless --path . -s res://bench/parity.gd        # part 3, "SCALED PARITY"
+python bench/pixels.py --godot <Godot exe>                 # "PIXELS SCALED", after the 1-ppp table
+```
+
+**The scale.** `UxmlDump.ScaleProbe` makes a runtime panel for each of 1032
+settings and screens (every mode; scales 0.75 to 3; reference DPIs 72 to
+144; reference resolutions 1920x1080, 1200x800, 1280x720 and 0x0; matches
+0 to 1 and -0.5 and 1.5; Expand and Shrink; twelve screens from 333x777 to
+3840x2160) and records `PanelSettings.m_ResolvedScale`, the panel's
+`scaledPixelsPerPoint` and the root's size. `UxmlPanelScale.resolve` and
+the native `UxmlNative.panel_scale` equal all three on every row, to the
+bit (`tests/test_panel_scale.gd`). Two things were measured, not read:
+the blend of MatchWidthOrHeight is rounded once (rounding each step
+differs on 52 rows), and the root size is rounded on the pixel grid. Batch
+mode reports `Screen.dpi` 96, so ConstantPhysicalSize is checked with that
+DPI; the fallback DPI (a screen DPI of 0) is not reachable there.
+
+**The cases** (`bench/parity/scaled/matrix.json`): `lay-percent`,
+`lay-minmax`, `lay-wrap`, `lay-fraction`, `lay-absolute`, `px-border`,
+`px-background`, `px-clip`, `px-text` and `scl-settings` (a settings
+screen with text, toggles, a slider and a text field that fills the
+panel), as `<case>__<setting>__<W>x<H>`. A sidecar `panel` gives the
+dumper the settings, `screen` the render texture (the screen the scale
+is resolved for) and `fill` makes the case host fill the panel; a layout
+case keeps its size in points at the panel origin, and its render is
+cropped to the host's pixels (`ReadPixels` counts rows from the bottom of
+the target). The dump has `scaling`: the settings as Unity holds them,
+`screenDpi`, `pixelsPerPoint`, `resolvedScale` and the root size.
+Unity lays a text out with a stale measure while TextCore fills its
+dynamic font atlas (see `ctl-numeric` above): a different case differed
+by 1.5pt in each Unity session, the first of its text. `run.py` dumps a copy of each case
+first (`0-warmup-<case>`) and drops it.
+
+`bench/parity.gd` (part 3) resolves the scale with `UxmlPanelScale` and
+checks it against the dump, lays the case out at Unity's panel size on
+the pixel grid of Unity's pixels per point, and compares as in part 2,
+the geometry in pixels at 0.1px. `bench/pixels_render.gd --scaled` draws
+each dump through `UxmlDocument.panel_settings` at the dump's screen size
+(a layout case inside a host element of its size, with the case sheet on
+the host so that its `:root` is the host), cropped as Unity's render.
+
+**Result: 172 of 172 dumps match on the model; the scale 172/172;
+structure 4301/4301, geometry 17128/17128 values (pixels), style
+421208/421208, element properties 8203/8203, import diagnostics 68/68.**
+Pixels: box pixels 99.904% exact and 99.973% within 1px, text mask IoU
+0.954, runtime rects 4036/4248 within 0.5px (at pixelsPerPoint 1:
+99.806%, 0.917, 3369/3551). Per setting and screen (10 cases each; the
+settings screen alone for ConstantPixelSize 1):
+
+| setting | screen | pixels per point | cases matching (model) | geometry (px) | box pixels exact | within 1px | text IoU | runtime rects |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ConstantPixelSize 1 | 400x300 | 1.0000 | 1/1 | 132/132 | 99.985% | 100.000% | 0.753 | 29/33 |
+| ConstantPixelSize 1 | 960x540 | 1.0000 | 1/1 | 132/132 | 99.997% | 100.000% | 0.855 | 32/33 |
+| ConstantPixelSize 2 | 1920x1080 | 2.0000 | 10/10 | 992/992 | 99.952% | 99.983% | 0.952 | 233/246 |
+| ConstantPixelSize 2 | 800x600 | 2.0000 | 10/10 | 992/992 | 99.947% | 99.982% | 0.943 | 232/246 |
+| ConstantPhysicalSize, reference 72 dpi (96 dpi screen) | 1280x720 | 1.3333 | 10/10 | 992/992 | 99.928% | 99.987% | 0.952 | 231/246 |
+| ScaleWithScreenSize, match 0 | 1080x1920 | 0.5625 | 10/10 | 992/992 | 99.768% | 99.912% | 0.963 | 240/246 |
+| ScaleWithScreenSize, match 0 | 2560x1080 | 1.3333 | 10/10 | 992/992 | 99.933% | 99.989% | 0.952 | 231/246 |
+| ScaleWithScreenSize, match 0.5 | 1080x1920 | 1.1701 | 10/10 | 992/992 | 99.880% | 99.987% | 0.946 | 228/246 |
+| ScaleWithScreenSize, match 0.5 | 1280x720 | 0.6667 | 10/10 | 992/992 | 99.873% | 99.960% | 0.954 | 227/246 |
+| ScaleWithScreenSize, match 0.5 | 1920x1080 | 1.0000 | 10/10 | 992/992 | 99.940% | 99.997% | 0.975 | 240/246 |
+| ScaleWithScreenSize, match 0.5 | 2560x1080 | 1.1667 | 10/10 | 992/992 | 99.935% | 99.995% | 0.948 | 228/246 |
+| ScaleWithScreenSize, match 0.5 | 2560x1440 | 1.3333 | 10/10 | 992/992 | 99.934% | 99.989% | 0.952 | 231/246 |
+| ScaleWithScreenSize, match 0.5 | 3840x2160 | 2.0000 | 10/10 | 992/992 | 99.953% | 99.983% | 0.952 | 233/246 |
+| ScaleWithScreenSize, match 1 | 1080x1920 | 1.7778 | 10/10 | 992/992 | 99.862% | 99.939% | 0.947 | 235/246 |
+| ScaleWithScreenSize, match 1 | 2560x1080 | 1.0000 | 10/10 | 992/992 | 99.940% | 99.997% | 0.975 | 240/246 |
+| ScaleWithScreenSize, Expand | 1080x1920 | 0.5625 | 10/10 | 992/992 | 99.768% | 99.912% | 0.963 | 240/246 |
+| ScaleWithScreenSize, Expand | 2560x1080 | 1.0000 | 10/10 | 992/992 | 99.940% | 99.997% | 0.975 | 240/246 |
+| ScaleWithScreenSize, Shrink | 1080x1920 | 1.7778 | 10/10 | 992/992 | 99.862% | 99.939% | 0.947 | 235/246 |
+| ScaleWithScreenSize, Shrink | 2560x1080 | 1.3333 | 10/10 | 992/992 | 99.933% | 99.989% | 0.952 | 231/246 |
+
+The runtime rects that differ are text: Godot's glyph advances against
+TextCore's (a Label 1 to 7 pixels wider or narrower), as at one pixel per
+point; the model, which takes Unity's text measures, has none. What the
+scaled runs found and fixed:
+
+| finding | fix |
+| --- | --- |
+| Godot snaps every Control to whole units of its parent (`gui_snap_controls_to_pixels`): points under a scaled root, so a box at 8.25 points (11 pixels at 1.33) drew at 8 (box pixels 92 to 97% exact at 0.56 to 1.33) | the viewport of a scaled document does not snap (`UxmlDocument._hold_unsnap`) |
+| `UxmlBoxStyle` antialiased its edges over one unit: 1.33 pixels at 1.33 | the meshes are built in device pixels (`px`) |
+| StyleBoxFlat has whole border widths (0.75pt drew 0) | a border off the whole points is a `UxmlBoxStyle` |
+| Unity rounds a leaf measure up to the pixel grid at the panel scale | `ceil_pixel` in both layouts |
+| TextCore lays text at the whole pixel size `round(font-size * ppp)`, a line `ceil(1.2099 * that)` pixels (all 40 sizes and scales of the dumps; at 1.33 a 28px title is 33.75 points, not 34.5) | `uxml_line_fix` in both measurers |
+| a wrapping Label in a box shorter than its lines kept the minimum size of a width a measure gave it (`equiv_runtime`: the full and the incremental document differed) | the placement takes the minimum size of the placed width (both paths) |
+
 ## What would close the gaps
 
 - Pixels: Unity's text rasteriser (TextCore SDF), fractional glyph
