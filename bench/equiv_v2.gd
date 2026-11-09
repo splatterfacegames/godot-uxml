@@ -116,13 +116,17 @@ func _cases() -> Array:
 			["base.uss", b._base_uss()], ["components.uss", b._components_uss()], ["theme.uss", b._theme_uss()],
 			["static.uss", b._static_uss()], ["hud.uxml", b._hud_uxml()], ["hud.uss", b._hud_uss()],
 			["wl.uss", w._uss()], ["wl_settings.uxml", w._settings_uxml()], ["wl_dialog.uxml", w._dialog_uxml()],
-			["wl_inventory.uxml", w._inventory_uxml()]]:
+			["wl_inventory.uxml", w._inventory_uxml()], ["wl_listview.uxml", LISTVIEW_UXML], ["wl_row.uxml", ROW_UXML]]:
 		_write(dir + pair[0], pair[1])
 	b.free()
 	w.free()
 	for f in ["big-static.uxml", "hud.uxml", "big.uxml", "wl_dialog.uxml", "wl_settings.uxml", "wl_inventory.uxml"]:
 		out.append({"name": "gen:" + f, "file": "Assets/UI/" + f, "root": "user://godot_uxml_equiv_v2/bench"})
 	out.append({"name": "gen:static-cards", "uxml": _static_cards(), "uss": ""})
+	# A ListView of 200 items (workloads.gd's listview document), bound,
+	# scrolled and selected by the changes.
+	out.append({"name": "gen:wl_listview.uxml", "file": "Assets/UI/wl_listview.uxml",
+		"root": "user://godot_uxml_equiv_v2/bench", "list": "list"})
 	# Panel scaling: the cases of bench/parity/scaled/matrix.json under
 	# three pixel grids (2, 1.33 and 0.8 pixels per point).
 	for n in ["lay-percent", "lay-minmax", "lay-wrap", "lay-fraction", "lay-absolute",
@@ -134,6 +138,25 @@ func _cases() -> Array:
 				"uxml": FileAccess.get_file_as_string(dir2 + n + ".uxml"),
 				"uss": FileAccess.get_file_as_string(up) if FileAccess.file_exists(up) else "", "files": {}})
 	return out
+
+
+const LISTVIEW_UXML := """<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <Style src="wl.uss" />
+  <ui:VisualElement name="screen" class="screen">
+    <ui:ListView name="list" class="list" fixed-item-height="24" item-template="wl_row.uxml" show-alternating-row-backgrounds="ContentOnly" selection-type="Multiple" />
+  </ui:VisualElement>
+</ui:UXML>"""
+const ROW_UXML := """<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement class="lrow">
+    <ui:Label name="lname" class="lname" text="" />
+    <ui:Label name="lval" class="lval" text="" />
+  </ui:VisualElement>
+</ui:UXML>"""
+
+
+static func _bind_row(row: UxmlListRow, i: int) -> void:
+	row.set_text("lname", "Entry %d" % i)
+	row.set_text("lval", str(i * 3) if i % 7 != 0 else "a longer value %d" % i)
 
 
 ## Panel settings of the scaled documents.
@@ -221,6 +244,9 @@ func _doc(c: Dictionary) -> void:
 			d.panel_settings = _panel_settings(c["scale"])
 		(host if rt == 1 else host2).add_child(d)
 		_load(d, c)
+		if c.has("list"):
+			d.set_list_source(c["list"], 200, _bind_row)
+			d.set_meta(&"equiv_list", c["list"])
 		docs.append(d)
 	var a: UxmlDocument = docs[0]
 	var b: UxmlDocument = docs[1]
@@ -248,7 +274,7 @@ func _doc(c: Dictionary) -> void:
 	_rng.seed = hash(name) ^ 2468
 	for step in _steps:
 		var k := _rng.randi_range(0, els.size() - 1)
-		var op := _rng.randi_range(0, 6)
+		var op := _rng.randi_range(0, 8 if a.has_meta(&"equiv_list") else 6)
 		for d in docs:
 			_apply(d, op, k, vocab)
 		await _settle(docs)
@@ -349,6 +375,14 @@ func _apply(d: UxmlDocument, op: int, k: int, vocab: Array) -> void:
 			d._set_state(el, ["hover", "active", "focus"][r.randi_range(0, 2)], r.randi_range(0, 1) == 0)
 		6:
 			d.size = Vector2(r.randi_range(200, 900), r.randi_range(150, 700))
+		7:
+			# A collection view scrolls (its rows rebound).
+			d.set_scroll_offset(String(d.get_meta(&"equiv_list")), Vector2(0, r.randi_range(0, 4000)))
+		8:
+			var sel := [r.randi_range(0, 199)]
+			if r.randi_range(0, 1) == 0:
+				sel.append(r.randi_range(0, 199))
+			d.set_selection(String(d.get_meta(&"equiv_list")), sel)
 
 
 # ---------------------------------------------------------------------------

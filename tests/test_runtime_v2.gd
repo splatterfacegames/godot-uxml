@@ -327,3 +327,35 @@ func test_panel_scaling_on_runtime_v2() -> void:
 	h.eq(doc.get_pixels_per_point(), 1.0, "one pixel per point")
 	h.eq(doc.get_element_rect(b), doc.get_element_rect(b, doc.get_document_model().root), "at one pixel per point the rect is the panel rect")
 	_unload(doc)
+
+
+func test_list_view_on_runtime_v2() -> void:
+	if not _native():
+		return
+	var doc := _doc('<ui:ListView name="lv" fixed-item-height="20" selection-type="Single" style="height: 200px;" />')
+	h.eq(doc.get_runtime(), 2, "a FixedHeight ListView loads on v2 (%s)" % doc.runtime_fallback)
+	doc.set_list_source("lv", 1000, func(row: UxmlListRow, i: int): row.set_text("", "Item %d" % i))
+	doc._restyle_now()
+	var rows: Array = doc.get_list_rows("lv")
+	h.check(rows.size() >= 10 and rows.size() <= 13, "the rows of the viewport are in use (%d)" % rows.size())
+	var r0: UxmlListRow = rows[0]
+	h.eq(doc._v2.rt.call("get_text", doc._v2.index_of(r0.element)), "Item 0", "a row is bound through set_text")
+	doc.set_scroll_offset("lv", Vector2(0, 100))
+	doc._restyle_now()
+	var shown := {}
+	for r in rows:
+		shown[(r as UxmlListRow).index] = true
+	h.check(shown.has(5) and shown.has(14) and not shown.has(0), "a scroll of five rows rebinds the rows (%s)" % [shown.keys()])
+	var r5: UxmlListRow = null
+	for r in rows:
+		if (r as UxmlListRow).index == 7:
+			r5 = r
+	var rr := doc.get_element_rect(r5.element)
+	var top := doc.get_element_rect(doc.get_element_model("lv")).position.y
+	h.eq(rr.position.y - top, 7 * 20.0 - 100.0, "item 7 is drawn at its place under the scroll (%s)" % rr)
+	h.eq(doc.element_at(rr.get_center(), false, true), r5.element, "the hit test finds its row")
+	var got := []
+	doc.selection_changed.connect(func(n, ix): got.append(ix))
+	_click(doc, rr.get_center())
+	h.eq(got, [[7]], "a click selects the item")
+	_unload(doc)

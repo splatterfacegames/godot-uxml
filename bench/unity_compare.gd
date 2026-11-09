@@ -329,8 +329,14 @@ func _dialog() -> void:
 
 func _listview() -> void:
 	var bind := func(row: UxmlListRow, i: int):
-		(row.get_native("lname") as Label).text = "Entry %d" % i
-		(row.get_native("lval") as Label).text = str(i * 3)
+		# Runtime v2 draws a Label with no Control: UxmlListRow.set_text.
+		var ln := row.get_native("lname") as Label
+		if ln == null:
+			row.set_text("lname", "Entry %d" % i)
+			row.set_text("lval", str(i * 3))
+		else:
+			ln.text = "Entry %d" % i
+			(row.get_native("lval") as Label).text = str(i * 3)
 	await _time_load("listview: load, 10,000 items", "Assets/UI/wl_listview.uxml", Vector2(1280, 720), _iters / 2,
 		func(d: UxmlDocument): d.set_list_source("list", 10000, bind))
 	var d := _new_doc(Vector2(1280, 720))

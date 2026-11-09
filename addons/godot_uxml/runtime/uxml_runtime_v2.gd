@@ -42,7 +42,8 @@ extends RefCounted
 const TAGS := {"VisualElement": true, "TemplateContainer": true, "Label": true, "Image": true,
 	"UXML": true, "Style": true, "Button": true, "Toggle": true, "Slider": true, "SliderInt": true,
 	"DropdownField": true, "TextField": true, "ScrollView": true, "RadioButton": true,
-	"RadioButtonGroup": true, "Foldout": true, "ProgressBar": true, "EnumField": true, "MinMaxSlider": true}
+	"RadioButtonGroup": true, "Foldout": true, "ProgressBar": true, "EnumField": true, "MinMaxSlider": true,
+	"ListView": true}
 
 ## The part tags of the controls v2 covers, and the kinds the core gives
 ## them (v2.rs K_*).
@@ -60,7 +61,7 @@ const UNPICKED := {"checkmark": true, "text": true, "checkmark-background": true
 const PART_KINDS := {"VisualElement": K_BOX, "TextInput": K_BOX, "Label": K_LABEL,
 	"TextElement": K_LABEL | F_PLAIN, "PopupTextElement": K_LABEL | F_PLAIN,
 	"Scroller": K_BOX, "ScrollerSlider": K_BOX, "RepeatButton": K_BUTTON, "Toggle": K_BOX,
-	"RadioButton": K_BOX}
+	"RadioButton": K_BOX, "ScrollView": K_BOX, "TemplateContainer": K_BOX}
 
 ## The attributes of the controls that v2 implements (beside COMMON).
 const CONTROL_ATTRS := {
@@ -79,6 +80,9 @@ const CONTROL_ATTRS := {
 	"ProgressBar": ["value", "low-value", "high-value", "title"],
 	"EnumField": ["type", "value", "label", "include-obsolete-values"],
 	"MinMaxSlider": ["min-value", "max-value", "low-limit", "high-limit", "label"],
+	"ListView": ["fixed-item-height", "item-template", "show-alternating-row-backgrounds",
+		"selection-type", "show-border", "virtualization-method", "horizontal-scrolling",
+		"show-bound-collection-size", "binding-source-selection-mode"],
 	"ScrollView": ["mode", "horizontal-scroller-visibility", "vertical-scroller-visibility",
 		"show-horizontal-scroller", "show-vertical-scroller", "mouse-wheel-scroll-size",
 		"horizontal-page-size", "vertical-page-size", "nested-interaction-kind", "touch-scroll-type",
@@ -171,6 +175,12 @@ static func uncovered(model: UxmlDocumentModel) -> String:
 			"TextField":
 				if UxmlInputParts.has_inner_scroll_view(el):
 					return "a TextField with a scroller"
+			"ListView":
+				# FixedHeight rows (DynamicHeight measures its rows' Controls).
+				if UxmlContainerParts.is_dynamic(el):
+					return "a DynamicHeight ListView"
+				if UxmlParts._bool(el, "horizontal-scrolling", false):
+					return "a ListView with horizontal scrolling"
 	return ""
 
 
@@ -195,7 +205,15 @@ func load() -> String:
 		return why
 	# Control part trees become model elements (as runtime v1's _index
 	# builds them; once per model).
+	# Collection views: their item templates and pools (UxmlDocument._index).
+	var collections := false
+	if not doc._doc.has_meta(&"uxml_parts_expanded"):
+		collections = doc._prepare_collections()
 	UxmlParts.expand(doc._doc)
+	if collections:
+		doc._rt_warnings.append_array(UxmlBindings.extract(doc._doc))
+		if not doc._doc.bindings.is_empty():
+			return "data bindings"
 	t0 = _step("v2: part trees", t0)
 	cascade = UssCascade.new(doc._doc)
 	if cascade._native == null:
@@ -251,6 +269,11 @@ func load() -> String:
 	_apply_editors(PackedInt32Array(editors.keys()))
 	_seen_rev = doc._opt_rev
 	_layout(true)
+	if not _failed.is_empty():
+		# A restyle of the load (a layout hook's styles) left v2.
+		why = _failed
+		dispose()
+		return why
 	t0 = _step("v2: layout", t0)
 	rt.call("draw")
 	t0 = _step("v2: draw", t0)
@@ -268,6 +291,16 @@ func _index() -> PackedByteArray:
 	var par: PackedInt32Array = cascade._parent
 	var kinds := PackedByteArray()
 	kinds.resize(els.size())
+	# The elements of the pooled rows of collection views: no names (the
+	# rows repeat them; runtime v1's _pooled).
+	var pooled := {}
+	for el in els:
+		if UxmlContainerParts.is_collection(el.local) and el.part_of == null:
+			for row in UxmlContainerParts.rows_of(el):
+				for sub in row.walk():
+					if sub.part_of == null:
+						pooled[sub] = true
+	doc._pooled = pooled
 	for i in els.size():
 		var el: UxmlElement = els[i]
 		if i > 0:
@@ -283,8 +316,11 @@ func _index() -> PackedByteArray:
 		match el.local:
 			"Button":
 				kinds[i] = K_BUTTON | F_ATTRS_OK
-			"Toggle", "Slider", "SliderInt", "DropdownField", "TextField", "ScrollView", "RadioButton", "RadioButtonGroup", "Foldout", "ProgressBar", "EnumField", "MinMaxSlider":
+			"Toggle", "Slider", "SliderInt", "DropdownField", "TextField", "ScrollView", "RadioButton", "RadioButtonGroup", "Foldout", "ProgressBar", "EnumField", "MinMaxSlider", "ListView":
 				kinds[i] = K_BOX | F_ATTRS_OK
+		if pooled.has(el):
+			kinds[i] |= F_PART
+			continue
 		var n = el.get_attribute("name")
 		if n != null and not doc._by_name.has(String(n)):
 			doc._by_name[String(n)] = el
@@ -318,6 +354,30 @@ static func _no_box() -> StyleBoxEmpty:
 	return _empty_box
 
 
+## The document cannot stay on runtime v2: it moves to v1 (during the load,
+## load() returns why).
+var _failed := ""
+
+
+func _fail(why: String) -> void:
+	if OS.has_environment("V2DBG"): print("FAIL ", why, " ", warnings.map(func(w): return w.message if w is Object else str(w)), " ", doc._rt_warnings.map(func(w): return str(w)))
+	if doc._v2 == self:
+		doc._v2_fallback(why)
+		return
+	_failed = why
+	rt = null
+
+
+## The collection view whose scroll view `content` is the content
+## container of, or null.
+func _collection_of(content: UxmlElement) -> UxmlElement:
+	var sv := content.part_of
+	if sv == null or sv.part_role != "scroll-view":
+		return null
+	var cv := sv.part_of
+	return cv if cv != null and UxmlContainerParts.is_collection(cv.local) else null
+
+
 ## One interaction Control per focusable or interactive element, the
 ## editors of the text fields, and the behaviors of the controls.
 func _make_proxies() -> void:
@@ -336,6 +396,13 @@ func _make_proxies() -> void:
 			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			c.set_meta("uxml_focus", c.focus_mode)
 			doc._natives[el] = c
+		elif el.part_of != null and el.part_role == "content" and _collection_of(el) != null:
+			# Unity: the scroll view's content container of a collection
+			# view takes the focus (CollectionBehavior.setup connects it).
+			c = Control.new()
+			c.focus_mode = Control.FOCUS_ALL
+			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			c.set_meta("uxml_focus", c.focus_mode)
 		elif el.part_of != null:
 			if el.part_role == "editor":
 				c = UxmlTextInput.create(el)
@@ -433,14 +500,21 @@ func _make_proxies() -> void:
 	for el in els:
 		if behaviors.has(el) or NO_BEHAVIOR.has(el.local):
 			continue
-		var vb = UxmlBehaviors._create(el)
+		var vb = null
+		if el.local == "ScrollView":
+			vb = V2ScrollViewBehavior.new()
+		elif el.local == "ListView":
+			vb = V2CollectionBehavior.new()
+		else:
+			vb = UxmlBehaviors._create(el)
 		if vb != null:
 			behaviors[el] = vb
 	for el in behaviors:
 		var b = behaviors[el]
 		b.doc = doc
 		b.el = el
-		if b is V2SliderBehavior or b is V2PopupBehavior or b is V2ScrollViewBehavior or b is V2MinMaxBehavior:
+		if b is V2SliderBehavior or b is V2PopupBehavior or b is V2ScrollViewBehavior or b is V2MinMaxBehavior \
+				or b is V2CollectionBehavior:
 			b.glue = self
 	doc._behaviors = behaviors
 	for el in behaviors:
@@ -448,7 +522,8 @@ func _make_proxies() -> void:
 	_hooked = []
 	for el in behaviors:
 		var hb = behaviors[el]
-		if hb is V2SliderBehavior or hb is V2MinMaxBehavior or hb is V2ScrollViewBehavior:
+		if hb is V2SliderBehavior or hb is V2MinMaxBehavior or hb is V2ScrollViewBehavior \
+				or hb is V2CollectionBehavior:
 			_hooked.append(hb)
 
 
@@ -909,7 +984,7 @@ func _restyle_pass() -> PackedInt32Array:
 	if why.is_empty() and not _diag_free():
 		why = "a style diagnostic"
 	if not why.is_empty():
-		doc._v2_fallback(why)
+		_fail(why)
 		return PackedInt32Array()
 	_flags = cascade.effective_flags()
 	_restyled = {}
@@ -932,6 +1007,10 @@ func _layout(force: bool = false, restyled: bool = true) -> void:
 		# The resolved insets changed what an editor measures.
 		rt.call("layout_if_needed", doc._layout_host(), true)
 	if not moved and not restyled and not force:
+		# Position offsets (a scroll, collection rows) move the interaction
+		# Controls without a restyle.
+		if rt.call("take_vis_changed"):
+			_place_proxies()
 		return
 	if not moved and not force:
 		# A paint-only restyle: the hooks whose parts were restyled, and
@@ -1072,7 +1151,7 @@ func rescale() -> void:
 	if why.is_empty() and not _diag_free():
 		why = "a style diagnostic"
 	if not why.is_empty():
-		doc._v2_fallback(why)
+		_fail(why)
 		return
 	if regrid:
 		for i in editors:
@@ -1186,6 +1265,13 @@ func _press(mb: InputEventMouseButton) -> void:
 	if is_disabled(el):
 		return
 	var b = doc._behaviors.get(el)
+	if el.part_role == "content" and _collection_of(el) != null:
+		# A press on the rows of a collection view (its content container
+		# is the innermost element with a Control under them).
+		var cb = doc._behaviors.get(_collection_of(el))
+		if cb is V2CollectionBehavior:
+			cb.v2_press(mb)
+			return
 	if b is V2SliderBehavior or b is V2MinMaxBehavior:
 		b.v2_press(mb)
 		return
@@ -1214,6 +1300,11 @@ func _release(mb: InputEventMouseButton) -> void:
 	if b is V2SliderBehavior or b is V2ScrollViewBehavior or b is V2MinMaxBehavior:
 		b.v2_release()
 		return
+	if el.part_role == "content" and _collection_of(el) != null:
+		var cb = doc._behaviors.get(_collection_of(el))
+		if cb is V2CollectionBehavior:
+			cb.v2_release(mb)
+			return
 	if is_disabled(el) or _target_at(mb.position) != el:
 		return
 	var c: Control = proxies.get(index_of(el))
@@ -1353,7 +1444,23 @@ func anchor_at(el: UxmlElement) -> Control:
 
 func computed_style(el: UxmlElement) -> Dictionary:
 	var i := index_of(el)
-	return {} if i < 0 else cascade._native.call("style_of", i)
+	if i < 0:
+		return {}
+	var st: Dictionary = cascade._native.call("style_of", i)
+	if el.has_meta(&"uxml_translate_native"):
+		# The scroll offset (content, draggers) is a position offset of the
+		# table, runtime v1's inline translate: its computed entry, as the
+		# last declaration of the inline style.
+		var t: Vector2 = el.get_meta(&"uxml_translate", Vector2.ZERO)
+		if t != Vector2.ZERO:
+			var n := 0
+			for d in String(el.get_attribute("style") if el.has_attribute("style") else "").split(";"):
+				if not d.strip_edges().is_empty():
+					n += 1
+			st = st.duplicate()
+			st["translate"] = {"value": "%s %s" % [UxmlContainerParts.px(t.x), UxmlContainerParts.px(t.y)],
+				"origin": {"kind": "inline", "decl_index": n}}
+	return st
 
 
 ## The border box of `el` in the root box's coordinates, or null when it
@@ -1573,6 +1680,50 @@ class V2ScrollViewBehavior extends UxmlContainerBehaviors.ScrollViewBehavior:
 	var glue
 	var _drag_sc: UxmlElement = null  # the Scroller whose dragger is dragged
 	var _grab := 0.0
+	## The elements whose translate is a position offset of the table (the
+	## scroll offset out of the cascade): the content, the draggers.
+	var _tl_els: Array = []
+	var _tl_idx := PackedInt32Array()
+	var _tl_last := PackedVector2Array()
+
+	func setup() -> void:
+		var content := UxmlContainerParts.get_part(el, "content")
+		if content != null:
+			_tl_els.append(content)
+		for role in ["vertical-scroller", "horizontal-scroller"]:
+			var sc := UxmlContainerParts.get_part(el, role)
+			if sc == null:
+				continue
+			for r in ["dragger", "dragger-border"]:
+				var x := UxmlContainerParts.get_part(sc, r)
+				if x != null:
+					_tl_els.append(x)
+		for x in _tl_els:
+			x.set_meta(&"uxml_translate_native", true)
+			_tl_idx.append(glue.index_of(x))
+		super()
+
+	## The translates of the content and the draggers to the table.
+	func _push() -> void:
+		if _tl_idx.is_empty() or glue.rt == null:
+			return
+		var offs := PackedVector2Array()
+		for x in _tl_els:
+			offs.append(x.get_meta(&"uxml_translate", Vector2.ZERO))
+		if offs == _tl_last:
+			return
+		_tl_last = offs
+		glue.rt.call("set_offsets", _tl_idx, offs, true)
+		glue._draw_req = true
+		glue.queue()
+
+	func set_offset(off: Vector2) -> void:
+		super(off)
+		_push()
+
+	func after_layout() -> void:
+		super()
+		_push()
 
 	func _size_of(x: UxmlElement):
 		return null if x == null else glue.size_of(x)
@@ -1625,6 +1776,7 @@ class V2ScrollViewBehavior extends UxmlContainerBehaviors.ScrollViewBehavior:
 		for sc in [_vs, _hs]:
 			if sc != null:
 				UxmlContainerParts.update_scroller(sc, _size_of)
+		_push()
 
 	## A press on a Scroller of this view; false when it is not on one.
 	func v2_press(mb: InputEventMouseButton) -> bool:
@@ -1772,3 +1924,112 @@ class V2MinMaxBehavior extends UxmlInputBehaviors.MinMaxBehavior:
 
 	func v2_release() -> void:
 		_pressed = false
+
+
+## ListView: runtime v1's CollectionBehavior on the table. The pooled rows
+## are table elements bound as v1 binds them (the same code); a row moves
+## to its item's place by a position offset outside the layout
+## (UxmlRuntimeV2.set_offsets, as v1's _place moves the row's Control), and
+## the pointer comes from the core's hit test.
+class V2CollectionBehavior extends UxmlContainerBehaviors.CollectionBehavior:
+	var glue
+	var _row_idx := PackedInt32Array()
+	var _offs := PackedVector2Array()
+
+	func setup() -> void:
+		super()
+		_row_idx = PackedInt32Array()
+		for r in _rows:
+			_row_idx.append(glue.index_of((r as UxmlListRow).element))
+
+	func _viewport_h() -> float:
+		var vp := UxmlContainerParts.get_part(_sv, "viewport") if _sv != null else null
+		return 0.0 if vp == null else (glue.size_of(vp) as Vector2).y
+
+	## Slot k is laid out at k * h; its row is drawn at its item's place.
+	func _place() -> void:
+		if _row_idx.is_empty():
+			return
+		var h := item_height()
+		var offs := PackedVector2Array()
+		offs.resize(_rows.size())
+		for k in _rows.size():
+			var idx: int = (_rows[k] as UxmlListRow).index
+			offs[k] = Vector2(0.0, 0.0 if idx < 0 else (idx - k) * h)
+		if offs == _offs:
+			return
+		_offs = offs
+		glue.rt.call("set_offsets", _row_idx, offs, false)
+		glue._draw_req = true
+		glue.queue()
+
+	func after_layout() -> void:
+		v2_after_layout()
+
+	## The layout hook: the rows at their places; a viewport that changed
+	## takes more or fewer rows (Unity's Resize). True when that wrote
+	## styles.
+	func v2_after_layout() -> bool:
+		_place()
+		if _rows_for_viewport() != _active:
+			refresh(false)
+			return true
+		return false
+
+	## Root box coordinates of a global point.
+	func _local(gp: Vector2) -> Vector2:
+		return glue.doc._root_box.get_global_transform().affine_inverse() * gp
+
+	func _row_holds(row: UxmlListRow, p: Vector2) -> bool:
+		if row.index < 0 or not glue.is_shown(row.element):
+			return false
+		var r = glue.host_rect(row.element)
+		return r != null and (r as Rect2).has_point(p)
+
+	## The bound, drawn row under root box point `p` inside the viewport.
+	func _row_at_local(p: Vector2) -> UxmlListRow:
+		var vp := UxmlContainerParts.get_part(_sv, "viewport") if _sv != null else null
+		if vp != null:
+			var vr = glue.host_rect(vp)
+			if vr == null or not glue.is_shown(vp) or not (vr as Rect2).has_point(p):
+				return null
+		for k in _active:
+			var row: UxmlListRow = _rows[k]
+			if _row_holds(row, p):
+				return row
+		return null
+
+	func row_at(gp: Vector2) -> UxmlListRow:
+		return _row_at_local(_local(gp))
+
+	func row_of(i: int) -> UxmlListRow:
+		if i < 0:
+			return null
+		for k in _active:
+			var row: UxmlListRow = _rows[k]
+			if row.index == i and glue.is_shown(row.element):
+				return row
+		return null
+
+	func item_rect(i: int) -> Rect2:
+		var row := row_of(i)
+		if row == null:
+			return Rect2()
+		var r = glue.host_rect(row.element)
+		if r == null:
+			return Rect2()
+		return UxmlDocument.xform_rect(glue.doc._root_box.get_global_transform(), r)
+
+	## A press on the rows (root box coordinates): runtime v1's row input.
+	func v2_press(mb: InputEventMouseButton) -> void:
+		var row := _row_at_local(mb.position)
+		if row == null:
+			var cc := control_of(_content)
+			if cc != null and cc.focus_mode != Control.FOCUS_NONE:
+				cc.grab_focus()
+			return
+		_on_row_input(mb, row)
+
+	func v2_release(mb: InputEventMouseButton) -> void:
+		var row := _row_at_local(mb.position)
+		_on_row_input(mb, row if row != null else (_rows[0] if not _rows.is_empty() else null))

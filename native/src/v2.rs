@@ -304,6 +304,14 @@ struct St {
     /// text is rasterized at (0: the viewport's).
     ppp: f64,
     oversampling: f32,
+    /// A position offset outside the layout per element (set_offsets): the
+    /// rows of a collection view at their items' places, as runtime v1's
+    /// CollectionBehavior moves their Controls.
+    ext_off: Vec<Vector2>,
+    /// The offset stands for a `translate` runtime v1 writes inline (the
+    /// scroll offset of a ScrollView's content, a Scroller's dragger): drawn
+    /// as runtime v1 draws a translate (_apply_transform's 1e-5 rad).
+    ext_tl: Vec<bool>,
     /// A record's display, visibility, opacity, clip or translate changed
     /// since the last take (the interaction Controls follow them).
     vis_changed: bool,
@@ -462,7 +470,9 @@ impl UxmlRuntimeV2 {
                     "class" | "style" | "usage-hints" | "view-data-key" | "content-container" | "template"
                     | "src" | "image" | "enabled" => {}
                     "name" => {
-                        if names[i].is_none() {
+                        // A part, or an element of a pooled row of a
+                        // collection view (F_PART), stays out of the names.
+                        if names[i].is_none() && !part {
                             names[i] = Some(avv.try_to::<GString>().unwrap_or_default());
                         }
                     }
@@ -584,6 +594,8 @@ impl UxmlRuntimeV2 {
             lay_ep: 0,
             ppp: 1.0,
             oversampling: 0.0,
+            ext_off: vec![Vector2::ZERO; n],
+            ext_tl: vec![false; n],
             vis_changed: true,
             placed: vec![None; n],
             elide_memo: vec![None; n],
@@ -695,6 +707,28 @@ impl UxmlRuntimeV2 {
             }
         }
         vis_out
+    }
+
+    /// Position offsets outside the layout: element `idx[k]` is drawn,
+    /// hit-tested and placed `offs[k]` from its layout position (the rows of
+    /// a collection view at their items' places).
+    /// `as_translate`: the offsets stand for an inline `translate` of
+    /// runtime v1 (see St::ext_tl).
+    #[func]
+    fn set_offsets(&mut self, idx: PackedInt32Array, offs: PackedVector2Array, as_translate: bool) {
+        let Some(st) = self.st.as_mut() else { return };
+        for (&i, &o) in idx.as_slice().iter().zip(offs.as_slice().iter()) {
+            let i = i as usize;
+            if i >= st.n || (st.ext_off[i] == o && st.ext_tl[i] == as_translate) {
+                continue;
+            }
+            st.ext_off[i] = o;
+            st.ext_tl[i] = as_translate;
+            st.vis_changed = true;
+            if i < st.items.len() && st.items[i].is_valid() && st.rects[i].is_some() {
+                st.place_item(i);
+            }
+        }
     }
 
     /// The f32 next to `x` (towards +inf for `dir` > 0, else -inf): the
@@ -1793,9 +1827,14 @@ impl St {
         Rect2::new(pos, r.size)
     }
 
+    /// The offset of element i's `translate` and of set_offsets.
+    fn tr_of(&self, i: usize) -> Vector2 {
+        self.tl_of(i) + self.ext_off[i]
+    }
+
     /// The offset of element i's `translate` (px plus the ratio of its
     /// own size).
-    fn tr_of(&self, i: usize) -> Vector2 {
+    fn tl_of(&self, i: usize) -> Vector2 {
         match (&self.vis[i].translate, self.rects[i]) {
             (Some((px, ratio)), Some(r)) => *px + *ratio * r.size,
             _ => Vector2::ZERO,
@@ -1982,16 +2021,17 @@ impl St {
         let it = self.items[i];
         let Some(rect) = self.rects[i] else { return };
         let v = &self.vis[i];
-        if v.translate.is_some() && i > 0 {
+        let tl_ext = self.ext_tl[i] && self.ext_off[i] != Vector2::ZERO;
+        if (v.translate.is_some() || tl_ext) && i > 0 {
             // UxmlStyleApplier._apply_transform: the Control's rotation of
             // 1e-5 rad (no pixel snap) times the offset transform.
             const NO_SNAP: f32 = 1e-5;
             let rot = Transform2D::from_angle_origin(NO_SNAP, Vector2::ZERO);
-            let tr = self.tr_of(i);
-            let o = rot.basis_xform(tr) + rect.position;
+            let (tr, ext) = if self.ext_tl[i] { (self.tl_of(i) + self.ext_off[i], Vector2::ZERO) } else { (self.tl_of(i), self.ext_off[i]) };
+            let o = rot.basis_xform(tr) + rect.position + ext;
             r.canvas_item_set_transform(it, Transform2D::from_angle_origin(NO_SNAP, o));
         } else {
-            let pos = if i == 0 { Vector2::ZERO } else { rect.position };
+            let pos = if i == 0 { Vector2::ZERO } else { rect.position + self.ext_off[i] };
             r.canvas_item_set_transform(it, Transform2D::from_angle_origin(0.0, pos));
         }
     }
