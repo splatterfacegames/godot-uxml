@@ -328,7 +328,7 @@ static func _parse_sheet(text: String, origin: String) -> Dictionary:
 		for k in items.size():
 			if items[k]["kind"] == "import":
 				items[k] = (items[k] as Dictionary).duplicate(true)
-	return {"items": items, "warnings": (hit["warnings"] as Array).duplicate(true)}
+	return {"items": items, "warnings": (hit["warnings"] as Array).duplicate(true), "cache": hit}
 
 
 ## Drop the parsed author sheets (tests that change the parser's statics).
@@ -420,6 +420,24 @@ static var _re_dim := RegEx.create_from_string(
 ## zero value: UssProperties.unity_value).
 static func _check_values(parsed: Dictionary, text: String, origin: String, doc: UxmlDocumentModel,
 		resolver: UxmlResourceResolver = null) -> void:
+	# A parsed sheet of the cache (_parse_sheet) keeps what its values
+	# report: [offset, problems, url() path (or "")] per declaration with
+	# something to report; only the url() files are looked up again.
+	var hit = parsed.get("cache")
+	if hit != null and hit.has("checks"):
+		for e in hit["checks"]:
+			for pr in e[1]:
+				doc.warnings.append(UxmlDiagnostic.make(pr[0], pr[1], text, e[0], origin))
+			if resolver != null and not String(e[3]).is_empty():
+				_check_url(String(e[2]), String(e[3]), text, e[0], origin, doc, resolver)
+		if hit["checks_failed"]:
+			var kept0: Array = []
+			for item in parsed["items"]:
+				if item["kind"] != "rule":
+					kept0.append(item)
+			parsed["items"] = kept0
+		return
+	var checks: Array = []
 	var failed := false
 	for item in parsed["items"]:
 		if item["kind"] != "rule":
@@ -439,19 +457,33 @@ static func _check_values(parsed: Dictionary, text: String, origin: String, doc:
 					failed = true
 			# Unity's importer resolves url() at import: a missing file is an
 			# import warning (the runtime reports it again where it applies).
-			if resolver != null and val.find("url(") >= 0 and val.find("var(") < 0:
+			var url := ""
+			if val.find("url(") >= 0 and val.find("var(") < 0:
 				var ref := UssValues.parse_url(val)
 				if ref.get("ok", false) and not String(ref.get("path", "")).is_empty():
-					var rr := resolver.resolve(String(ref["path"]), origin)
-					if rr["ok"] and not FileAccess.file_exists(String(rr["path"])) and not ResourceLoader.exists(String(rr["path"])):
-						doc.warnings.append(UxmlDiagnostic.make("missing-file",
-							'%s: url("%s") names no file (%s)' % [prop, ref["path"], rr["path"]], text, at, origin))
+					url = String(ref["path"])
+			if resolver != null and not url.is_empty():
+				_check_url(prop, url, text, at, origin, doc, resolver)
+			if not found.is_empty() or not url.is_empty():
+				checks.append([at, found, prop, url])
+	if hit != null:
+		hit["checks"] = checks
+		hit["checks_failed"] = failed
 	if failed:
 		var kept: Array = []
 		for item in parsed["items"]:
 			if item["kind"] != "rule":
 				kept.append(item)
 		parsed["items"] = kept
+
+
+## The missing-file diagnostic of a url() in a sheet (_check_values).
+static func _check_url(prop: String, path: String, text: String, at: int, origin: String,
+		doc: UxmlDocumentModel, resolver: UxmlResourceResolver) -> void:
+	var rr := resolver.resolve(path, origin)
+	if rr["ok"] and not FileAccess.file_exists(String(rr["path"])) and not ResourceLoader.exists(String(rr["path"])):
+		doc.warnings.append(UxmlDiagnostic.make("missing-file",
+			'%s: url("%s") names no file (%s)' % [prop, path, rr["path"]], text, at, origin))
 
 
 static var _problem_cache := {}

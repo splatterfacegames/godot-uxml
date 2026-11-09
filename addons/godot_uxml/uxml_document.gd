@@ -3978,7 +3978,7 @@ func _vertical_viewport(el: UxmlElement, st: Dictionary) -> bool:
 ## ...), as a two-way binding reads it: null for an element without a field
 ## value.
 func get_field_value(element_name: String) -> Variant:
-	var b = _behaviors.get(_lookup_name(element_name))
+	var b = _behaviors.get(_field_el(element_name))
 	if b == null:
 		return null
 	var r: Array = b.bind_read("value")
@@ -3994,7 +3994,7 @@ func get_field_value(element_name: String) -> Variant:
 ## (Unity's SetValueWithoutNotify and `value`). Returns false for an element
 ## without a field value.
 func set_field_value(element_name: String, value: Variant, notify: bool = false) -> bool:
-	var el: UxmlElement = _lookup_name(element_name)
+	var el: UxmlElement = _field_el(element_name)
 	var b = null if el == null else _behaviors.get(el)
 	if b == null or not (b.bind_read("value") as Array)[0]:
 		return false
@@ -4029,7 +4029,7 @@ var _quiet_attr := "value"
 ## the editor changes (an empty field shapes its placeholder). Returns false
 ## for an element without a placeholder.
 func set_field_placeholder(element_name: String, text: String) -> bool:
-	var el: UxmlElement = _lookup_name(element_name)
+	var el: UxmlElement = _field_el(element_name)
 	var b = null if el == null else _behaviors.get(el)
 	if b == null or not b.has_method("native") or not b.has_method("bind_write_common"):
 		return false
@@ -4051,11 +4051,20 @@ func set_field_placeholder(element_name: String, text: String) -> bool:
 
 ## The placeholder of a text field ("" for none or another element).
 func get_field_placeholder(element_name: String) -> String:
-	var el: UxmlElement = _lookup_name(element_name)
+	var el: UxmlElement = _field_el(element_name)
 	var b = null if el == null else _behaviors.get(el)
 	if b == null or not b.has_method("bind_write_common"):
 		return ""
 	return UxmlParts._attr(el, "placeholder-text")
+
+
+## The element named `element_name` with its behavior made (runtime v2
+## makes the Control and behavior of a lazy field on first need).
+func _field_el(element_name: String) -> UxmlElement:
+	var el: UxmlElement = _lookup_name(element_name)
+	if _v2 != null and el != null:
+		_v2.ensure(el)
+	return el
 
 
 ## True for an element of the current load.

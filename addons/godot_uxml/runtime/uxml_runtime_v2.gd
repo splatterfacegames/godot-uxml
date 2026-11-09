@@ -462,9 +462,15 @@ func _make_proxies() -> void:
 	_lazy = {}
 	var lazy := not eager and not _needs_all()
 	for i in tab.proxy_rows(_PROXY_TAGS):
-		if lazy and _lazy_row(tab, i):
+		if lazy and _lazy_row(tab, i) and not _pooled_ix.has(i):
 			# Made on first need (_ctl): the focus, a press, the API.
 			_lazy[i] = true
+			if String(tab.local(i)) == "Toggle":
+				# Its :checked from its value, as ToggleBehavior.setup sets it.
+				var tel: UxmlElement = cascade.el(i)
+				var on := UxmlParts._bool(tel, "value", false)
+				doc._set_state(tel, "checked", on)
+				doc._set_state(UxmlParts.find_part(tel, "input"), "checked", on)
 			continue
 		var el: UxmlElement = cascade.el(i)
 		var c: Control = null
@@ -563,6 +569,8 @@ func _make_proxies() -> void:
 	# The behaviors of the other controls, as runtime v1 makes them
 	# (UxmlBehaviors.attach_all: parts included).
 	for bi in tab.rows_except(_NO_BEHAVIOR_TAGS, true):
+		if _lazy.has(bi):
+			continue
 		var el: UxmlElement = cascade.el(bi)
 		if behaviors.has(el):
 			continue
@@ -582,7 +590,8 @@ func _make_proxies() -> void:
 		if b is V2SliderBehavior or b is V2PopupBehavior or b is V2ScrollViewBehavior or b is V2MinMaxBehavior \
 				or b is V2CollectionBehavior:
 			b.glue = self
-	doc._behaviors = behaviors
+	for el in behaviors:
+		doc._behaviors[el] = behaviors[el]
 	for el in behaviors:
 		behaviors[el].setup()
 	_hooked = []
@@ -626,6 +635,8 @@ func _make_proxies() -> void:
 static var eager := false
 ## Element index -> true: its Control is not made yet.
 var _lazy: Dictionary = {}
+## The value a lazy Toggle is made with (null: its attribute's).
+var _make_value = null
 var _nav: Node = null
 
 
@@ -648,7 +659,7 @@ static func _lazy_row(t: Object, i: int) -> bool:
 	if t.part_of(i) >= 0:
 		return false
 	match String(t.local(i)):
-		"Button":
+		"Button", "Toggle":
 			return true
 		"VisualElement", "TemplateContainer":
 			return t.attr(i, "focusable") == "true"
@@ -658,7 +669,7 @@ static func _lazy_row(t: Object, i: int) -> bool:
 ## Whether the Control of `el` is made on first need.
 static func _lazy_kind(el: UxmlElement) -> bool:
 	match el.local:
-		"Button":
+		"Button", "Toggle":
 			return el._part_of == null
 		"VisualElement", "TemplateContainer":
 			return el._part_of == null and UxmlParts._attr(el, "focusable") == "true"
@@ -688,6 +699,10 @@ func _make_lazy(i: int, el: UxmlElement) -> Control:
 		b.button_down.connect(doc._set_state.bind(el, "active", true))
 		b.button_up.connect(doc._set_state.bind(el, "active", false))
 		c = b
+	elif el.local == "Toggle":
+		var t := UxmlToggle.new()
+		t.set_pressed_no_signal(UxmlParts._bool(el, "value", false) if _make_value == null else bool(_make_value))
+		c = t
 	else:
 		c = Control.new()
 		c.focus_mode = Control.FOCUS_ALL
@@ -696,6 +711,14 @@ func _make_lazy(i: int, el: UxmlElement) -> Control:
 	_add_ordered(i, c)
 	c.focus_entered.connect(_on_focus.bind(el, true))
 	c.focus_exited.connect(_on_focus.bind(el, false))
+	if c is UxmlToggle:
+		# Its behavior (runtime v1's), made with it: the value, :checked,
+		# value_changed.
+		var tb := UxmlBehaviors.ToggleBehavior.new()
+		tb.doc = doc
+		tb.el = el
+		doc._behaviors[el] = tb
+		tb.setup()
 	return c
 
 
@@ -766,6 +789,8 @@ func _ctl(i: int) -> Control:
 		var off := i < dis.size() and dis[i] == 1
 		if c is BaseButton:
 			(c as BaseButton).disabled = off
+		elif c is UxmlToggle:
+			(c as UxmlToggle).disabled = off
 		var fm: int = Control.FOCUS_NONE if off else int(c.get_meta("uxml_focus", c.focus_mode))
 		if c.focus_mode != fm:
 			c.focus_mode = fm
@@ -1332,6 +1357,14 @@ func index_of(el: UxmlElement) -> int:
 func _on_model_changed(el: UxmlElement) -> void:
 	# The table is what the core reads: the handle's attributes into its row.
 	var row := index_of(el)
+	if row >= 0 and _lazy.has(row) and el.local == "Toggle":
+		# A lazy Toggle is made with the value it had (its row's), so that
+		# the change reaches it as it reaches a Toggle made at the load.
+		var ov = doc._doc.table.attr(row, "value")
+		var ol := "" if ov == null else String(ov).to_lower()
+		_make_value = true if ol in ["true", "1"] else false
+		_ctl(row)
+		_make_value = null
 	if row >= 0:
 		doc._doc.table.set_attributes(row, el.attributes)
 	var b = doc._behaviors.get(el)
