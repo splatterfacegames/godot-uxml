@@ -114,6 +114,19 @@ var _restyle_all := false
 var _pressed: UxmlElement = null
 var _tooltip_el: UxmlElement = null
 var _menu_anchor: Control = null
+## The restyle state: the option revision seen (UxmlDocument._opt_rev), a
+## layout request, the effective flags of the last pass, the elements it
+## restyled, the disabled flags the interaction Controls follow, the
+## behaviors with layout hooks, the indices of the interaction Controls.
+var _seen_rev := -1
+var _layout_req := false
+var _draw_req := false  # a text or a focus box changed: lay out if needed, draw
+var _flags: Array = [PackedByteArray(), PackedByteArray(), PackedByteArray()]
+var _restyled: Dictionary = {}
+var _last_dis := PackedByteArray()
+var _hooked: Array = []
+var _proxy_idx := PackedInt32Array()
+var _editor_shown: Dictionary = {}  # editor index -> shown at its last placement
 
 static var _mask_material: ShaderMaterial = null
 static var _empty_box: StyleBoxEmpty = null
@@ -224,8 +237,11 @@ func load() -> String:
 		el.changed = on_changed
 	for i in editors:
 		rt.call("set_edit_control", i, editors[i])
+	_flags = cascade.effective_flags()
+	_sync_disabled()
 	_apply_editors(PackedInt32Array(editors.keys()))
-	_layout()
+	_seen_rev = doc._opt_rev
+	_layout(true)
 	t0 = _step("v2: layout", t0)
 	rt.call("draw")
 	t0 = _step("v2: draw", t0)
@@ -408,6 +424,11 @@ func _make_proxies() -> void:
 	doc._behaviors = behaviors
 	for el in behaviors:
 		behaviors[el].setup()
+	_hooked = []
+	for el in behaviors:
+		var hb = behaviors[el]
+		if hb is V2SliderBehavior or hb is V2MinMaxBehavior or hb is V2ScrollViewBehavior:
+			_hooked.append(hb)
 
 
 func _on_focus(el: UxmlElement, on: bool) -> void:
@@ -417,39 +438,45 @@ func _on_focus(el: UxmlElement, on: bool) -> void:
 	var i := index_of(el)
 	if rt != null and i >= 0 and int(rt.call("kind_of", i)) == K_BUTTON:
 		rt.call("set_focused", i, on)
+		_draw_req = true
 		queue()
 
 
 ## Places the interaction Controls at their elements' rects (inside the
-## clips of their clipping ancestors) and shows those that are shown.
+## clips of their clipping ancestors) and shows those that are shown: one
+## native call for all of them (UxmlRuntimeV2.place_states).
 func _place_proxies() -> void:
-	for i in proxies:
+	if proxies.is_empty():
+		return
+	if _proxy_idx.size() != proxies.size():
+		_proxy_idx = PackedInt32Array(proxies.keys())
+	var st: Array = rt.call("place_states", _proxy_idx)
+	var rects: PackedVector2Array = st[0]
+	var shown_f: PackedByteArray = st[1]
+	var ops: PackedFloat32Array = st[2]
+	var which: PackedInt32Array = st[3]
+	for k in which.size():
+		var i := _proxy_idx[which[k]]
 		var c: Control = proxies[i]
-		var ds: Array = rt.call("draw_state", i)
-		var shown: bool = ds[0]
-		var r: Rect2 = rt.call("host_rect", i)
-		if shown:
-			var vis: Rect2 = rt.call("visible_rect", i)
-			if vis.size.x <= 0.0 or vis.size.y <= 0.0:
-				shown = false
+		var pos := rects[k * 4]
+		var size := rects[k * 4 + 1]
+		var vsz := rects[k * 4 + 3]
+		var shown := shown_f[k] == 1 and vsz.x > 0.0 and vsz.y > 0.0
+		if c.position != pos:
+			c.position = pos
+		if c.size != size:
+			c.size = size
 		if editors.has(i):
 			# The editor draws: it stays at its rect (its own clip), with the
 			# opacity of its ancestors (v1 nests it in their Controls).
-			if c.position != r.position:
-				c.position = r.position
-			if c.size != r.size:
-				c.size = r.size
-			var a := float(ds[1])
+			var a := ops[k]
 			if c.modulate.a != a:
 				c.modulate = Color(1, 1, 1, a)
-			var want := shown and bool(c.get_meta(&"uxml_v2_visible", true))
+			_editor_shown[i] = shown_f[k] == 1
+			var want := shown_f[k] == 1 and bool(c.get_meta(&"uxml_v2_visible", true))
 			if c.visible != want:
 				c.visible = want
 			continue
-		if c.position != r.position:
-			c.position = r.position
-		if c.size != r.size:
-			c.size = r.size
 		if c.visible != shown:
 			c.visible = shown
 		if not shown and c.has_focus():
@@ -466,9 +493,8 @@ func _place_proxies() -> void:
 func _apply_editors(changed: PackedInt32Array) -> void:
 	if editors.is_empty():
 		return
-	var flags: Array = cascade.effective_flags()
-	var dis: PackedByteArray = flags[1]
-	var gone: PackedByteArray = flags[2]
+	var dis: PackedByteArray = _flags[1]
+	var gone: PackedByteArray = _flags[2]
 	var ch := {}
 	for i in changed:
 		ch[i] = true
@@ -482,6 +508,8 @@ func _apply_editors(changed: PackedInt32Array) -> void:
 		var style: Dictionary = cascade._native.call("style_of", i)
 		applier.apply(el, c, c, style, dis[i] == 1, gone[i] == 1)
 		c.set_meta(&"uxml_v2_visible", c.visible)
+		if not bool(_editor_shown.get(i, true)):
+			c.visible = false
 
 
 # ---------------------------------------------------------------------------
@@ -753,14 +781,25 @@ func _flush() -> void:
 
 
 ## Runs the cascade for what changed, restyles, lays out and draws. False
-## when the document must move to runtime v1.
+## when the document must move to runtime v1. A restyle with nothing to do
+## (no dirty element, no new state or option, no layout request) returns at
+## once (runtime v1's _quiet).
 func restyle() -> bool:
 	_queued = false
 	if rt == null:
 		return true
-	if not _restyle_pass():
-		return false
-	_layout()
+	if _dirty.is_empty() and not _restyle_all and not _layout_req and not _draw_req and doc._opt_rev == _seen_rev:
+		return true
+	var layout_req := _layout_req
+	_layout_req = false
+	_draw_req = false
+	var changed := PackedInt32Array()
+	if not _dirty.is_empty() or _restyle_all or doc._opt_rev != _seen_rev:
+		_seen_rev = doc._opt_rev
+		changed = _restyle_pass()
+		if rt == null:
+			return false
+	_layout(layout_req, not changed.is_empty())
 	if rt == null:
 		return false
 	rt.call("draw")
@@ -768,7 +807,9 @@ func restyle() -> bool:
 	return true
 
 
-func _restyle_pass() -> bool:
+## The cascade and the records of what changed; the indices whose computed
+## style changed (empty when the document moved to runtime v1: rt is null).
+func _restyle_pass() -> PackedInt32Array:
 	var dl := PackedInt32Array()
 	for el in _dirty:
 		var i := index_of(el)
@@ -783,39 +824,87 @@ func _restyle_pass() -> bool:
 		why = "a style diagnostic"
 	if not why.is_empty():
 		doc._v2_fallback(why)
-		return false
+		return PackedInt32Array()
+	_flags = cascade.effective_flags()
+	_restyled = {}
+	for i in changed:
+		_restyled[i] = true
 	_apply_editors(changed)
 	_sync_disabled()
-	return true
+	return changed
 
 
-## Lays out; the layout hooks of the behaviors (a slider's dragger moves
-## with the size of its track) can change inline styles, which restyle and
-## lay out again (as runtime v1's _post_layout).
-func _layout() -> void:
-	rt.call("layout", doc.size)
+## Lays out when something the layout reads changed (or `force`); the
+## layout hooks of the behaviors (a slider's dragger follows its track, the
+## ScrollViews place their Scrollers) run after a layout that moved a rect
+## or a restyle (`restyled`), and can change inline styles, which restyle
+## and lay out again (as runtime v1's _post_layout). The interaction
+## Controls follow.
+func _layout(force: bool = false, restyled: bool = true) -> void:
+	var moved: bool = rt.call("layout_if_needed", doc.size, force or _editor_measures_changed())
+	if not moved and not restyled and not force:
+		return
+	if not moved and not force:
+		# A paint-only restyle: the hooks whose parts were restyled, and
+		# the interaction Controls only when a visibility changed.
+		for b in _hooked:
+			if not b is V2ScrollViewBehavior:
+				b.v2_after_layout()
+		if not _dirty.is_empty():
+			moved = true  # a hook wrote a style: the full path below
+		elif rt.call("take_vis_changed"):
+			_place_proxies()
+			return
+		else:
+			return
 	for k in 4:
 		var hooked := false
-		for b in doc._behaviors.values():
-			if b is V2SliderBehavior or b is V2MinMaxBehavior:
-				hooked = b.v2_after_layout() or hooked
-			elif b is V2ScrollViewBehavior:
+		for b in _hooked:
+			if b is V2ScrollViewBehavior:
 				b.after_layout()
 				hooked = true
+			else:
+				hooked = b.v2_after_layout() or hooked
 		if not hooked or _dirty.is_empty():
 			break
-		if not _restyle_pass():
+		var ch := _restyle_pass()
+		if rt == null:
 			return
-		rt.call("layout", doc.size)
+		if rt.call("layout_if_needed", doc.size, false):
+			moved = true
+		restyled = restyled or not ch.is_empty()
+	rt.call("take_vis_changed")
 	_place_proxies()
 
 
+## The editors' minimum sizes (what the layout measures of them) changed
+## since the last layout.
+func _editor_measures_changed() -> bool:
+	var changed := false
+	for i in editors:
+		var c: Control = editors[i]
+		var m := c.get_combined_minimum_size()
+		if m != c.get_meta(&"uxml_v2_min", Vector2(-1, -1)):
+			c.set_meta(&"uxml_v2_min", m)
+			changed = true
+	return changed
+
+
+## Whether element `x` was restyled by the last restyle pass.
+func restyled(x: UxmlElement) -> bool:
+	return _restyled.has(index_of(x))
+
+
 ## The disabled state of the interaction Controls (runtime v1's
-## UxmlStyleApplier.apply_flags: disabled natives, no focus).
+## UxmlStyleApplier.apply_flags: disabled natives, no focus), when the
+## disabled flags changed.
 func _sync_disabled() -> void:
 	if proxies.is_empty():
 		return
-	var dis: PackedByteArray = cascade.effective_flags()[1]
+	var dis: PackedByteArray = _flags[1]
+	if dis == _last_dis:
+		return
+	_last_dis = dis
 	for i in proxies:
 		if editors.has(i):
 			continue
@@ -845,6 +934,7 @@ func set_text(el: UxmlElement, text: String) -> void:
 		var c = proxies.get(i)
 		if c is Button:
 			(c as Button).accessibility_name = text
+		_draw_req = true
 		queue()
 
 
@@ -855,12 +945,20 @@ func refresh() -> void:
 	queue()
 
 
+## A resize (NOTIFICATION_RESIZED): lays out and draws now.
 func relayout() -> void:
 	if rt == null:
 		return
-	_layout()
+	_layout(true)
 	if rt != null:
 		rt.call("draw")
+
+
+## UxmlDocument.relayout(): the next restyle lays out (code may have
+## changed what an editor measures).
+func request_layout() -> void:
+	_layout_req = true
+	queue()
 
 
 func _options() -> Dictionary:
@@ -1193,10 +1291,8 @@ class V2SliderBehavior extends UxmlInputBehaviors.SliderBehavior:
 	## placement changed (UxmlDocument._run_layout_hooks): here when the
 	## sizes it reads changed (a value change places the dragger itself).
 	func v2_after_layout() -> bool:
-		var ds := style_of(part("dragger"))
-		var key := [size_of(part("drag-container")), size_of(part("dragger")),
-			UxmlInputParts.style_px(ds, "margin-left"), UxmlInputParts.style_px(ds, "margin-right")]
-		if key == _hook_key:
+		var key := [size_of(part("drag-container")), size_of(part("dragger"))]
+		if key == _hook_key and not glue.restyled(part("dragger")):
 			return false
 		_hook_key = key
 		return UxmlInputParts.layout_styles(el, size_of, style_of, _parts)
@@ -1464,11 +1560,8 @@ class V2MinMaxBehavior extends UxmlInputBehaviors.MinMaxBehavior:
 		return glue.is_disabled(el)
 
 	func v2_after_layout() -> bool:
-		var ds := style_of(part("dragger"))
-		var key := [size_of(part("input")), size_of(part("thumb-min")), size_of(part("thumb-max")),
-			UxmlInputParts.style_px(ds, "border-left-width"), UxmlInputParts.style_px(ds, "margin-left"),
-			UxmlInputParts.style_px(ds, "border-right-width"), UxmlInputParts.style_px(ds, "margin-right")]
-		if key == _hook_key:
+		var key := [size_of(part("input")), size_of(part("thumb-min")), size_of(part("thumb-max"))]
+		if key == _hook_key and not glue.restyled(part("dragger")):
 			return false
 		_hook_key = key
 		return UxmlInputParts.layout_styles(el, size_of, style_of, _parts)

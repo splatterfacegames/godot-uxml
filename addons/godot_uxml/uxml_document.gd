@@ -4713,7 +4713,7 @@ func set_imgui_handler(element_name: String, draw: Callable, input: Callable = C
 ## with other pending restyles like every other mutation.
 func relayout() -> void:
 	if _v2 != null:
-		_v2.queue()
+		_v2.request_layout()
 		return
 	_force_layout = true
 	_queue_restyle()

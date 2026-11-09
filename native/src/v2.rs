@@ -263,6 +263,14 @@ struct St {
     focused: Vec<bool>,
     /// The disabled flags of the last restyle (effective_flags).
     disabled: Vec<bool>,
+    /// A leaf measure changed since the last layout (a text shaped again,
+    /// an image, a box padding, an editor): the layout must run.
+    measure_dirty: bool,
+    /// A record's display, visibility, opacity, clip or translate changed
+    /// since the last take (the interaction Controls follow them).
+    vis_changed: bool,
+    /// The placement each interaction Control was last given (place_states).
+    placed: Vec<Option<(Rect2, Rect2, bool, f32)>>,
     /// The last elision of each eliding Label: (text, width, position, font
     /// size) and the text shown; whether it is elided now.
     elide_memo: Vec<Option<((GString, f32, GString, i32), GString)>>,
@@ -527,6 +535,9 @@ impl UxmlRuntimeV2 {
             locale,
             focused: vec![false; n],
             disabled: vec![false; n],
+            measure_dirty: true,
+            vis_changed: true,
+            placed: vec![None; n],
             elide_memo: vec![None; n],
             elided: vec![false; n],
             unity_metrics,
@@ -577,6 +588,85 @@ impl UxmlRuntimeV2 {
         st.layout(host)
     }
 
+    /// Lays out only when something the layout reads changed since the last
+    /// layout (a layout record, a leaf measure, the host size), or `force`.
+    /// Returns whether a rect changed.
+    #[func]
+    fn layout_if_needed(&mut self, host: Vector2, force: bool) -> bool {
+        let Some(st) = self.st.as_mut() else { return false };
+        if !force && !st.measure_dirty && host == st.host_size && !st.records_changed() {
+            return false;
+        }
+        st.layout(host)
+    }
+
+    /// For each of `idx`: [position, size, visible rect position, visible
+    /// rect size] in `rects` and [shown, opacity] in `states` (the
+    /// interaction Controls' placement in one call).
+    /// Only the entries whose placement changed since the last call are
+    /// returned; `which` holds their positions in `idx`.
+    #[func]
+    fn place_states(&mut self, idx: PackedInt32Array) -> VarArray {
+        let mut out = VarArray::new();
+        let Some(st) = self.st.as_mut() else { return out };
+        let mut rects = PackedVector2Array::new();
+        let mut shown = PackedByteArray::new();
+        let mut op = PackedFloat32Array::new();
+        let mut which = PackedInt32Array::new();
+        let mut placed = std::mem::take(&mut st.placed);
+        let cb = st.casc.bind();
+        let c = cb.inner.as_ref().unwrap();
+        for (kk, &i) in idx.as_slice().iter().enumerate() {
+            let i = i as usize;
+            let r = st.host_rect(i);
+            let mut sh = i < st.n && st.rects[i].is_some();
+            let mut o = 1.0f32;
+            let mut vis = r;
+            if i < st.n {
+                let mut k = i as i32;
+                while k >= 0 {
+                    let ku = k as usize;
+                    let v = &st.vis[ku];
+                    if v.gone || v.hidden {
+                        sh = false;
+                    }
+                    o *= v.opacity;
+                    if ku != i && k > 0 && v.clip {
+                        let ar = st.host_rect(ku);
+                        let ins = st.clip_inset_of(ku);
+                        let cr = Rect2::new(
+                            ar.position + Vector2::new(ins[0], ins[1]),
+                            Vector2::new((ar.size.x - ins[0] - ins[2]).max(0.0), (ar.size.y - ins[1] - ins[3]).max(0.0)),
+                        );
+                        vis = vis.intersect(cr).unwrap_or(Rect2::new(vis.position, Vector2::ZERO));
+                    }
+                    k = c.parent_of(ku);
+                }
+            }
+            let now = Some((r, vis, sh, o));
+            if i < placed.len() && placed[i] == now {
+                continue;
+            }
+            if i < placed.len() {
+                placed[i] = now;
+            }
+            which.push(kk as i32);
+            rects.push(r.position);
+            rects.push(r.size);
+            rects.push(vis.position);
+            rects.push(vis.size);
+            shown.push(if sh { 1 } else { 0 });
+            op.push(o);
+        }
+        drop(cb);
+        st.placed = placed;
+        out.push(&rects.to_variant());
+        out.push(&shown.to_variant());
+        out.push(&op.to_variant());
+        out.push(&which.to_variant());
+        out
+    }
+
     /// Records every element's canvas item again.
     #[func]
     fn draw(&mut self) {
@@ -625,6 +715,7 @@ impl UxmlRuntimeV2 {
         let i = i as usize;
         if i < st.n {
             st.leaves_mut().ctls[i] = ctl;
+            st.measure_dirty = true;
         }
     }
 
@@ -675,6 +766,14 @@ impl UxmlRuntimeV2 {
     #[func]
     fn last_size(&self, i: i64) -> Vector2 {
         self.st.as_ref().and_then(|s| s.last_size.get(i as usize).copied()).unwrap_or(Vector2::ZERO)
+    }
+
+    /// Whether a record's display, visibility, opacity, clip or translate
+    /// changed since the last call.
+    #[func]
+    fn take_vis_changed(&mut self) -> bool {
+        let Some(st) = self.st.as_mut() else { return false };
+        std::mem::replace(&mut st.vis_changed, false)
     }
 
     /// Whether Label i shows its text elided (its last draw).
@@ -908,6 +1007,7 @@ impl St {
             if self.vis[i].gone != (gone[i] == 1) {
                 self.vis[i].gone = gone[i] == 1;
                 self.dirty[i] = true;
+                self.vis_changed = true;
             }
         }
         Ok(())
@@ -955,7 +1055,13 @@ impl St {
                 v.picking_ignore = self.vis[i].picking_ignore;
                 v.gone = gone;
                 let hp = *hp;
-                self.leaves_mut().hpad[i] = hp;
+                if Self::placement_differs(&self.vis[i], &v) {
+                    self.vis_changed = true;
+                }
+                if self.leaves.hpad[i] != hp {
+                    self.leaves_mut().hpad[i] = hp;
+                    self.measure_dirty = true;
+                }
                 self.vis[i] = v;
                 self.dirty[i] = true;
                 if self.kind[i] == K_LABEL || self.kind[i] == K_BUTTON {
@@ -1289,7 +1395,11 @@ impl St {
                     v.image = Some((t, m as i32, c));
                 }
             }
-            self.leaves_mut().natural[i] = v.image.as_ref().map(|x| x.0.get_size()).unwrap_or(Vector2::ZERO);
+            let nat = v.image.as_ref().map(|x| x.0.get_size()).unwrap_or(Vector2::ZERO);
+            if self.leaves.natural[i] != nat {
+                self.leaves_mut().natural[i] = nat;
+                self.measure_dirty = true;
+            }
         }
         // translate (UxmlStyleApplier._apply_transform: an offset of the
         // drawn box and of the hit test, never of the layout).
@@ -1303,12 +1413,18 @@ impl St {
         // The box's horizontal border and padding, as the stylebox content
         // margins carry them before the layout resolves percentages.
         let hp = if v.boxed { widths[3] + pads[3] + widths[1] + pads[1] } else { (self.theme.normal_margins[0] + self.theme.normal_margins[2]) as f64 };
-        self.leaves_mut().hpad[i] = hp;
+        if self.leaves.hpad[i] != hp {
+            self.leaves_mut().hpad[i] = hp;
+            self.measure_dirty = true;
+        }
         if memo_ok {
             if self.vis_memo.len() > 4096 {
                 self.vis_memo.clear();
             }
             self.vis_memo.insert(key, (keep, v.clone(), hp));
+        }
+        if Self::placement_differs(&self.vis[i], &v) {
+            self.vis_changed = true;
         }
         self.vis[i] = v;
         self.dirty[i] = true;
@@ -1316,6 +1432,12 @@ impl St {
             self.make_text(i);
         }
         Ok(())
+    }
+
+    /// What the interaction Controls follow differs between two records.
+    fn placement_differs(a: &Vis, b: &Vis) -> bool {
+        a.gone != b.gone || a.hidden != b.hidden || a.opacity != b.opacity || a.clip != b.clip
+            || a.clip_inset != b.clip_inset || a.translate != b.translate
     }
 
     fn leaves_mut(&mut self) -> &mut Leaves {
@@ -1336,6 +1458,8 @@ impl St {
                 }
             }
             t[i] = Some(ButtonText::new(text, ts, self.locale.clone()));
+            drop(t);
+            self.measure_dirty = true;
             return;
         }
         let mut t = self.leaves.texts.borrow_mut();
@@ -1346,11 +1470,24 @@ impl St {
             }
         }
         t[i] = Some(TextBlock::new(text, ts));
+        drop(t);
+        self.measure_dirty = true;
+    }
+
+    /// Whether a layout record changed since the last layout.
+    fn records_changed(&mut self) -> bool {
+        let cb = self.casc.bind();
+        let c: &Cascade = cb.inner.as_ref().unwrap();
+        if self.recs.recs.len() != c.len() {
+            return true;
+        }
+        (0..c.len()).any(|i| c.layout_version(i) != self.recs.vers[i])
     }
 
     fn layout(&mut self, host: Vector2) -> bool {
         let _p = crate::prof::scope("v2.layout");
         self.host_size = host;
+        self.measure_dirty = false;
         let leaves = self.leaves.clone();
         let src: Rc<dyn LeafSource> = leaves;
         let n = self.n;
