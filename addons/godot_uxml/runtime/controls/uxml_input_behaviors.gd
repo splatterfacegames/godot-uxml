@@ -1029,7 +1029,7 @@ class TextBehavior extends InputBehavior:
 			if not _ph_listed and not ph.is_empty() and _ed is LineEdit:
 				_ph_listed = true
 				doc._placeholder_fields.append(self)
-			if _ph_listed and not hide_now and not ph.is_empty() and doc._applier != null \
+			if _ph_listed and not hide_now and not ph.is_empty() and _applier() != null \
 					and not _ph_position().is_empty():
 				# R30: the elided text is written once (each write of the
 				# LineEdit's placeholder shapes it).
@@ -1055,9 +1055,15 @@ class TextBehavior extends InputBehavior:
 	##
 	## `fresh`: the placeholder changed and the LineEdit still shows the old
 	## one (_placeholder writes the elided text only).
+	## The style applier: runtime v1's, or runtime v2's glue's.
+	func _applier() -> UxmlStyleApplier:
+		if doc._applier != null:
+			return doc._applier
+		return doc._v2.applier if doc._v2 != null else null
+
 	func elide_placeholder(fresh := false) -> void:
 		var le := _ed as LineEdit
-		if le == null or doc._applier == null:
+		if le == null or _applier() == null:
 			return
 		var ph := attr("placeholder-text")
 		var pos := _ph_position()
@@ -1067,7 +1073,7 @@ class TextBehavior extends InputBehavior:
 				_ph_memo = []
 				if not le.placeholder_text.is_empty():
 					le.placeholder_text = ph
-				doc._applier._elided_tooltip(le, false, ph)
+				_applier()._elided_tooltip(le, false, ph)
 			return
 		var fs := le.get_theme_font_size(&"font_size")
 		var font := le.get_theme_font(&"font")
@@ -1081,7 +1087,7 @@ class TextBehavior extends InputBehavior:
 		_ph_shown = "" if shown == ph else shown
 		if le.placeholder_text != shown:
 			le.placeholder_text = shown
-		doc._applier._elided_tooltip(le, not _ph_shown.is_empty() and text().is_empty(), ph)
+		_applier()._elided_tooltip(le, not _ph_shown.is_empty() and text().is_empty(), ph)
 
 	## The overflow position of the first of the field, its input and its
 	## editor with `text-overflow: ellipsis`, else "".

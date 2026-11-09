@@ -242,7 +242,9 @@ static func content_style(content: UxmlElement) -> String:
 	var p: float = content.get_meta(&"uxml_padding", 0.0)
 	if p > 0.0:
 		out = (out + " padding-top: %s;" % px(p)).strip_edges()
-	var t := _translate_style(content.get_meta(&"uxml_translate", Vector2.ZERO))
+	# Runtime v2 keeps the scroll offset out of the cascade (a position
+	# offset of the table, V2ScrollViewBehavior).
+	var t := "" if content.has_meta(&"uxml_translate_native") else _translate_style(content.get_meta(&"uxml_translate", Vector2.ZERO))
 	if not t.is_empty():
 		out = (out + " " + t).strip_edges()
 	return out
@@ -452,6 +454,11 @@ static func update_scroller(sc: UxmlElement, size_of: Callable) -> bool:
 	var pos := normalized(v, lo, hi) * (track - size)
 	var t := Vector2(pos, 0.0) if horizontal else Vector2(0.0, pos)
 	var tstyle := _translate_style(t)
+	dragger.set_meta(&"uxml_translate", t)
+	if border != null:
+		border.set_meta(&"uxml_translate", t)
+	if dragger.has_meta(&"uxml_translate_native"):
+		tstyle = ""
 	var changed := false
 	if hidden:
 		style += "visibility: hidden; "

@@ -54,6 +54,21 @@ func get_element_model(element_name: String) -> UxmlElement:
 	return _named(element_name)
 
 
+## Set the text of a Label (or Button) of the row (its own element for an
+## empty name): on runtime v2 the core draws a Label with no Control, so a
+## bind callback that works on both runtimes writes text this way.
+func set_text(element_name: String, text: String) -> void:
+	var el: UxmlElement = element if element_name.is_empty() else _named(element_name)
+	if el == null:
+		return
+	if _doc._v2 != null:
+		_doc._v2.set_text(el, text)
+		return
+	var c = _doc._natives.get(el)
+	if c is Control:
+		_doc._set_control_text(c, text)
+
+
 ## Replace a row element's classes (restyles just that element).
 func set_class(element_name: String, class_string: String) -> void:
 	var el: UxmlElement = element if element_name.is_empty() else _named(element_name)

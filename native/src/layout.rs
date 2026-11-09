@@ -295,6 +295,11 @@ pub trait LeafSource {
     /// The longest paragraph as one line (label_max_content less the box).
     fn max_content(&self, i: usize) -> f64;
     fn natural(&self, i: usize) -> Vector2;
+    /// Unity's line height on a scaled panel (UxmlStyleApplier.line_fix):
+    /// [the font's line height, Unity's in points].
+    fn line_fix(&self, _i: usize) -> Option<(f64, f64)> {
+        None
+    }
 }
 
 pub struct LayoutIn {
@@ -1722,6 +1727,17 @@ impl<'a> Pass<'a> {
                 let mut ms = src.text_min(i, w);
                 if self.volatile[i] {
                     ms.x = f(src.max_content(i));
+                }
+                if self.io.ppp != 1.0 {
+                    // Unity's line height on a scaled panel (measure_leaf).
+                    if let Some((h0, h1)) = src.line_fix(i) {
+                        if h0 > 0.0 {
+                            let n = (d(ms.y) / h0).round();
+                            if n > 0.0 {
+                                ms.y = f(n * h1);
+                            }
+                        }
+                    }
                 }
                 ms
             }

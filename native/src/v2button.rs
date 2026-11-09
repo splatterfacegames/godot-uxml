@@ -49,7 +49,7 @@ impl ButtonText {
 
     /// Whether this block can serve `text` with `st` without shaping again.
     pub fn same_shape(&self, text: &GString, st: &TextStyle) -> bool {
-        self.text == *text && self.st.font == st.font && self.st.size == st.size && self.st.line_spacing == st.line_spacing
+        self.text == *text && self.st.font == st.font && self.st.size == st.size && self.st.line_spacing == st.line_spacing && self.st.line_fix == st.line_fix
     }
 
     fn shape(&mut self) {
@@ -116,7 +116,7 @@ impl ButtonText {
 
     /// The text of a Button of `size` with stylebox margins `m`, recorded
     /// into `ci` (Button's NOTIFICATION_DRAW, no icon).
-    pub fn draw(&mut self, ci: Rid, size: Vector2, m: [f32; 4]) {
+    pub fn draw(&mut self, ci: Rid, size: Vector2, m: [f32; 4], os: f32) {
         if self.text.is_empty() {
             return;
         }
@@ -137,8 +137,8 @@ impl ButtonText {
         ofs.x += m[0];
         ofs.y = (remained.y - p.get_size().y) / 2.0 + m[1];
         if self.st.outline_size > 0 && self.st.outline_color.a > 0.0 {
-            p.draw_outline_ex(ci, ofs).outline_size(self.st.outline_size).color(self.st.outline_color).done();
+            p.draw_outline_ex(ci, ofs).outline_size(self.st.outline_size).color(self.st.outline_color).oversampling(os).done();
         }
-        p.draw_ex(ci, ofs).color(self.st.color).done();
+        p.draw_ex(ci, ofs).color(self.st.color).oversampling(os).done();
     }
 }

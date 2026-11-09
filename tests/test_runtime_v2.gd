@@ -197,7 +197,9 @@ func test_text_field_editor_is_a_line_edit() -> void:
 	var le := doc.get_native("tf") as LineEdit
 	h.eq(le.text, "abc", "the editor has the value")
 	var ed := UxmlParts.find_part(doc.get_element_model("tf"), "editor")
-	h.eq(le.get_rect(), doc.get_element_rect(ed), "the LineEdit is at the editor part's rect")
+	# It sits in a Control at its field's place (as v1's in its field's).
+	var er := Rect2((le.get_parent() as Control).position + le.position, le.size)
+	h.eq(er, doc.get_element_rect(ed), "the LineEdit is at the editor part's rect")
 	var vals := []
 	doc.value_changed.connect(func(n, v): vals.append([n, v]))
 	le.grab_focus()
@@ -285,4 +287,114 @@ func test_scroll_view_wheel_and_focus_scroll() -> void:
 	var off := doc.get_scroll_offset("sv")
 	h.check(off.y > 400.0, "scroll_to shows a row below the viewport (%s)" % off)
 	h.check(not doc.get_native("r0").visible, "a row scrolled out has its Control hidden")
+	_unload(doc)
+
+
+func test_panel_scaling_on_runtime_v2() -> void:
+	if not _native():
+		return
+	DirAccess.make_dir_recursive_absolute(TMP + "/Assets")
+	var x := FileAccess.open(TMP + "/Assets/s.uxml", FileAccess.WRITE)
+	x.store_string('<ui:UXML xmlns:ui="UnityEngine.UIElements">%s</ui:UXML>' % WIDGETS)
+	x.close()
+	var doc := UxmlDocument.new()
+	doc.runtime = 2
+	var ps := UxmlPanelSettings.new()
+	ps.scale_mode = UxmlPanelSettings.ScaleMode.CONSTANT_PIXEL_SIZE
+	ps.scale = 2.0
+	doc.panel_settings = ps
+	h.root.add_child(doc)
+	doc.size = Vector2(640, 480)
+	doc.load_document("Assets/s.uxml", TMP)
+	h.eq(doc.get_runtime(), 2, "a scaled document loads on v2 (%s)" % doc.runtime_fallback)
+	h.eq(doc.get_pixels_per_point(), 2.0, "two pixels per point")
+	h.eq(doc.get_panel_size(), Vector2(320, 240), "the panel in points")
+	var b := doc.get_element_model("b")
+	var r := doc.get_element_rect(b)
+	var rp := doc.get_element_rect(b, doc.get_document_model().root)
+	h.eq(r.size, rp.size * 2.0, "get_element_rect without a space is in document pixels (%s, %s)" % [r, rp])
+	h.eq(r.position, doc.panel_to_document(rp.position), "and at the panel point's place")
+	h.eq(doc.element_at(r.get_center()), b, "element_at takes document pixels")
+	var got := []
+	doc.button_pressed.connect(func(n): got.append(n))
+	_click(doc, doc.document_to_panel(r.get_center()))
+	h.eq(got, ["b"], "a click on the scaled Button presses it")
+	var w := (doc.get_native("s") as Control).size.x
+	h.eq(w, 300.0, "an interaction Control is sized in points (%s)" % w)
+	ps.scale = 1.0
+	doc._restyle_now()
+	h.eq(doc.get_runtime(), 2, "a new scale keeps the document on v2 (%s)" % doc.runtime_fallback)
+	h.eq(doc.get_pixels_per_point(), 1.0, "one pixel per point")
+	h.eq(doc.get_element_rect(b), doc.get_element_rect(b, doc.get_document_model().root), "at one pixel per point the rect is the panel rect")
+	_unload(doc)
+
+
+func test_list_view_on_runtime_v2() -> void:
+	if not _native():
+		return
+	var doc := _doc('<ui:ListView name="lv" fixed-item-height="20" selection-type="Single" style="height: 200px;" />')
+	h.eq(doc.get_runtime(), 2, "a FixedHeight ListView loads on v2 (%s)" % doc.runtime_fallback)
+	doc.set_list_source("lv", 1000, func(row: UxmlListRow, i: int): row.set_text("", "Item %d" % i))
+	doc._restyle_now()
+	var rows: Array = doc.get_list_rows("lv")
+	h.check(rows.size() >= 10 and rows.size() <= 13, "the rows of the viewport are in use (%d)" % rows.size())
+	var r0: UxmlListRow = rows[0]
+	h.eq(doc._v2.rt.call("get_text", doc._v2.index_of(r0.element)), "Item 0", "a row is bound through set_text")
+	doc.set_scroll_offset("lv", Vector2(0, 100))
+	doc._restyle_now()
+	var shown := {}
+	for r in rows:
+		shown[(r as UxmlListRow).index] = true
+	h.check(shown.has(5) and shown.has(14) and not shown.has(0), "a scroll of five rows rebinds the rows (%s)" % [shown.keys()])
+	var r5: UxmlListRow = null
+	for r in rows:
+		if (r as UxmlListRow).index == 7:
+			r5 = r
+	var rr := doc.get_element_rect(r5.element)
+	var top := doc.get_element_rect(doc.get_element_model("lv")).position.y
+	h.eq(rr.position.y - top, 7 * 20.0 - 100.0, "item 7 is drawn at its place under the scroll (%s)" % rr)
+	h.eq(doc.element_at(rr.get_center(), false, true), r5.element, "the hit test finds its row")
+	var got := []
+	doc.selection_changed.connect(func(n, ix): got.append(ix))
+	_click(doc, rr.get_center())
+	h.eq(got, [[7]], "a click selects the item")
+	_unload(doc)
+
+
+func test_tabindex_focus_ring_on_runtime_v2() -> void:
+	if not _native():
+		return
+	var doc := _doc('<ui:Button name="a" text="a"/><ui:Button name="b" text="b" tabindex="2"/>'
+		+ '<ui:Button name="c" text="c" tabindex="-1"/><ui:Button name="d" text="d" tabindex="1"/>'
+		+ '<ui:Button name="e" text="e"/><ui:VisualElement name="f" tabindex="3"/>')
+	h.eq(doc.get_runtime(), 2, "tabindex loads on v2 (%s)" % doc.runtime_fallback)
+	var names: Array = []
+	for t in doc.get_focus_ring():
+		names.append(doc._el_names.get(doc._el_of.get(t)))
+	h.eq(names, ["d", "b", "a", "e"], "positive tabindex first, then 0 in tree order; negative and unfocusable left out")
+	h.eq((doc.get_native("c") as Control).focus_mode, Control.FOCUS_CLICK, "negative tabindex: focusable by pointer only")
+	h.eq(doc.get_native("d").get_node(doc.get_native("d").focus_next), doc.get_native("b"), "focus_next chain")
+	doc.get_element_model("e").set_attribute("tabindex", "5")
+	doc._restyle_now()
+	names = []
+	for t in doc.get_focus_ring():
+		names.append(doc._el_names.get(doc._el_of.get(t)))
+	h.eq(names, ["d", "b", "e", "a"], "a tabindex change rebuilds the ring")
+	_unload(doc)
+
+
+func test_editor_clipped_by_overflow_hidden() -> void:
+	if not _native():
+		return
+	var doc := _doc('<ui:VisualElement name="box" style="overflow: hidden; width: 120px; margin-top: 50px; flex-direction: row;">'
+		+ '<ui:TextField name="tf" value="abc" style="width: 300px; flex-shrink: 0;" /></ui:VisualElement>')
+	h.eq(doc.get_runtime(), 2, "loads on v2 (%s)" % doc.runtime_fallback)
+	var le := doc.get_native("tf") as Control
+	var wrap := le.get_parent() as Control
+	var box := doc.get_element_rect(doc.get_element_model("box"))
+	h.check(wrap.clip_contents, "the editor's Control clips it")
+	var wr := Rect2(wrap.position, wrap.size)
+	h.check(box.encloses(wr), "to the part of it inside the box (%s in %s)" % [wr, box])
+	var ed := UxmlParts.find_part(doc.get_element_model("tf"), "editor")
+	h.eq(Rect2(wrap.position + le.position, le.size), doc.get_element_rect(ed), "the editor keeps its rect")
 	_unload(doc)

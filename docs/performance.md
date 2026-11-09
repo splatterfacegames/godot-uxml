@@ -2871,3 +2871,92 @@ the per-round ratios:
 | `bench.gd --only=hud` (4 ops, full iterations) | 0.96 to 1.07 |
 
 No op is slower beyond the spread of its rounds.
+
+## Runtime v2, phase 3 (`runtime/v2-phase3`)
+
+Phase 3 so far: the cross-pass layout cache on the element table, panel
+scaling on v2, the FixedHeight ListView (rows placed by position offsets of
+the table, the scroll offset out of the cascade), tabindex, sliders with
+`show-input-field`, elided placeholders and editors clipped by `overflow:
+hidden` (`docs/design.md`, "Phase 3"). v2 stays an opt-in.
+
+### Method
+
+`python tools/unity-bench/run.py --arms godot-release,godot-release-v2,unity-il2cpp --rounds 5 --iters 60 --skip-build`
+after a fresh release export of the branch (`run.export_godot`); the IL2CPP
+player of phase 1 (its documents are unchanged). Other sessions loaded the
+machine (gate runs of this branch ran beside it): compare the ratios. The
+ListView bind callback writes its Labels with `UxmlListRow.set_text` on v2.
+
+### Results (ms, release template, median of the 5 rounds)
+
+| Operation | v1 | v2 | Unity (IL2CPP) | v2 / v1 | v2 / Unity | phase 2 v2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| big: load | 633 | **300** | 44.7 | 0.47 | 6.7 | 298 |
+| big: load + first frame | 679 | **293** | 71.6 | 0.43 | 4.1 | 303 |
+| big: hover toggle (button) | 0.504 | **0.415** | 1.010 | 0.82 | 0.41 | 0.702 |
+| big: hover toggle (card, descendant selector) | 1.325 | **0.583** | 1.047 | 0.44 | 0.56 | 0.976 |
+| big: restyle, no change | 0.008 | **0.005** | 0.012 | 0.63 | 0.42 | 0.006 |
+| big: class change (card) | 5.13 | **3.70** | 1.60 | 0.72 | 2.3 | 8.53 |
+| big: label text change + layout | 3.32 | **2.66** | 1.38 | 0.80 | 1.9 | 7.28 |
+| big: resize | 6.96 | **6.32** | 3.90 | 0.91 | 1.6 | 14.0 |
+| settings: load | 58.6 | **35.4** | 4.45 | 0.60 | 8.0 | 35.5 |
+| settings: switch tab | 4.53 | **1.09** | 1.41 | 0.24 | 0.78 | 1.30 |
+| inventory: load | 58.7 | **23.5** | 2.90 | 0.40 | 8.1 | 23.4 |
+| inventory: select slot | 0.800 | **0.411** | 0.311 | 0.51 | 1.3 | 0.575 |
+| inventory: count change + layout | 0.516 | **0.352** | 0.275 | 0.68 | 1.3 | 0.550 |
+| dialog: load | 8.25 | **6.61** | 0.303 | 0.80 | 22 | 6.97 |
+| dialog: typewriter character + layout | 0.343 | **0.325** | 0.093 | 0.95 | 3.5 | 0.378 |
+| hud: frame, 8 labels + layout | **0.386** | 0.409 | 0.318 | 1.06 | 1.3 | 0.412 |
+| listview: load, 10,000 items | 89.0 | **34.4** | 3.66 | 0.39 | 9.4 | (v1) |
+| listview: scroll 3 rows | 2.06 | **1.10** | 0.055 | 0.53 | 20 | (v1) |
+| listview: rebind visible items | 2.12 | **1.33** | 0.344 | 0.63 | 3.9 | (v1) |
+| frame: big document, idle | 0.539 | 0.559 | 2.035 | 1.04 | 0.27 | 0.534 |
+
+Every update of the big document that lays it out is now below v1 (phase 2:
+about twice v1). The layout part of a class change is about 1 ms of native
+layout (a full pass was 5.4 to 6.7 ms); what remains is the cascade of the
+changed card, the draw of the elements that moved or changed, the GDScript
+of the restyle path and the 310 interaction Controls that move (placed in
+one native call). A ListView scroll of three rows costs half of v1's, 20x
+Unity's: the rebind runs runtime v1's CollectionBehavior and bind_row in
+GDScript (row classes through the model and the cascade), the bind
+callback's six texts are shaped again, and the rows lay out (the cache keeps
+the other rows).
+
+### Where a v2 load of the big document goes (editor binary, ms)
+
+`bench/v2/load_cost.gd -- --doc=big --n=7` and the native timers
+(`bench/prof/ops.gd --op=big-load --runtime=2`), the machine loaded:
+
+| Step | ms |
+| --- | ---: |
+| parse, theme attach (GDScript model: phase 5) | about 40 |
+| part trees (`UxmlParts.expand`, GDScript model: phase 5) | 43 |
+| cascade setup (rule compilation in GDScript: phase 5) | 27 |
+| index (names, kinds, the pooled rows) | 13 |
+| interaction Controls (about 470: their creation and entering the tree 67, the behaviors and their setup 8) | 81 |
+| first cascade (native 33) | 32 |
+| build (native: records, texts shaped) | 32 |
+| layout: the native pass 30 (wrapping text 12, line breaking 12), the layout hooks of 38 sliders and the ScrollView, their restyle and second layout, the placement of the Controls | 75 |
+| draw (1,950 canvas items) | 16 |
+| total | about 345 (v1 760) |
+
+The largest step outside phase 5 is the interaction Controls (Godot's cost
+of making about 470 Controls and adding them to the tree; adding them to a
+holder Control out of the tree and the holder once did not change it,
+67 ms against 70). Then the layout step, half native text measuring, half
+GDScript hooks. No cut of these steps was measured to hold beyond the noise
+of the loaded machine in this phase.
+
+### Coverage
+
+- `bench/equiv_v2.gd` (windowed): 246 documents, of which 30 new scaled
+  documents (the ten cases of `bench/parity/scaled/matrix.json` at 2, 1.33
+  and 0.8 pixels per point) and the bound ListView of the benchmarks.
+- `python bench/pixels.py --runtime 2`: 103 of 177 cases on v2, renders
+  identical to v1's; scaled: 121 of 172 cases on v2 (phase 2: 0), 230 of
+  their 242 renders identical to v1's; the 12 others are `scl-settings`,
+  where v1's Buttons keep a Control a fraction of a pixel larger than their
+  layout rect (51.33 px for a 51 px rect at 1.33 pixels per point) and v2
+  draws the layout's rect, Unity's.

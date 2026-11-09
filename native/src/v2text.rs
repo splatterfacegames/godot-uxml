@@ -58,6 +58,10 @@ pub struct TextStyle {
     pub shadow_color: Color,
     pub shadow_ofs: Vector2,
     pub shadow_outline_size: i32,
+    /// Unity's line height on a scaled panel: [the font's line height,
+    /// Unity's in points] (UxmlStyleApplier._set_line_fix); None at one
+    /// pixel per point.
+    pub line_fix: Option<(f64, f64)>,
 }
 
 struct Para {
@@ -114,6 +118,7 @@ impl TextBlock {
             && self.st.trim == st.trim
             && self.st.line_spacing == st.line_spacing
             && self.st.paragraph_spacing == st.paragraph_spacing
+            && self.st.line_fix == st.line_fix
     }
 
     fn free(&mut self) {
@@ -327,7 +332,7 @@ impl TextBlock {
 
     /// The draw of a Label of `size` with content margins `m` (left, top,
     /// right, bottom) into canvas item `ci` at `pos`.
-    pub fn draw(&mut self, ci: Rid, pos: Vector2, size: Vector2, m: [f32; 4]) {
+    pub fn draw(&mut self, ci: Rid, pos: Vector2, size: Vector2, m: [f32; 4], os: f32) {
         let _p = crate::prof::scope("v2.draw_text");
         let width = (size.x - (m[0] + m[2])) as i32;
         self.break_at(width.max(if self.st.autowrap == AUTOWRAP_OFF { 0 } else { 1 }));
@@ -409,18 +414,20 @@ impl TextBlock {
                     t.shaped_text_draw_outline_ex(l, ci, at + st.shadow_ofs)
                         .outline_size(st.shadow_outline_size as i64)
                         .color(st.shadow_color)
+                        .oversampling(os)
                         .done();
                 }
                 if st.shadow_color.a > 0.0 {
-                    t.shaped_text_draw_ex(l, ci, at + st.shadow_ofs).color(st.shadow_color).done();
+                    t.shaped_text_draw_ex(l, ci, at + st.shadow_ofs).color(st.shadow_color).oversampling(os).done();
                 }
                 if st.outline_size > 0 && st.outline_color.a != 0.0 {
                     t.shaped_text_draw_outline_ex(l, ci, at)
                         .outline_size(st.outline_size as i64)
                         .color(st.outline_color)
+                        .oversampling(os)
                         .done();
                 }
-                t.shaped_text_draw_ex(l, ci, at).color(st.color).done();
+                t.shaped_text_draw_ex(l, ci, at).color(st.color).oversampling(os).done();
                 ofs.y = (ofs.y as f64 + (d + line_spacing as f64)) as f32;
             }
             drawn += end;

@@ -88,8 +88,13 @@ func _initialize() -> void:
 	quit(0)
 
 func _bind(row, i):
-	(row.get_native("lname") as Label).text = "Entry %d" % i
-	(row.get_native("lval") as Label).text = str(i * 3)
+	var ln := row.get_native("lname") as Label
+	if ln == null:
+		row.set_text("lname", "Entry %d" % i)
+		row.set_text("lval", str(i * 3))
+	else:
+		ln.text = "Entry %d" % i
+		(row.get_native("lval") as Label).text = str(i * 3)
 
 func _load(path: String, size: Vector2, lv := false) -> void:
 	var s := PackedFloat64Array()
