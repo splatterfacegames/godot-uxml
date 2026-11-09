@@ -61,14 +61,15 @@ const UNPICKED := {"checkmark": true, "text": true, "checkmark-background": true
 const PART_KINDS := {"VisualElement": K_BOX, "TextInput": K_BOX, "Label": K_LABEL,
 	"TextElement": K_LABEL | F_PLAIN, "PopupTextElement": K_LABEL | F_PLAIN,
 	"Scroller": K_BOX, "ScrollerSlider": K_BOX, "RepeatButton": K_BUTTON, "Toggle": K_BOX,
-	"RadioButton": K_BOX, "ScrollView": K_BOX, "TemplateContainer": K_BOX}
+	"RadioButton": K_BOX, "ScrollView": K_BOX, "TemplateContainer": K_BOX, "TextField": K_BOX,
+	"IntegerField": K_BOX, "FloatField": K_BOX}
 
 ## The attributes of the controls that v2 implements (beside COMMON).
 const CONTROL_ATTRS := {
 	"Button": ["text", "enable-rich-text", "parse-escape-sequences", "display-tooltip-when-elided"],
 	"Toggle": ["value", "label", "text", "toggle-on-label-click"],
-	"Slider": ["value", "low-value", "high-value", "label", "page-size", "direction", "inverted", "fill"],
-	"SliderInt": ["value", "low-value", "high-value", "label", "page-size", "direction", "inverted", "fill"],
+	"Slider": ["value", "low-value", "high-value", "label", "page-size", "direction", "inverted", "fill", "show-input-field"],
+	"SliderInt": ["value", "low-value", "high-value", "label", "page-size", "direction", "inverted", "fill", "show-input-field"],
 	"DropdownField": ["choices", "index", "value", "label"],
 	"TextField": ["value", "text", "label", "max-length", "password", "mask-character", "readonly",
 		"placeholder-text", "hide-placeholder-on-focus", "is-delayed", "keyboard-type", "auto-correction",
@@ -93,7 +94,7 @@ const NO_BEHAVIOR := {"VisualElement": true, "Label": true, "Image": true, "Temp
 	"UXML": true, "Style": true, "Button": true, "TextInput": true, "TextElement": true,
 	"PopupTextElement": true, "RepeatButton": true, "ScrollerSlider": true}
 const COMMON_ATTRS := {"name": true, "class": true, "style": true, "tooltip": true, "focusable": true,
-	"picking-mode": true, "enabled": true, "view-data-key": true, "usage-hints": true}
+	"picking-mode": true, "enabled": true, "view-data-key": true, "usage-hints": true, "tabindex": true}
 
 var doc: UxmlDocument
 var cascade: UssCascade
@@ -162,8 +163,6 @@ static func uncovered(model: UxmlDocumentModel) -> String:
 			continue
 		if not TAGS.has(el.local):
 			return "element <%s>" % el.local
-		if el.has_attribute("tabindex"):
-			return "tabindex"
 		var allowed: Array = CONTROL_ATTRS.get(el.local, [])
 		if allowed.is_empty():
 			continue  # the core checks the attributes of static elements
@@ -245,6 +244,12 @@ func load() -> String:
 	var kinds := _index()
 	t0 = _step("v2: index", t0)
 	_make_proxies()
+	# tabindex: Unity's focus ring over the interaction Controls (runtime
+	# v1's UxmlCommonAttributes, which reads the document's element maps).
+	for el in cascade.els:
+		if el.has_attribute("tabindex"):
+			doc._attrs.rebuild_focus_ring()
+			break
 	t0 = _step("v2: controls", t0)
 	cascade.update(_options())
 	t0 = _step("v2: first cascade", t0)
@@ -578,11 +583,27 @@ func _place_proxies() -> void:
 		var c: Control = _proxy_ctls[w]
 		var wrap: Control = _edit_wrap[i]
 		var r: Rect2 = rt.call("local_rect", i)
-		var wp := _editor_frame(i, rects[k * 4] - r.position)
+		var host := Rect2(rects[k * 4], rects[k * 4 + 1])
+		var vis := Rect2(rects[k * 4 + 2], rects[k * 4 + 3])
+		var at := r.position
+		var wp: Vector2
+		var clipped := vis.position != host.position or vis.size.x < host.size.x - 0.001 or vis.size.y < host.size.y - 0.001
+		if clipped:
+			# An ancestor with overflow: hidden cuts the editor (runtime v1's
+			# Controls clip their children): the Control it sits in is that
+			# clip, the visible part of its rect.
+			wp = vis.position
+			at = host.position - vis.position
+			if wrap.size != vis.size:
+				wrap.size = vis.size
+		else:
+			wp = _editor_frame(i, host.position - r.position)
+		if wrap.clip_contents != clipped:
+			wrap.clip_contents = clipped
 		if wrap.position != wp:
 			wrap.position = wp
-		if c.position != r.position:
-			c.position = r.position
+		if c.position != at:
+			c.position = at
 		if c.size != r.size:
 			c.size = r.size
 		# The editor draws: it stays at its rect (its own clip), with the
@@ -912,6 +933,8 @@ func _on_model_changed(el: UxmlElement) -> void:
 		b.on_quiet_change(doc._quiet_attr)
 		return
 	_dirty[el] = true
+	if el.changed_attribute == "tabindex":
+		doc._attrs.rebuild_focus_ring()
 	if el.changed_attribute == "text" and el.local == "Label":
 		var i := index_of(el)
 		if i >= 0:
@@ -1043,6 +1066,16 @@ func _layout(force: bool = false, restyled: bool = true) -> void:
 		restyled = restyled or not ch.is_empty()
 	rt.call("take_vis_changed")
 	_place_proxies()
+	elide_placeholders()
+
+
+## text-overflow: ellipsis on a text field elides its placeholder at the
+## width of its editor (runtime v1's _update_elision after a placement).
+func elide_placeholders() -> void:
+	if doc._v2 != self:
+		return
+	for b in doc._placeholder_fields:
+		b.elide_placeholder()
 
 
 ## The insets the layout resolved (padding and borders on the pixel grid)

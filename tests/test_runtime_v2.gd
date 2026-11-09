@@ -359,3 +359,42 @@ func test_list_view_on_runtime_v2() -> void:
 	_click(doc, rr.get_center())
 	h.eq(got, [[7]], "a click selects the item")
 	_unload(doc)
+
+
+func test_tabindex_focus_ring_on_runtime_v2() -> void:
+	if not _native():
+		return
+	var doc := _doc('<ui:Button name="a" text="a"/><ui:Button name="b" text="b" tabindex="2"/>'
+		+ '<ui:Button name="c" text="c" tabindex="-1"/><ui:Button name="d" text="d" tabindex="1"/>'
+		+ '<ui:Button name="e" text="e"/><ui:VisualElement name="f" tabindex="3"/>')
+	h.eq(doc.get_runtime(), 2, "tabindex loads on v2 (%s)" % doc.runtime_fallback)
+	var names: Array = []
+	for t in doc.get_focus_ring():
+		names.append(doc._el_names.get(doc._el_of.get(t)))
+	h.eq(names, ["d", "b", "a", "e"], "positive tabindex first, then 0 in tree order; negative and unfocusable left out")
+	h.eq((doc.get_native("c") as Control).focus_mode, Control.FOCUS_CLICK, "negative tabindex: focusable by pointer only")
+	h.eq(doc.get_native("d").get_node(doc.get_native("d").focus_next), doc.get_native("b"), "focus_next chain")
+	doc.get_element_model("e").set_attribute("tabindex", "5")
+	doc._restyle_now()
+	names = []
+	for t in doc.get_focus_ring():
+		names.append(doc._el_names.get(doc._el_of.get(t)))
+	h.eq(names, ["d", "b", "e", "a"], "a tabindex change rebuilds the ring")
+	_unload(doc)
+
+
+func test_editor_clipped_by_overflow_hidden() -> void:
+	if not _native():
+		return
+	var doc := _doc('<ui:VisualElement name="box" style="overflow: hidden; width: 120px; margin-top: 50px; flex-direction: row;">'
+		+ '<ui:TextField name="tf" value="abc" style="width: 300px; flex-shrink: 0;" /></ui:VisualElement>')
+	h.eq(doc.get_runtime(), 2, "loads on v2 (%s)" % doc.runtime_fallback)
+	var le := doc.get_native("tf") as Control
+	var wrap := le.get_parent() as Control
+	var box := doc.get_element_rect(doc.get_element_model("box"))
+	h.check(wrap.clip_contents, "the editor's Control clips it")
+	var wr := Rect2(wrap.position, wrap.size)
+	h.check(box.encloses(wr), "to the part of it inside the box (%s in %s)" % [wr, box])
+	var ed := UxmlParts.find_part(doc.get_element_model("tf"), "editor")
+	h.eq(Rect2(wrap.position + le.position, le.size), doc.get_element_rect(ed), "the editor keeps its rect")
+	_unload(doc)

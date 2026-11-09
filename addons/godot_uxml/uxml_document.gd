@@ -510,6 +510,7 @@ func _start_runtime() -> bool:
 		var why := g.load()
 		if why.is_empty():
 			_v2 = g
+			g.elide_placeholders()
 			diagnostics = g.diagnostics()
 			return true
 		runtime_fallback = why

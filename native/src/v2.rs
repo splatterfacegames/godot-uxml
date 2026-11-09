@@ -495,7 +495,9 @@ impl UxmlRuntimeV2 {
                         }
                     }
                     // The GDScript side makes the interaction Control and the tooltip.
-                    "focusable" | "tooltip" => {}
+                    // The GDScript side makes the interaction Control, the
+                    // tooltip and the Tab ring (UxmlCommonAttributes).
+                    "focusable" | "tooltip" | "tabindex" => {}
                     other => return GString::from(format!("attribute {} (element {}) is not handled by runtime v2 yet", other, i).as_str()),
                 }
             }
