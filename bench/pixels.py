@@ -165,6 +165,8 @@ def compare(name, udir, gdir, ddir, tol):
     geo_notes = []
     if os.path.exists(rp):
         ours = json.load(open(rp, encoding="utf-8"))
+        r["runtime"] = ours.pop("__runtime", 1)
+        r["fallback"] = ours.pop("__fallback", "")
         for e in unity_dump_elements(name):
             if e["path"] not in ours or e.get("style", {}).get("display") == "none":
                 continue
@@ -243,10 +245,12 @@ def explain(r):
     return lines
 
 
-def render(godot, names, gdir):
+def render(godot, names, gdir, runtime=1):
     os.makedirs(gdir, exist_ok=True)
     cmd = [godot, "--path", REPO, "--resolution", "64x64", "-s", "res://bench/pixels_render.gd",
            "--", "--out", gdir]
+    if runtime != 1:
+        cmd += ["--runtime", str(runtime)]
     if names:
         cmd += ["--only", ",".join(names)]
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -276,6 +280,8 @@ def main():
     ap.add_argument("--out", default=OUT)
     ap.add_argument("--tol", type=int, default=8)
     ap.add_argument("--markdown", default="")
+    ap.add_argument("--runtime", type=int, default=1,
+                    help="2: runtime v2 for the cases it covers (the others stay on v1); renders into out/godot-v2")
     ap.add_argument("--json", default="")
     ap.add_argument("--explain", action="store_true",
                     help="list each region of box differences with the Unity element that holds it")
@@ -284,9 +290,9 @@ def main():
     names = sorted(f[:-4] for f in os.listdir(args.unity) if f.endswith(".png") and not f.endswith(".notext.png"))
     if only:
         names = [n for n in names if n in only]
-    gdir = os.path.join(args.out, "godot")
-    ddir = os.path.join(args.out, "diff")
-    if not args.no_render and not render(args.godot, only, gdir):
+    gdir = os.path.join(args.out, "godot" if args.runtime == 1 else "godot-v%d" % args.runtime)
+    ddir = os.path.join(args.out, "diff" if args.runtime == 1 else "diff-v%d" % args.runtime)
+    if not args.no_render and not render(args.godot, only, gdir, args.runtime):
         return 1
     rows = [compare(n, args.unity, gdir, ddir, args.tol) for n in names]
     head = ["| case | boxes | exact | within 1px | max error | text IoU | text px Unity / godot-uxml | text edge px | runtime rects |",
@@ -312,6 +318,9 @@ def main():
                "box pixels %.3f%% exact, %.3f%% within 1px; text mask IoU %.3f (mean); "
                "runtime rects %d/%d within 0.5px") % (
         len(done), len(rows) - len(done), exact, aa, len(done) - exact - aa, 100 * px, 100 * near, iou, gok, gn)
+    if args.runtime != 1:
+        v2 = [r["name"] for r in done if r.get("runtime") == args.runtime]
+        summary += "; runtime v%d: %d cases" % (args.runtime, len(v2))
     print("")
     print(summary)
     if args.markdown:

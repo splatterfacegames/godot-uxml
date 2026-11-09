@@ -94,6 +94,8 @@ func _write_docs(dir: String) -> void:
 	var w = Workloads.new()
 	var files := {
 		"big.uxml": b._big_uxml(),
+		"big-static.uxml": b._big_static_uxml(),
+		"static.uss": b._static_uss(),
 		"base.uss": b._base_uss(),
 		"components.uss": b._components_uss(),
 		"theme.uss": b._theme_uss(),

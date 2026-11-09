@@ -8,6 +8,8 @@ mod cascade;
 mod layout;
 mod parse;
 mod prof;
+mod v2;
+mod v2text;
 
 struct UxmlNativeExtension;
 
@@ -18,6 +20,7 @@ unsafe impl ExtensionLibrary for UxmlNativeExtension {
         // while the engine is still up.
         if stage == InitStage::MainLoop || stage == InitStage::Scene {
             cascade::clear_cache();
+            v2text::clear_cache();
         }
     }
 }
