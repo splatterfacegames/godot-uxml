@@ -39,6 +39,12 @@ var image: StyleBox = null
 ## the antialiased edge, and draw no border: the mask of a rounded
 ## overflow clip (UxmlClip).
 var fill_inner := false
+## Device pixels per local unit (the pixels per point of a scaled panel,
+## UxmlPanelScale). The geometry is built in device pixels (the box at
+## its size times px) and drawn scaled by 1 / px, so every edge is
+## antialiased over one device pixel at any panel scale, as Unity draws
+## it, and not over px pixels.
+var px := 1.0
 
 ## Mesh groups: background, the four sides (1 + side), the image, the mask.
 const _G_BG := 0
@@ -75,6 +81,8 @@ func _draw(to_canvas_item: RID, rect: Rect2) -> void:
 	if rect.size != _geo_size or _geo == null:
 		_find_geo(rect.size)
 	var xf := Transform2D(0.0, rect.position)
+	if px != 1.0:
+		xf = Transform2D(Vector2(1.0 / px, 0.0), Vector2(0.0, 1.0 / px), rect.position)
 	if fill_inner:
 		_mesh(to_canvas_item, _G_MASK, xf, Color.WHITE, RID())
 		return
@@ -155,12 +163,27 @@ func _shape_flags() -> float:
 func _find_geo(size: Vector2) -> void:
 	var flags := _shape_flags()
 	var key := PackedFloat64Array([size.x, size.y, widths[0], widths[1], widths[2], widths[3],
-		radii[0], radii[1], radii[2], radii[3], flags])
+		radii[0], radii[1], radii[2], radii[3], flags, px])
 	var hit = _cache.get(key)
 	if hit == null:
 		if _cache.size() >= _CACHE_MAX:
 			_cache.clear()
-		hit = _build(Rect2(Vector2.ZERO, size), _img_round, _uniform >= 0)
+		if px == 1.0:
+			hit = _build(Rect2(Vector2.ZERO, size), _img_round, _uniform >= 0)
+		else:
+			# In device pixels: the widths and radii scaled for the build.
+			var w0 := widths
+			var r0 := radii
+			var ws := PackedFloat64Array()
+			var rs := PackedFloat64Array()
+			for k in 4:
+				ws.append(w0[k] * px)
+				rs.append(r0[k] * px if k < r0.size() else 0.0)
+			widths = ws
+			radii = rs
+			hit = _build(Rect2(Vector2.ZERO, size * px), _img_round, _uniform >= 0)
+			widths = w0
+			radii = r0
 		_cache[key] = hit
 	_geo = hit
 	_geo_size = size

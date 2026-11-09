@@ -30,7 +30,15 @@ green), prints one line per case and a summary line:
   PIXELS: <n> cases; boxes: <a> exact, <b> within 1px; ...
 
   python bench/pixels.py [--godot EXE] [--only a,b] [--no-render]
-                         [--markdown FILE] [--tol 8]
+                         [--markdown FILE] [--tol 8] [--no-scaled]
+
+Panel scaling: then the same for the panel-scaling renders
+(bench/pixels/unity-scaled/, tools/unity-dump/run.py --scaled ... --render
+bench/pixels/unity-scaled), drawn by pixels_render.gd --scaled through
+UxmlDocument.panel_settings at the dump's screen size, cropped to the case
+host as Unity's renders are. Runtime rects compare in pixels. A second table
+and summary (PIXELS SCALED) and a summary per scale; --no-scaled skips it,
+--scaled-only runs only it.
 
 Needs Pillow and numpy.
 """
@@ -46,6 +54,9 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 UNITY = os.path.join(HERE, "pixels", "unity")
+UNITY_SCALED = os.path.join(HERE, "pixels", "unity-scaled")
+DUMPS = os.path.join(HERE, "parity", "unity")
+DUMPS_SCALED = os.path.join(HERE, "parity", "unity-scaled")
 OUT = os.path.join(HERE, "pixels", "out")
 DEFAULT_GODOT = os.environ.get("GODOT", "godot")
 TEXT_THRESHOLD = 24
@@ -115,7 +126,7 @@ def bbox(mask):
     return (ys.min(), xs.min(), ys.max(), xs.max())
 
 
-def compare(name, udir, gdir, ddir, tol):
+def compare(name, udir, gdir, ddir, tol, dumps=DUMPS):
     uf, un = load(os.path.join(udir, name + ".png")), load(os.path.join(udir, name + ".notext.png"))
     gp = os.path.join(gdir, name + ".png")
     if not os.path.exists(gp):
@@ -163,16 +174,19 @@ def compare(name, udir, gdir, ddir, tol):
     rp = os.path.join(gdir, name + ".rects.json")
     geo_n = geo_bad = 0
     geo_notes = []
+    ppp = dump_ppp(name, dumps)
     if os.path.exists(rp):
         ours = json.load(open(rp, encoding="utf-8"))
-        for e in unity_dump_elements(name):
+        for e in unity_dump_elements(name, dumps):
             if e["path"] not in ours or e.get("style", {}).get("display") == "none":
                 continue
             st = e.get("style", {})
             if st.get("rotate", "0").split(" ")[0] not in ("0", "0deg") or not str(st.get("scale", "")).startswith("(1.00, 1.00"):
                 continue
             rc = e["rect"]
-            want = (rc["x"], rc["y"], rc["width"], rc["height"])
+            # In pixels (a scaled panel: Unity's points times its pixels
+            # per point; the renderer writes pixels).
+            want = (rc["x"] * ppp, rc["y"] * ppp, rc["width"] * ppp, rc["height"] * ppp)
             got = ours[e["path"]]
             geo_n += 1
             if max(abs(a - b) for a, b in zip(want, got)) > 0.5:
@@ -203,22 +217,32 @@ def compare(name, udir, gdir, ddir, tol):
     return r
 
 
-def unity_dump_elements(name):
-    p = os.path.join(HERE, "parity", "unity", name + ".json")
+def unity_dump_elements(name, dumps=DUMPS):
+    p = os.path.join(dumps, name + ".json")
     if not os.path.exists(p):
         return []
     return json.load(open(p, encoding="utf-8"))["elements"]
 
 
-def unity_elements(name):
-    """The Unity dump's elements with panel rects (bench/parity/unity)."""
-    p = os.path.join(HERE, "parity", "unity", name + ".json")
+def dump_ppp(name, dumps=DUMPS):
+    """Unity's pixels per point of a dump (1 without panel scaling)."""
+    p = os.path.join(dumps, name + ".json")
+    if not os.path.exists(p):
+        return 1.0
+    sc = json.load(open(p, encoding="utf-8")).get("scaling")
+    return float(sc["pixelsPerPoint"]) if sc else 1.0
+
+
+def unity_elements(name, dumps=DUMPS):
+    """The Unity dump's elements with rects in pixels of its render."""
+    p = os.path.join(dumps, name + ".json")
     if not os.path.exists(p):
         return []
     d = json.load(open(p, encoding="utf-8"))
+    k = float(d["scaling"]["pixelsPerPoint"]) if d.get("scaling") else 1.0
     out = []
     for e in d["elements"] + d.get("overlay", []):
-        rc = e["rect"]
+        rc = {key: float(v) * k for key, v in e["rect"].items()}
         label = e["type"] + ("#" + e["name"] if e["name"] else "")
         cls = [c for c in e["classes"] if c.startswith("unity-")][:1]
         if cls and not e["name"]:
@@ -227,10 +251,10 @@ def unity_elements(name):
     return out
 
 
-def explain(r):
+def explain(r, dumps=DUMPS):
     """Each region of box differences with the smallest Unity element that
     holds it."""
-    els = unity_elements(r["name"])
+    els = unity_elements(r["name"], dumps)
     lines = []
     for (y0, x0, y1, x1) in r.get("regions", [])[:12]:
         best = None
@@ -243,10 +267,10 @@ def explain(r):
     return lines
 
 
-def render(godot, names, gdir):
+def render(godot, names, gdir, scaled=False):
     os.makedirs(gdir, exist_ok=True)
     cmd = [godot, "--path", REPO, "--resolution", "64x64", "-s", "res://bench/pixels_render.gd",
-           "--", "--out", gdir]
+           "--", "--out", gdir] + (["--scaled"] if scaled else [])
     if names:
         cmd += ["--only", ",".join(names)]
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -267,6 +291,76 @@ def fmt(r):
         r["text_iou"], r["text_u"], r["text_g"], r["text_edge"], r["geo_n"] - r["geo_bad"], r["geo_n"])
 
 
+HEAD = ["| case | boxes | exact | within 1px | max error | text IoU | text px Unity / godot-uxml | text edge px | runtime rects |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+
+
+def summarize(label, rows):
+    done = [r for r in rows if "box_exact" in r]
+    exact = sum(1 for r in done if r["status"] == "exact")
+    aa = sum(1 for r in done if r["status"] == "1px")
+    px = sum(r["box_exact"] for r in done) / max(1, len(done))
+    near = sum(r["box_near"] for r in done) / max(1, len(done))
+    iou = sum(r["text_iou"] for r in done) / max(1, len(done))
+    gn = sum(r["geo_n"] for r in done)
+    gok = gn - sum(r["geo_bad"] for r in done)
+    return ("%s: %d cases (%d not rendered); boxes: %d exact, %d more within 1px, %d differ; "
+            "box pixels %.3f%% exact, %.3f%% within 1px; text mask IoU %.3f (mean); "
+            "runtime rects %d/%d within 0.5px") % (
+        label, len(done), len(rows) - len(done), exact, aa, len(done) - exact - aa, 100 * px, 100 * near, iou, gok, gn)
+
+
+def per_scale(rows):
+    """One row per panel setting and screen: <case>__<config>__<WxH>."""
+    groups = {}
+    for r in rows:
+        parts = r["name"].split("__")
+        if len(parts) != 3 or "box_exact" not in r:
+            continue
+        groups.setdefault((parts[1], parts[2]), []).append(r)
+    out = ["| config | screen | pixels per point | cases | box pixels exact | within 1px | text IoU | runtime rects |",
+           "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    for (cfg, scr), rs in sorted(groups.items()):
+        n = len(rs)
+        gn = sum(r["geo_n"] for r in rs)
+        out.append("| %s | %s | %.4f | %d | %.3f%% | %.3f%% | %.3f | %d/%d |" % (
+            cfg, scr, dump_ppp(rs[0]["name"], DUMPS_SCALED), n,
+            100 * sum(r["box_exact"] for r in rs) / n, 100 * sum(r["box_near"] for r in rs) / n,
+            sum(r["text_iou"] for r in rs) / n, gn - sum(r["geo_bad"] for r in rs), gn))
+    return out
+
+
+def run_set(args, only, udir, dumps, out, scaled, label):
+    names = sorted(f[:-4] for f in os.listdir(udir) if f.endswith(".png") and not f.endswith(".notext.png"))
+    if only:
+        names = [n for n in names if n in only]
+        if not names:
+            return [], [], ""
+    gdir = os.path.join(out, "godot")
+    ddir = os.path.join(out, "diff")
+    if not args.no_render and not render(args.godot, only, gdir, scaled):
+        return None, None, None
+    rows = [compare(n, udir, gdir, ddir, args.tol, dumps) for n in names]
+    lines = HEAD + [fmt(r) for r in rows]
+    print("\n".join(lines))
+    if args.explain:
+        for r in rows:
+            if r.get("regions") or r.get("geo_notes"):
+                print(r["name"])
+                print("\n".join(explain(r, dumps)))
+                for g in r.get("geo_notes", []):
+                    print("    rect " + g)
+    summary = summarize(label, rows)
+    if scaled:
+        print("")
+        table = per_scale(rows)
+        print("\n".join(table))
+        lines += [""] + table
+    print("")
+    print(summary)
+    return rows, lines, summary
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--godot", default=DEFAULT_GODOT)
@@ -277,49 +371,34 @@ def main():
     ap.add_argument("--tol", type=int, default=8)
     ap.add_argument("--markdown", default="")
     ap.add_argument("--json", default="")
+    ap.add_argument("--no-scaled", action="store_true", help="skip the panel-scaling renders")
+    ap.add_argument("--scaled-only", action="store_true", help="only the panel-scaling renders")
     ap.add_argument("--explain", action="store_true",
                     help="list each region of box differences with the Unity element that holds it")
     args = ap.parse_args()
     only = [x for x in args.only.split(",") if x]
-    names = sorted(f[:-4] for f in os.listdir(args.unity) if f.endswith(".png") and not f.endswith(".notext.png"))
-    if only:
-        names = [n for n in names if n in only]
-    gdir = os.path.join(args.out, "godot")
-    ddir = os.path.join(args.out, "diff")
-    if not args.no_render and not render(args.godot, only, gdir):
-        return 1
-    rows = [compare(n, args.unity, gdir, ddir, args.tol) for n in names]
-    head = ["| case | boxes | exact | within 1px | max error | text IoU | text px Unity / godot-uxml | text edge px | runtime rects |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
-    lines = head + [fmt(r) for r in rows]
-    print("\n".join(lines))
-    if args.explain:
-        for r in rows:
-            if r.get("regions") or r.get("geo_notes"):
-                print(r["name"])
-                print("\n".join(explain(r)))
-                for g in r.get("geo_notes", []):
-                    print("    rect " + g)
-    done = [r for r in rows if "box_exact" in r]
-    exact = sum(1 for r in done if r["status"] == "exact")
-    aa = sum(1 for r in done if r["status"] == "1px")
-    px = sum(r["box_exact"] for r in done) / max(1, len(done))
-    near = sum(r["box_near"] for r in done) / max(1, len(done))
-    iou = sum(r["text_iou"] for r in done) / max(1, len(done))
-    gn = sum(r["geo_n"] for r in done)
-    gok = gn - sum(r["geo_bad"] for r in done)
-    summary = ("PIXELS: %d cases (%d not rendered); boxes: %d exact, %d more within 1px, %d differ; "
-               "box pixels %.3f%% exact, %.3f%% within 1px; text mask IoU %.3f (mean); "
-               "runtime rects %d/%d within 0.5px") % (
-        len(done), len(rows) - len(done), exact, aa, len(done) - exact - aa, 100 * px, 100 * near, iou, gok, gn)
-    print("")
-    print(summary)
+    rows, lines, summary = [], [], ""
+    if not args.scaled_only:
+        rows, lines, summary = run_set(args, only, args.unity, DUMPS, args.out, False, "PIXELS")
+        if rows is None:
+            return 1
+    srows, slines, ssummary = [], [], ""
+    if not args.no_scaled and os.path.isdir(UNITY_SCALED):
+        print("")
+        srows, slines, ssummary = run_set(args, only, UNITY_SCALED, DUMPS_SCALED,
+                                          os.path.join(args.out, "scaled"), True, "PIXELS SCALED")
+        if srows is None:
+            return 1
+    if summary and ssummary:
+        print(summary)
     if args.markdown:
         with open(args.markdown, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines) + "\n\n" + summary + "\n")
+            if slines:
+                f.write("\n" + "\n".join(slines) + "\n\n" + ssummary + "\n")
     if args.json:
         with open(args.json, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(rows, f, indent=1, default=float)
+            json.dump(rows + srows, f, indent=1, default=float)
     return 0
 
 

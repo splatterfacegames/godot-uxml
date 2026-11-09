@@ -2141,6 +2141,7 @@ impl UxmlNativeCascade {
             buttons,
             text_clip: false,
             pixel_grid: false,
+            ppp: 1.0,
             auto_size: None,
             fields: ks.iter().map(|&b| b & 2 != 0).collect(),
             texrects,
@@ -2177,6 +2178,19 @@ impl UxmlNativeCascade {
     fn set_pixel_grid(&mut self, on: bool) {
         if let Some(io) = self.layout_in.as_mut() {
             io.pixel_grid = on;
+        }
+    }
+
+    /// The pixel grid in pixels per point (LayoutIn::ppp; panel scaling).
+    /// A change drops the cross-pass cache: its entries hold box lengths
+    /// rounded on the old grid.
+    #[func]
+    fn set_pixels_per_point(&mut self, ppp: f64) {
+        if let Some(io) = self.layout_in.as_mut() {
+            if io.ppp != ppp {
+                io.ppp = ppp;
+                self.xcache.clear();
+            }
         }
     }
 

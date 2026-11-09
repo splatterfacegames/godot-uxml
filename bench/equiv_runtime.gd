@@ -70,12 +70,22 @@ func _initialize() -> void:
 		["res://tests/fixtures/controls", "Assets/UI/controls.uxml", 120],
 		["res://tests/fixtures/editor", "Assets/UI/editor.uxml", 120],
 		["res://tests/fixtures/runtime", "Assets/UI/collections.uxml", 120],
+		# Panel scaling (UxmlDocument.panel_settings): scale with screen size
+		# at reference 480x360, so the random resizes change the pixels per
+		# point (a new pixel grid, every control applied again).
+		["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml", 80, "scaled"],
+		["res://tests/fixtures/options", "Assets/UI/Options.uxml", 60, "scaled"],
+		["res://tests/fixtures/controls", "Assets/UI/controls.uxml", 80, "scaled"],
 	]:
 		var only := ""
 		for arg in OS.get_cmdline_user_args():
 			if arg.begins_with("--only="):
 				only = arg.substr(7)
 		if not only.is_empty() and String(pair[1]).find(only) < 0:
+			continue
+		if pair.size() > 3:
+			if not OS.get_cmdline_user_args().has("--reload-only"):
+				await _run(pair[0], pair[1], pair[2], rng, true)
 			continue
 		if not OS.get_cmdline_user_args().has("--reload-only"):
 			await _run(pair[0], pair[1], pair[2], rng)
@@ -93,12 +103,18 @@ func _initialize() -> void:
 	quit(0 if _fails == 0 else 1)
 
 
-func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator) -> void:
+func _run(project: String, path: String, steps: int, rng: RandomNumberGenerator, scaled := false) -> void:
 	var a := UxmlDocument.new()
 	var b := UxmlDocument.new()
 	var c := UxmlDocument.new()
 	var all := [a, b, c]
 	for d in all:
+		if scaled:
+			var ps := UxmlPanelSettings.new()
+			ps.scale_mode = UxmlPanelSettings.ScaleMode.SCALE_WITH_SCREEN_SIZE
+			ps.reference_resolution = Vector2i(480, 360)
+			ps.match_width_or_height = 0.5
+			d.panel_settings = ps
 		root.add_child(d)
 		d.size = Vector2(640, 480)
 		# Outside the viewport: a cursor-shape change makes Godot pick the
@@ -615,6 +631,13 @@ func _snap(d) -> Array:
 		var e := {"tag": el.local}
 		e["style"] = _norm(d._styles.get(el, {}), idx)
 		e["c"] = _ctl(c)
+		# A display: none element has no layout: the size its control keeps
+		# is stale (a text change resizes it on a full re-apply and not on a
+		# relayout; Unity also keeps stale rects there). Not compared.
+		var ci = d._cascade.index.get(el) if d._cascade != null else null
+		if ci != null and int(ci) < d._gone.size() and d._gone[int(ci)] == 1:
+			e["c"].erase("pos")
+			e["c"].erase("size")
 		if n != c:
 			e["n"] = _ctl(n)
 		if c is UxmlField:

@@ -1633,7 +1633,8 @@ caps `align-items: stretch`. This was verified against the installed
 package, not assumed from CSS.
 
 Pixel grid: Unity rounds every layout to the pixel grid (Yoga's
-RoundToPixelGrid at one pixel per point). `UxmlDocument.pixel_grid`
+RoundToPixelGrid at one pixel per point; at the panel's pixels per point
+with panel scaling, see "Panel scaling"). `UxmlDocument.pixel_grid`
 (default true) does the same in both layout paths
 (`UxmlFlexLayout.round_to_pixel_grid`, `round_node` in `layout.rs`). A
 position is the rounded absolute position less the rounded absolute
@@ -1717,6 +1718,141 @@ for the width bound in a subtree without wrapping or best-fit text (a
 width bound changes their width hint). So a subtree is measured once,
 not once per distinct bound. Both layout paths and the reference engine
 give the same results; the reference computes every bounded measure.
+
+### Panel scaling
+
+Unity's `PanelSettings` scales a panel with the screen; godot-uxml does
+the same with `UxmlDocument.panel_settings` (a `UxmlPanelSettings`
+resource, or a Unity `.asset` through `panel_settings_asset`). Without
+settings nothing changes: one point per pixel, the panel the size of the
+document Control.
+
+**The formulas** (Unity 6000.3.24f1 `PanelSettings.ResolveScale` and
+`ApplyPanelSettings`, read from the installed `UnityEngine.UIElementsModule`
+and checked against Unity on 1032 settings and screens,
+`bench/parity/probes/panel-scale.json`, every row equal to the bit). With
+the screen `W x H` (the document Control's size) and `s = scale`:
+
+| mode | points per pixel `r` |
+| --- | --- |
+| ConstantPixelSize | `1 / s` |
+| ConstantPhysicalSize | `(referenceDpi / dpi) / s`; `dpi` is `fallbackDpi` when the screen DPI is 0 |
+| ScaleWithScreenSize | `(1 / d) / s`, `d` from `x = W / refW`, `y = H / refH`: MatchWidthOrHeight `x + (y - x) * clamp01(match)` (a linear blend, not uGUI's logarithmic one: 1080x1920 at reference 1920x1080 and match 0.5 is 1.1701 pixels per point, not 1), Expand `min(x, y)`, Shrink `max(x, y)`; `r = 1 / s` for a reference size of 0 |
+
+`r` is 0 for a scale of 0 or less (Unity draws nothing). Pixels per point
+`ppp = 1 / r`. The panel (the root) is `W * r` by `H * r` points, on the
+pixel grid (Yoga rounds the root too: 1280 x 720 at scale 1.5 is 853.3333
+points, not 853.33337). Every step is a C# `float`: `x`, `y`, the blend, `r`
+and `ppp` round to single precision (the blend once, at the end: rounding
+each step differs from Unity in 52 of 648 rows), and the root size too.
+The `scale` field applies in every mode, as `ResolveScale` applies it
+(Unity's inspector resets it to 1 for the other modes; an asset made there
+has 1). Unity's defaults are those of a new `UxmlPanelSettings`:
+ConstantPhysicalSize, scale 1, reference 1200 x 800, match 0, 96 and 96 dpi.
+
+**The points/pixels contract** (`core/uxml_panel_scale.gd`, `UxmlPanelScale`,
+and `native/src/panel_scale.rs`, the same functions; runtime v2 takes them
+from there):
+
+- `resolve(settings, screen, dpi)` gives `{resolved_scale,
+  pixels_per_point, panel_size}`; `settings_from_unity()` reads Unity's C#
+  names (the dumps).
+- Layout runs in points, at the panel size. The pixel grid is at `ppp`:
+  `pixel(v, ppp)` is Yoga's `roundValueToPixelGrid(v * ppp) / ppp`, and every
+  rule of "Layout" holds in pixels: a position is the rounded absolute
+  position less the parent's, a size the difference of rounded edges,
+  margins and padding round to the nearest pixel, a border is at least one
+  pixel (`grid_box(v, border, ppp)`). Measured in Unity at 0.5625 to 2
+  pixels per point: 400 points at 1.33 are 533 pixels, so the box is 399.75
+  points; a 0.4pt border is 0.75pt.
+- A leaf measure rounds up to the pixel grid (`ceil_pixel`, Unity's
+  `CeilToPixelGrid` of a text measure and `RoundToPixelGrid` of every
+  measure). At 1 pixel per point nothing changes: both layouts skip the step.
+- Text lines: TextCore lays text out at the whole pixel size
+  `round(font-size * ppp)`, a line `ceil(1.2099 * that)` pixels high
+  (measured on 40 sizes and scales, all of them). The applier's line font
+  keeps the line of one pixel per point, and a scaled measure counts its
+  lines in Unity's height (`uxml_line_fix`, `UxmlStyleApplier.line_fix`;
+  both layouts).
+
+**Runtime** (`UxmlDocument`): `_update_scale()` resolves the scale for the
+Control's size (on a resize, a settings change, entering the tree and a
+load). The root box gets the panel size in points and `scale = ppp`; every
+element control is laid out and placed in points under it. A new grid
+drops the cross-pass layout caches (GDScript `_layout_xcache`, native
+`set_pixels_per_point`) and applies every control again (border widths and
+the box edges depend on it); a resize that keeps the grid only lays out.
+
+Drawing is at device resolution, not a scaled image:
+
+- text: the root box has `oversampling_with_scale` (Godot 4.7), so glyphs
+  rasterize at the font size times the scale (shaped at the point size, as
+  TextCore measures in points);
+- boxes: `UxmlBoxStyle.px` is the pixels per point: its meshes are built in
+  device pixels (the box at its size times `px`) and drawn scaled back, so
+  every edge is antialiased over one device pixel, as Unity's. A border off
+  the whole points (0.75pt at 1.33) is a `UxmlBoxStyle` (StyleBoxFlat has
+  whole-number widths); rounded clip masks (`UxmlClip.px`) likewise;
+- images, slices, lines: Godot draws them through the canvas transform, at
+  device resolution.
+
+Godot snaps every Control to whole units of its parent
+(`Viewport.gui_snap_controls_to_pixels`), which under a scaled root are
+points: a control at 8.25 points (11 pixels at 1.33) drew at 8 points. While
+a scaled document is in a viewport, that viewport does not snap (the panel's
+pixel grid does); the setting comes back when the last scaled document
+leaves. Other Controls of the viewport keep their positions, unsnapped.
+
+Coordinates of the API: `element_at(point)`, `get_element_rect(e)` and
+`get_element_transform(e)` without a `space` use the document Control's
+coordinates (pixels of the host). With an element as `space`, its
+coordinates (points); with the document root as `space`, panel points,
+Unity's `worldBound`. Element Controls (`get_element`) have their size in
+points and a global transform that includes the scale.
+`get_pixels_per_point()`, `get_panel_size()` (points),
+`panel_to_document()` and `document_to_panel()` convert. Dropdown and
+context menus are documents at the owner's scale (constant pixel size), in
+windows sized in pixels. Godot's tooltips are not scaled.
+
+**Godot's stretch** (`display/window/stretch`): the "screen" is the
+document Control's size in Godot units, so the two scales multiply: a
+document at reference 1920 x 1080 in a project stretched (`canvas_items`)
+from 1280 x 720 to a 2560 x 1440 window resolves 0.667 pixels per unit and
+draws at 0.667 x 2 = 1.33 device pixels per point, what Unity resolves for
+that window. The pixel grid is the device's: the layout and the applier
+round at `ppp` times the device scale of the document (Godot's stretch and
+the canvas scales above it, `_device_scale()`), so edges land on physical
+pixels; text oversamples at both. ConstantPhysicalSize divides the screen
+DPI by the device scale, so a point keeps its physical size; set
+`screen_dpi` to override `DisplayServer.screen_get_dpi()`.
+
+**Unity assets**: `UxmlPanelSettings.load_unity_asset(path)` reads the
+YAML Unity writes (`m_ScaleMode`, `m_Scale`, `m_ReferenceDpi`,
+`m_FallbackDpi`, `m_ReferenceResolution`, `m_ScreenMatchMode`, `m_Match`;
+enum values as in C#), and finds `themeUss` by the GUID of a `.tss.meta`
+beside the asset or under the project root; a world-space panel lays out
+as a screen one, with a warning. A `.tss` theme (`theme_path`, or the
+settings' `theme_style_sheet`): its `@import url("unity-theme://default")`
+is the default theme, its other imports and its own rules are theme sheets
+after it (`UxmlTheme.tss_parts`). The fixtures in
+`tests/fixtures/panel_settings/` were written by Unity
+(`tools/unity-dump/run.py --scale-probe`). Unity gives a PanelSettings made
+without a theme the first theme of the project, and writes it.
+
+**Parity** (`bench/parity/scaled/matrix.json`): the five layout cases, the
+four paint cases `px-border`, `px-background`, `px-clip`, `px-text` and a
+settings screen that fills the panel (`scl-settings`), under constant pixel
+size at 1 and 2, constant physical size at reference 72 dpi, and scale with
+screen size at reference 1920 x 1080 (match 0, 0.5 and 1, Expand, Shrink) on
+1280x720, 1920x1080, 2560x1440, 3840x2160, 1080x1920 and 2560x1080: 172
+dumps, 19 scales from 0.5625 to 2 pixels per point. See docs/parity.md,
+"Panel scaling".
+
+For runtime v2 (`runtime/v2`): take `panel_scale.rs` (resolve, pixel,
+grid_box, ceil_pixel) as is; lay out in points with `ppp` as the grid; draw
+the panel under one transform of `ppp` with edges built in device pixels
+and text rasterized at the scale; keep the contract of the API above
+(document pixels without a space, points in an element's space).
 
 ### Style application
 

@@ -135,7 +135,9 @@ func _build_at(owner: UxmlDocument, global_point: Vector2, entries: Array) -> vo
 	if owner._doc != null:
 		_doc.shared_sheets = owner._doc
 		_doc.project_root = owner._effective_root
-	_doc.size = Vector2(4000.0, 4000.0)
+	var k := _scale_of(owner)
+	_scale_doc(k)
+	_doc.size = Vector2(4000.0, 4000.0) * k
 	add_child(_doc)
 	_doc.load_source(context_uxml(entries))
 	for e in entries:
@@ -166,15 +168,16 @@ func _build_at(owner: UxmlDocument, global_point: Vector2, entries: Array) -> vo
 	else:
 		top_left = owner.get_screen_transform() * local
 		bounds = Rect2(DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen()))
-	if bounds.size != Vector2.ZERO and h > bounds.size.y and outer != null:
+	if bounds.size != Vector2.ZERO and h * k > bounds.size.y and outer != null:
 		# Taller than the visible rect: the outer container gets the room
 		# as max-height and the ScrollView scrolls (Unity's
 		# EnsureVisibilityInParent).
 		_doc.get_element_model("outer").set_attribute("style",
-			CONTEXT_OUTER + " max-height: %spx;" % maxf(bounds.size.y - outer.position.y - 2.0, 20.0))
+			CONTEXT_OUTER + " max-height: %spx;" % maxf(bounds.size.y / k - outer.position.y - 2.0, 20.0))
 		_doc._restyle_now()
 		h = outer.position.y + outer.size.y
-	size = Vector2i(ceili(w + 2.0), ceili(h + 2.0))
+	# The window in pixels (the menu's points times the owner's scale).
+	size = Vector2i(ceili((w + 2.0) * k), ceili((h + 2.0) * k))
 	_doc.size = Vector2(size)
 	var pos := top_left
 	if bounds.size != Vector2.ZERO:
@@ -185,6 +188,23 @@ func _build_at(owner: UxmlDocument, global_point: Vector2, entries: Array) -> vo
 	window_input.connect(_on_window_input)
 	popup_hide.connect(_on_hide)
 	popup(Rect2i(Vector2i(pos), size))
+
+
+## The pixels per point of `owner`'s panel (UxmlDocument.panel_settings): a
+## menu of a scaled document draws at the same scale, in a window sized in
+## pixels (1 without an owner or panel settings).
+static func _scale_of(owner: UxmlDocument) -> float:
+	return owner.get_pixels_per_point() if owner != null else 1.0
+
+
+## The menu document at the owner's scale (constant pixel size).
+func _scale_doc(k: float) -> void:
+	if k == 1.0:
+		return
+	var ps := UxmlPanelSettings.new()
+	ps.scale_mode = UxmlPanelSettings.ScaleMode.CONSTANT_PIXEL_SIZE
+	ps.scale = k
+	_doc.panel_settings = ps
 
 
 ## The menu UXML: Unity's GenericDropdownMenu tree for `items`.
@@ -213,7 +233,11 @@ func _build(anchor: Control, items: PackedStringArray, selected: int, theme_path
 	if owner != null:
 		_doc.shared_sheets = owner._doc
 		_doc.project_root = owner._effective_root
-	_doc.size = Vector2(width + 8.0, 4000.0)
+	# A field of a scaled panel: the menu in points at the owner's scale,
+	# its window in pixels.
+	var k := _scale_of(owner)
+	_scale_doc(k)
+	_doc.size = Vector2(width + 8.0, 4000.0) * k
 	add_child(_doc)
 	_doc.load_source(menu_uxml(items, width))
 	_doc._restyle_now()
@@ -239,7 +263,7 @@ func _build(anchor: Control, items: PackedStringArray, selected: int, theme_path
 	else:
 		top_left = anchor.get_screen_position()
 		bounds = Rect2(DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen()))
-	var below := top_left + Vector2(0.0, anchor.size.y)
+	var below := top_left + Vector2(0.0, anchor.size.y * k)
 	var pos := below
 	var above := false
 	if bounds.size != Vector2.ZERO:
@@ -248,16 +272,16 @@ func _build(anchor: Control, items: PackedStringArray, selected: int, theme_path
 		# gets the space as max-height and the ScrollView scrolls.
 		var space_below := bounds.end.y - below.y
 		var space_above := top_left.y - bounds.position.y
-		if h > space_below:
+		if h * k > space_below:
 			above = space_above > space_below
-			var room := maxf(space_above if above else space_below, 0.0)
+			var room := maxf(space_above if above else space_below, 0.0) / k
 			if h > room and outer != null:
 				var oel := _doc.get_element_model("outer")
 				var st := "width: %spx; max-height: %spx;" % [width, maxf(room - outer.position.y - 2.0, 20.0)]
 				oel.set_attribute("style", st)
 				_doc._restyle_now()
 				h = outer.position.y + outer.size.y
-	size = Vector2i(ceili(width + 2.0), ceili(h + 2.0))
+	size = Vector2i(ceili((width + 2.0) * k), ceili((h + 2.0) * k))
 	_doc.size = Vector2(size)
 	if bounds.size != Vector2.ZERO:
 		if above:
