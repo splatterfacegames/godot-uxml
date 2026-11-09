@@ -1083,7 +1083,9 @@ func _apply_editors(changed: PackedInt32Array) -> void:
 			continue
 		c.set_meta(&"uxml_v2_flags", f)
 		var el: UxmlElement = cascade.el(i)
-		var style: Dictionary = cascade._native.call("style_of", i)
+		# The values, and the origins the applier reads (url() files, the
+		# diagnostics of declared properties): not every inheritance wrap.
+		var style: Dictionary = cascade._native.call("style_of_lite", i, _APPLY_ORIGINS)
 		applier.apply(el, c, c, style, dis[i] == 1, gone[i] == 1)
 		c.set_meta(&"uxml_v2_visible", c.visible)
 		if not bool(_editor_shown.get(i, true)):
@@ -1155,7 +1157,7 @@ func v2_button_theme() -> Dictionary:
 ## runtime v1 draws with (UxmlStyleApplier._apply_themed_inner).
 func v2_font(i: int, button: bool = false) -> Array:
 	var el: UxmlElement = cascade.el(i)
-	var style: Dictionary = cascade._native.call("style_of", i)
+	var style: Dictionary = cascade._native.call("style_of_lite", i, _APPLY_ORIGINS)
 	var probe: Control = _bprobe if button else _probe
 	applier._capture_base_font(probe)
 	var font: Font = applier._font(probe, style, el)
@@ -1177,6 +1179,10 @@ func v2_font(i: int, button: bool = false) -> Array:
 ## element i with a background image (UxmlStyleApplier._apply_box for a
 ## box, _apply_themed_inner for a Label).
 static var _URL_PROPS := PackedStringArray(["background-image"])
+## The properties whose origins UxmlStyleApplier reads (the files their
+## url() resolve against; the declared-here checks of its diagnostics).
+static var _APPLY_ORIGINS := PackedStringArray(["background-image", "--unity-image", "-unity-font",
+	"-unity-font-definition", "filter", "-unity-material", "text-shadow", "-unity-text-auto-size", "cursor"])
 
 
 func v2_boxes(i: int, label: bool) -> Array:
@@ -1212,7 +1218,7 @@ func v2_boxes(i: int, label: bool) -> Array:
 ## and UxmlStyleApplier._apply_image), or [] without a texture.
 func v2_image(i: int) -> Array:
 	var el: UxmlElement = cascade.el(i)
-	var style: Dictionary = cascade._native.call("style_of", i)
+	var style: Dictionary = cascade._native.call("style_of_lite", i, _APPLY_ORIGINS)
 	var tex: Texture2D = null
 	var ref := factory._first_attr(el, ["src", "image"])
 	if not ref.is_empty():
