@@ -184,6 +184,9 @@ struct St {
     opacity_memo: HashMap<String, Option<f32>>,
     font_memo: HashMap<String, (Gd<Font>, i32)>,
     box_memo: HashMap<Vec<u64>, Option<Gd<StyleBox>>>,
+    /// Visual records by the values they read (see make_vis); the values
+    /// are kept so their addresses stay theirs.
+    vis_memo: HashMap<Vec<usize>, (Vec<Rc<Variant>>, Vis, f64)>,
     theme: LabelTheme,
     unity_metrics: bool,
     recs: layout::RecCache,
@@ -192,6 +195,11 @@ struct St {
     host_size: Vector2,
     /// bench/pixels_render.gd: draw no text (the box-only render).
     text_hidden: bool,
+    /// Elements whose record or text changed since their last draw, and
+    /// the rect and insets each was last drawn at: draw() records again
+    /// only those, and the elements the layout moved or resized.
+    dirty: Vec<bool>,
+    drawn: Vec<Option<(Rect2, Option<(Vector2, Vector2)>)>>,
     /// `name` attribute -> the first element (preorder) with it.
     by_name: HashMap<GString, i32>,
     /// The elements whose name an earlier element has (diagnosed).
@@ -372,6 +380,7 @@ impl UxmlRuntimeV2 {
             opacity_memo: HashMap::new(),
             font_memo: HashMap::new(),
             box_memo: HashMap::new(),
+            vis_memo: HashMap::new(),
             theme,
             unity_metrics,
             recs: layout::RecCache::default(),
@@ -381,6 +390,8 @@ impl UxmlRuntimeV2 {
             text_hidden: false,
             by_name: HashMap::new(),
             dup_names: vec![],
+            dirty: vec![true; n],
+            drawn: vec![None; n],
         };
         for i in 0..n {
             st.vis[i].picking_ignore = picking[i];
@@ -444,6 +455,7 @@ impl UxmlRuntimeV2 {
         }
         st.texts_src[i] = text;
         st.make_text(i);
+        st.dirty[i] = true;
         true
     }
 
@@ -464,6 +476,7 @@ impl UxmlRuntimeV2 {
     fn set_text_hidden(&mut self, on: bool) {
         if let Some(st) = self.st.as_mut() {
             st.text_hidden = on;
+            st.dirty.fill(true);
         }
     }
 
@@ -605,7 +618,10 @@ impl St {
         // Elements whose own record did not change can still flip their
         // display flag (an ancestor's display).
         for i in 0..self.n {
-            self.vis[i].gone = gone[i] == 1;
+            if self.vis[i].gone != (gone[i] == 1) {
+                self.vis[i].gone = gone[i] == 1;
+                self.dirty[i] = true;
+            }
         }
         Ok(())
     }
@@ -614,6 +630,12 @@ impl St {
     fn make_vis(&mut self, i: usize, gone: bool) -> Result<(), String> {
         let mut vals: [Option<Variant>; NVP] = std::array::from_fn(|_| None);
         let mut lay_ok = true;
+        // The record is a function of the values the record reads (the
+        // cascade shares a declaration's value between the elements it
+        // reaches): elements with the same values share it. Images and
+        // background images read the element too.
+        let mut key: Vec<usize> = vec![self.kind[i] as usize];
+        let mut keep: Vec<Rc<Variant>> = vec![];
         {
             let cb = self.cascade();
             let c = cb.inner.as_ref().unwrap();
@@ -626,11 +648,34 @@ impl St {
                 let k = self.vp[pid];
                 if k >= 0 {
                     vals[k as usize] = Some((*it.value).clone());
+                    key.push(k as usize);
+                    key.push(Rc::as_ptr(&it.value) as usize);
+                    keep.push(it.value.clone());
                 }
             }
         }
         if !lay_ok {
             return Err(format!("element {}: a property runtime v2 does not draw", i));
+        }
+        // url() values resolve against the file of their declaration, which
+        // the shared value of an inline style does not tell.
+        let memo_ok = self.kind[i] != K_IMAGE
+            && vals[P_BGIMG].is_none()
+            && ![P_FONT, P_FONTDEF].iter().any(|&k| vals[k].as_ref().is_some_and(|x| s(x).contains("url(")));
+        if memo_ok {
+            if let Some((_, rec, hp)) = self.vis_memo.get(&key) {
+                let mut v = rec.clone();
+                v.picking_ignore = self.vis[i].picking_ignore;
+                v.gone = gone;
+                let hp = *hp;
+                self.leaves_mut().hpad[i] = hp;
+                self.vis[i] = v;
+                self.dirty[i] = true;
+                if self.kind[i] == K_LABEL {
+                    self.make_text(i);
+                }
+                return Ok(());
+            }
         }
         let str_of = |k: usize| vals[k].as_ref().map(s).unwrap_or_default();
         let mut v = Vis { picking_ignore: self.vis[i].picking_ignore, opacity: 1.0, gone, ..Default::default() };
@@ -937,7 +982,14 @@ impl St {
         // margins carry them before the layout resolves percentages.
         let hp = if v.boxed { widths[3] + pads[3] + widths[1] + pads[1] } else { (self.theme.normal_margins[0] + self.theme.normal_margins[2]) as f64 };
         self.leaves_mut().hpad[i] = hp;
+        if memo_ok {
+            if self.vis_memo.len() > 4096 {
+                self.vis_memo.clear();
+            }
+            self.vis_memo.insert(key, (keep, v.clone(), hp));
+        }
         self.vis[i] = v;
+        self.dirty[i] = true;
         if label {
             self.make_text(i);
         }
@@ -1128,6 +1180,7 @@ impl St {
         let host_ci = self.host.get_canvas_item();
         if self.items.len() != n {
             self.free_items();
+            self.dirty.fill(true);
             self.items = vec![Rid::Invalid; n];
             self.clips = vec![Rid::Invalid; n];
             let cb = self.casc.bind();
@@ -1149,7 +1202,12 @@ impl St {
             }
         }
         for i in 0..n {
-            self.draw_one(i);
+            let at = self.rects[i].map(|r| (r, self.insets[i]));
+            if self.dirty[i] || self.drawn[i] != at {
+                self.draw_one(i);
+                self.dirty[i] = false;
+                self.drawn[i] = at;
+            }
         }
     }
 

@@ -348,6 +348,9 @@ pub struct Cascade {
     /// (`out_items`), not Dictionaries; see `set_table_mode`.
     pub table: bool,
     pub out_items: Vec<Rc<Vec<Rc<Item>>>>,
+    /// Table mode: one value per (expansion, longhand); the expansion is
+    /// kept so its address stays its own.
+    val_rc: HashMap<(usize, usize), (Rc<Vec<Pair>>, Rc<Variant>)>,
 }
 
 /// Two item lists with the same properties, values and origins, in order.
@@ -700,6 +703,7 @@ impl Cascade {
             last_old: VarArray::new(),
             table: false,
             out_items: vec![],
+            val_rc: HashMap::new(),
         };
 
         // The GDScript rule tables, and the theme blocks among them:
@@ -1726,7 +1730,26 @@ impl Cascade {
             if !table {
                 computed.set(&self.props.keys[pidx], &entry);
             }
-            let item = Rc::new(Item { pid: b.pid, value: Rc::new(val.clone()), origin: origin.clone(), decl: i as i32 });
+            // Table mode: the value of a shared expansion is shared by the
+            // elements it reaches (runtime v2 keys its records on it).
+            let value = if table {
+                let pr = c_pairs[b.j].clone().unwrap();
+                let k = (Rc::as_ptr(&pr) as usize, b.pk);
+                match self.val_rc.get(&k) {
+                    Some((_, v)) => v.clone(),
+                    None => {
+                        let v = Rc::new(val.clone());
+                        if self.val_rc.len() > 65536 {
+                            self.val_rc.clear();
+                        }
+                        self.val_rc.insert(k, (pr, v.clone()));
+                        v
+                    }
+                }
+            } else {
+                Rc::new(val.clone())
+            };
+            let item = Rc::new(Item { pid: b.pid, value, origin: origin.clone(), decl: i as i32 });
             match comp.iter_mut().find(|it| it.pid == b.pid) {
                 Some(it) => *it = item,
                 None => comp.push(item),
