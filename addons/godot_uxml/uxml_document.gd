@@ -117,6 +117,9 @@ var shared_sheets: UxmlDocumentModel = null
 var runtime_fallback := ""
 ## Overrides `runtime` for every document when nonzero (benchmarks, tests).
 static var default_runtime := 0
+## A document of the runtime itself that reads its Controls (a popup
+## menu): always on runtime v1, whatever `runtime` or `default_runtime` say.
+var pinned_v1 := false
 var _v2: UxmlRuntimeV2Glue = null
 
 ## Every diagnostic produced by the last load: parse/cascade warnings plus
@@ -495,7 +498,9 @@ func _finish_load(adopt: bool) -> void:
 ## runtime v1's controls and their first restyle (false).
 func _start_runtime() -> bool:
 	runtime_fallback = ""
-	if (default_runtime if default_runtime != 0 else runtime) == 2 and panel_settings != null:
+	if pinned_v1:
+		pass
+	elif (default_runtime if default_runtime != 0 else runtime) == 2 and panel_settings != null:
 		runtime_fallback = "panel settings (scaling)"
 	elif (default_runtime if default_runtime != 0 else runtime) == 2:
 		var g := UxmlRuntimeV2Glue.new(self)
@@ -2913,8 +2918,8 @@ func _free_parked() -> void:
 ## The element's outer control, or null. For labeled fields this is the
 ## UxmlField wrapper; for Image the host box.
 func get_element(element_name: String) -> Control:
-	if _v2 != null:
-		return null  # runtime v2: the core draws the elements, no Control
+	# Runtime v2: the interaction Control of a control or focusable element,
+	# null for an element the core draws alone.
 	var el := _named(element_name)
 	return null if el == null else _controls.get(el)
 
@@ -2928,8 +2933,6 @@ func get_element_by_name(element_name: String) -> Control:
 ## get_element for unwrapped controls and for part-tree containers
 ## (ScrollView, ListView, TabView, ...).
 func get_native(element_name: String) -> Control:
-	if _v2 != null:
-		return null
 	var el := _named(element_name)
 	if el == null:
 		return null
@@ -3013,8 +3016,6 @@ func get_document_model() -> UxmlDocumentModel:
 ## for an element without a control (a <Style>, the <UXML> root's
 ## non-visual children) or of another load.
 func get_control_for(element: UxmlElement) -> Control:
-	if _v2 != null:
-		return null
 	var c = _controls.get(element)
 	if c != null and not _parked.is_empty():
 		_expose(element)
@@ -3025,7 +3026,8 @@ func get_control_for(element: UxmlElement) -> Control:
 ## a name), or null.
 func get_native_for(element: UxmlElement) -> Control:
 	if _v2 != null:
-		return null
+		var vb = _behaviors.get(element)
+		return vb.native() if vb != null else _natives.get(element)
 	if element == null or not _controls.has(element):
 		return null
 	if not _parked.is_empty():
@@ -3231,7 +3233,7 @@ func element_at(point: Vector2, respect_picking: bool = false, include_parts: bo
 	if _doc == null:
 		return null
 	if _v2 != null:
-		return _v2.element_at(point, respect_picking)
+		return _v2.element_at(point, respect_picking, include_parts)
 	if _restyle_queued:
 		_restyle_now()
 	var gp := get_global_transform() * point
@@ -4591,6 +4593,11 @@ func set_scroll_offset(element_name: String, offset: Vector2) -> void:
 ## named `child_name`.
 func scroll_to(element_name: String, child_name: String) -> void:
 	var b = _scroll_behavior(element_name)
+	if _v2 != null:
+		var cel := _named(child_name)
+		if b != null and cel != null:
+			b.scroll_to_element(cel)
+		return
 	var child = get_element(child_name)
 	if b != null and child != null:
 		b.scroll_to(child)
@@ -4706,7 +4713,7 @@ func set_imgui_handler(element_name: String, draw: Callable, input: Callable = C
 ## with other pending restyles like every other mutation.
 func relayout() -> void:
 	if _v2 != null:
-		_v2.queue()
+		_v2.request_layout()
 		return
 	_force_layout = true
 	_queue_restyle()

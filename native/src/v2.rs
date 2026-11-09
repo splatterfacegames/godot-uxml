@@ -26,6 +26,7 @@ use godot::prelude::*;
 
 use crate::cascade::{Cascade, UxmlNativeCascade};
 use crate::layout::{self, LeafSource, Len};
+use crate::v2button::ButtonText;
 use crate::v2text::{TextBlock, TextStyle, AUTOWRAP_OFF, AUTOWRAP_WORD_SMART, DEFAULT_TRIM};
 
 /// Element kinds of the table.
@@ -33,9 +34,27 @@ const K_NONE: u8 = 0;
 const K_BOX: u8 = 1;
 const K_LABEL: u8 = 2;
 const K_IMAGE: u8 = 3;
+/// A Button: its box, and its text drawn as Godot's Button draws it.
+const K_BUTTON: u8 = 4;
+/// A text editor (the editor part of a TextField): a LineEdit or TextEdit
+/// Control of the GDScript side draws it; the core measures it through
+/// that Control and draws nothing.
+const K_EDIT: u8 = 5;
+
+/// Flags of the kinds handed to `build` by the GDScript side.
+const F_KIND: u8 = 0x0f;
+/// The element's attributes were checked by the GDScript side (controls
+/// and their parts).
+const F_ATTRS_OK: u8 = 0x80;
+/// Plain text (a TextElement part): no rich text check.
+const F_PLAIN: u8 = 0x40;
+/// A part of a control: its name is internal (not in the name index).
+const F_PART: u8 = 0x20;
+/// A part that Unity does not pick (a Toggle's checkmark, a text part).
+const F_UNPICKED: u8 = 0x10;
 
 /// The properties the visual records read (P_*), by name.
-const VIS_PROPS: [&str; 44] = [
+const VIS_PROPS: [&str; 45] = [
     "background-color",
     "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
     "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
@@ -47,7 +66,7 @@ const VIS_PROPS: [&str; 44] = [
     "letter-spacing", "word-spacing", "background-image", "text-overflow",
     "-unity-text-overflow-position", "--unity-image", "--unity-image-size", "--unity-image-tint-color",
     "-unity-slice-left", "-unity-slice-right", "-unity-slice-top", "-unity-slice-bottom",
-    "-unity-background-image-tint-color",
+    "-unity-background-image-tint-color", "translate",
 ];
 const P_BG: usize = 0;
 const P_BW: usize = 1;
@@ -74,7 +93,8 @@ const P_BGIMG: usize = 33;
 const P_TOVER: usize = 34;
 const P_TOVERPOS: usize = 35;
 const P_UIMG: usize = 36;
-const NVP: usize = 44;
+const P_TRANSLATE: usize = 44;
+const NVP: usize = 45;
 
 /// Properties that only the layout reads, or that phase 1 draws without a
 /// record of its own (the background placement goes through the GDScript
@@ -106,6 +126,17 @@ struct Vis {
     text: Option<TextStyle>,
     image: Option<(Gd<Texture2D>, i32, Color)>,
     picking_ignore: bool,
+    /// `translate` (px, and the ratio of the element's own size).
+    translate: Option<(Vector2, Vector2)>,
+    /// A Button's clip_text (overflow: hidden on a Button,
+    /// UxmlStyleApplier._apply_elision).
+    bclip: bool,
+    /// The text colour comes from USS (else a Button's theme colour of its
+    /// draw mode).
+    color_set: bool,
+    /// text-overflow: ellipsis on a Label that clips and does not wrap: the
+    /// -unity-text-overflow-position ("start", "middle", "end").
+    elide: Option<GString>,
 }
 
 /// The leaves for the layout: kinds, box paddings, text blocks, natural
@@ -115,13 +146,17 @@ struct Leaves {
     hpad: Vec<f64>,
     natural: Vec<Vector2>,
     texts: RefCell<Vec<Option<TextBlock>>>,
+    /// The texts of the Buttons.
+    btexts: RefCell<Vec<Option<ButtonText>>>,
+    /// The editor Controls (K_EDIT), measured as runtime v1 measures them.
+    ctls: Vec<Option<Gd<Control>>>,
 }
 
 impl LeafSource for Leaves {
     fn kind(&self, i: usize) -> u8 {
         match self.kind[i] {
-            K_LABEL => 1,
-            K_IMAGE => 2,
+            K_LABEL | K_BUTTON => 1,
+            K_IMAGE | K_EDIT => 2,
             _ => 0,
         }
     }
@@ -129,12 +164,20 @@ impl LeafSource for Leaves {
         self.texts.borrow()[i].as_ref().is_some_and(|t| t.st.autowrap != AUTOWRAP_OFF)
     }
     fn empty(&self, i: usize) -> bool {
+        if self.kind[i] == K_BUTTON {
+            return self.btexts.borrow()[i].as_ref().is_none_or(|t| t.text.is_empty());
+        }
         self.texts.borrow()[i].as_ref().is_none_or(|t| t.text.is_empty())
     }
     fn hpad(&self, i: usize) -> f64 {
         self.hpad[i]
     }
     fn text_min(&self, i: usize, width: f64) -> Vector2 {
+        if self.kind[i] == K_BUTTON {
+            // Button's minimum size less its stylebox; a clipped Button is
+            // measured with its full text (UxmlDocument._measure_leaf).
+            return self.btexts.borrow()[i].as_ref().map(|b| b.measure()).unwrap_or(Vector2::ZERO);
+        }
         let mut t = self.texts.borrow_mut();
         let Some(b) = t[i].as_mut() else { return Vector2::ZERO };
         let hp = self.hpad[i];
@@ -147,6 +190,17 @@ impl LeafSource for Leaves {
         t[i].as_mut().map(|b| b.max_content()).unwrap_or(0.0)
     }
     fn natural(&self, i: usize) -> Vector2 {
+        if self.kind[i] == K_EDIT {
+            // UxmlDocument._measure_leaf of the editor: its combined
+            // minimum size less the `uxml_margins` of its stylebox.
+            let Some(c) = self.ctls[i].as_ref() else { return Vector2::ZERO };
+            let mut ms = c.get_combined_minimum_size();
+            if let Some(m) = layout::read_margins(c, &StringName::from("normal"), &StringName::from("uxml_margins")) {
+                ms.x = layout::f(f64::max(0.0, layout::d(ms.x) - m[0] - m[2]));
+                ms.y = layout::f(f64::max(0.0, layout::d(ms.y) - m[1] - m[3]));
+            }
+            return ms;
+        }
         self.natural[i]
     }
 }
@@ -165,6 +219,17 @@ struct LabelTheme {
     normal_margins: [f32; 4],
 }
 
+/// Default theme items of a Button (read once through the host).
+#[derive(Clone)]
+struct ButtonTheme {
+    font_color: Color,
+    font_disabled_color: Color,
+    font_focus_color: Color,
+    line_spacing: i32,
+    outline_size: i32,
+    outline_color: Color,
+}
+
 struct St {
     casc: Gd<UxmlNativeCascade>,
     helper: Gd<Object>,
@@ -177,6 +242,9 @@ struct St {
     vp: Vec<i16>,
     allowed: Vec<bool>,
     rects: Vec<Option<Rect2>>,
+    /// The size of each element at its last layout (kept under display:
+    /// none, as a Control of runtime v1 keeps its size).
+    last_size: Vec<Vector2>,
     insets: Vec<Option<(Vector2, Vector2)>>,
     items: Vec<Rid>,
     clips: Vec<Rid>,
@@ -188,6 +256,25 @@ struct St {
     /// are kept so their addresses stay theirs.
     vis_memo: HashMap<Vec<usize>, (Vec<Rc<Variant>>, Vis, f64)>,
     theme: LabelTheme,
+    btheme: ButtonTheme,
+    locale: GString,
+    /// Elements whose interaction Control has the focus (a focused Button
+    /// draws its focus stylebox, the same box, over its box).
+    focused: Vec<bool>,
+    /// The disabled flags of the last restyle (effective_flags).
+    disabled: Vec<bool>,
+    /// A leaf measure changed since the last layout (a text shaped again,
+    /// an image, a box padding, an editor): the layout must run.
+    measure_dirty: bool,
+    /// A record's display, visibility, opacity, clip or translate changed
+    /// since the last take (the interaction Controls follow them).
+    vis_changed: bool,
+    /// The placement each interaction Control was last given (place_states).
+    placed: Vec<Option<(Rect2, Rect2, bool, f32)>>,
+    /// The last elision of each eliding Label: (text, width, position, font
+    /// size) and the text shown; whether it is elided now.
+    elide_memo: Vec<Option<((GString, f32, GString, i32), GString)>>,
+    elided: Vec<bool>,
     unity_metrics: bool,
     recs: layout::RecCache,
     warned: VarDictionary,
@@ -241,7 +328,7 @@ impl UxmlRuntimeV2 {
     /// parsers and resources of runtime v1. Returns "" when the document is
     /// covered, else why not (the document then loads on runtime v1).
     #[func]
-    fn build(&mut self, casc: Gd<UxmlNativeCascade>, host: Gd<Control>, helper: Gd<Object>, unity_metrics: bool) -> GString {
+    fn build(&mut self, casc: Gd<UxmlNativeCascade>, host: Gd<Control>, helper: Gd<Object>, unity_metrics: bool, kinds_in: PackedByteArray) -> GString {
         let _p = crate::prof::scope("v2.build");
         self.free_items();
         self.st = None;
@@ -270,16 +357,28 @@ impl UxmlRuntimeV2 {
         let kn = "name".to_variant();
         let kv = "value".to_variant();
         let mut picking = vec![false; n];
+        let kin = kinds_in.as_slice();
         for i in 0..n {
             let local = c.local_name(i);
-            kind[i] = match local {
-                "UXML" if i == 0 => K_BOX,
-                "UXML" | "Style" => K_NONE,
-                "VisualElement" | "TemplateContainer" => K_BOX,
-                "Label" => K_LABEL,
-                "Image" => K_IMAGE,
-                other => return GString::from(format!("element <{}> (index {}) is not drawn by runtime v2 yet", other, i).as_str()),
+            let given = kin.get(i).copied().unwrap_or(0);
+            kind[i] = if given & F_KIND != 0 {
+                given & F_KIND
+            } else {
+                match local {
+                    "UXML" if i == 0 => K_BOX,
+                    "UXML" | "Style" => K_NONE,
+                    "VisualElement" | "TemplateContainer" => K_BOX,
+                    "Label" => K_LABEL,
+                    "Image" => K_IMAGE,
+                    other => return GString::from(format!("element <{}> (index {}) is not drawn by runtime v2 yet", other, i).as_str()),
+                }
             };
+            let attrs_ok = given & F_ATTRS_OK != 0;
+            let plain = given & F_PLAIN != 0;
+            let part = given & F_PART != 0;
+            if given & F_UNPICKED != 0 {
+                picking[i] = true;
+            }
             if kind[i] == K_NONE {
                 continue;
             }
@@ -291,10 +390,34 @@ impl UxmlRuntimeV2 {
             // The <UXML> root's attributes are namespaces and editor settings.
             let attrs = if i == 0 { VarArray::new() } else { c.attributes(i) };
             let (mut seen_text, mut rich_on, mut escapes) = (false, true, false);
+            let texty = kind[i] == K_LABEL || kind[i] == K_BUTTON;
             for a in attrs.iter_shared() {
                 let Ok(d) = a.try_to::<VarDictionary>() else { continue };
                 let an = s(&d.get(&kn).unwrap_or_default());
                 let avv = d.get(&kv).unwrap_or_default();
+                if attrs_ok {
+                    // Checked by the GDScript side; only what the core reads.
+                    match an.as_str() {
+                        "name" if names[i].is_none() && !part => names[i] = Some(avv.try_to::<GString>().unwrap_or_default()),
+                        "text" if texty && !seen_text => {
+                            texts[i] = avv.try_to::<GString>().unwrap_or_default();
+                            seen_text = true;
+                        }
+                        "enable-rich-text" if texty => rich_on = s(&avv).trim() != "false",
+                        "parse-escape-sequences" if texty => escapes = s(&avv).trim() == "true",
+                        "picking-mode" => {
+                            let av = s(&avv);
+                            let v = av.trim();
+                            if v == "Ignore" {
+                                picking[i] = true;
+                            } else if v != "Position" {
+                                return "picking-mode with an invalid value".into();
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
                 match an.as_str() {
                     "class" | "style" | "usage-hints" | "view-data-key" | "content-container" | "template"
                     | "src" | "image" | "enabled" => {}
@@ -321,11 +444,17 @@ impl UxmlRuntimeV2 {
                             return "picking-mode with an invalid value".into();
                         }
                     }
-                    "focusable" if s(&avv) == "false" => {}
+                    // The GDScript side makes the interaction Control and the tooltip.
+                    "focusable" | "tooltip" => {}
                     other => return GString::from(format!("attribute {} (element {}) is not handled by runtime v2 yet", other, i).as_str()),
                 }
             }
-            if kind[i] == K_LABEL {
+            if kind[i] == K_BUTTON || (kind[i] == K_LABEL && plain) {
+                // A Button's and a TextElement's text are plain.
+                if escapes && texts[i].to_string().contains('\\') {
+                    return "escape sequences".into();
+                }
+            } else if kind[i] == K_LABEL {
                 // Rich text and escape sequences stay on runtime v1.
                 let t = texts[i].to_string();
                 if rich_on && t.contains('<') {
@@ -356,6 +485,23 @@ impl UxmlRuntimeV2 {
                 normal_margins: if ms.len() == 4 { [ms[0], ms[1], ms[2], ms[3]] } else { [0.0; 4] },
             }
         };
+        let (btheme, locale) = {
+            let mut h = helper.clone();
+            let d = h.call("v2_button_theme", &[]).try_to::<VarDictionary>().unwrap_or_default();
+            let col = |k: &str| d.get(k).and_then(|v| v.try_to::<Color>().ok()).unwrap_or(Color::from_rgba(0.0, 0.0, 0.0, 0.0));
+            let int = |k: &str| d.get(k).and_then(|v| v.try_to::<i64>().ok()).unwrap_or(0) as i32;
+            (
+                ButtonTheme {
+                    font_color: col("font_color"),
+                    font_disabled_color: col("font_disabled_color"),
+                    font_focus_color: col("font_focus_color"),
+                    line_spacing: int("line_spacing"),
+                    outline_size: int("outline_size"),
+                    outline_color: col("font_outline_color"),
+                },
+                d.get("locale").and_then(|v| v.try_to::<GString>().ok()).unwrap_or_default(),
+            )
+        };
         let mut st = St {
             casc,
             helper,
@@ -369,10 +515,13 @@ impl UxmlRuntimeV2 {
                 hpad: vec![0.0; n],
                 natural: vec![Vector2::ZERO; n],
                 texts: RefCell::new((0..n).map(|_| None).collect()),
+                btexts: RefCell::new((0..n).map(|_| None).collect()),
+                ctls: vec![None; n],
             }),
             vp,
             allowed,
             rects: vec![None; n],
+            last_size: vec![Vector2::ZERO; n],
             insets: vec![None; n],
             items: vec![],
             clips: vec![],
@@ -382,6 +531,15 @@ impl UxmlRuntimeV2 {
             box_memo: HashMap::new(),
             vis_memo: HashMap::new(),
             theme,
+            btheme,
+            locale,
+            focused: vec![false; n],
+            disabled: vec![false; n],
+            measure_dirty: true,
+            vis_changed: true,
+            placed: vec![None; n],
+            elide_memo: vec![None; n],
+            elided: vec![false; n],
             unity_metrics,
             recs: layout::RecCache::default(),
             warned: VarDictionary::new(),
@@ -430,6 +588,85 @@ impl UxmlRuntimeV2 {
         st.layout(host)
     }
 
+    /// Lays out only when something the layout reads changed since the last
+    /// layout (a layout record, a leaf measure, the host size), or `force`.
+    /// Returns whether a rect changed.
+    #[func]
+    fn layout_if_needed(&mut self, host: Vector2, force: bool) -> bool {
+        let Some(st) = self.st.as_mut() else { return false };
+        if !force && !st.measure_dirty && host == st.host_size && !st.records_changed() {
+            return false;
+        }
+        st.layout(host)
+    }
+
+    /// For each of `idx`: [position, size, visible rect position, visible
+    /// rect size] in `rects` and [shown, opacity] in `states` (the
+    /// interaction Controls' placement in one call).
+    /// Only the entries whose placement changed since the last call are
+    /// returned; `which` holds their positions in `idx`.
+    #[func]
+    fn place_states(&mut self, idx: PackedInt32Array) -> VarArray {
+        let mut out = VarArray::new();
+        let Some(st) = self.st.as_mut() else { return out };
+        let mut rects = PackedVector2Array::new();
+        let mut shown = PackedByteArray::new();
+        let mut op = PackedFloat32Array::new();
+        let mut which = PackedInt32Array::new();
+        let mut placed = std::mem::take(&mut st.placed);
+        let cb = st.casc.bind();
+        let c = cb.inner.as_ref().unwrap();
+        for (kk, &i) in idx.as_slice().iter().enumerate() {
+            let i = i as usize;
+            let r = st.host_rect(i);
+            let mut sh = i < st.n && st.rects[i].is_some();
+            let mut o = 1.0f32;
+            let mut vis = r;
+            if i < st.n {
+                let mut k = i as i32;
+                while k >= 0 {
+                    let ku = k as usize;
+                    let v = &st.vis[ku];
+                    if v.gone || v.hidden {
+                        sh = false;
+                    }
+                    o *= v.opacity;
+                    if ku != i && k > 0 && v.clip {
+                        let ar = st.host_rect(ku);
+                        let ins = st.clip_inset_of(ku);
+                        let cr = Rect2::new(
+                            ar.position + Vector2::new(ins[0], ins[1]),
+                            Vector2::new((ar.size.x - ins[0] - ins[2]).max(0.0), (ar.size.y - ins[1] - ins[3]).max(0.0)),
+                        );
+                        vis = vis.intersect(cr).unwrap_or(Rect2::new(vis.position, Vector2::ZERO));
+                    }
+                    k = c.parent_of(ku);
+                }
+            }
+            let now = Some((r, vis, sh, o));
+            if i < placed.len() && placed[i] == now {
+                continue;
+            }
+            if i < placed.len() {
+                placed[i] = now;
+            }
+            which.push(kk as i32);
+            rects.push(r.position);
+            rects.push(r.size);
+            rects.push(vis.position);
+            rects.push(vis.size);
+            shown.push(if sh { 1 } else { 0 });
+            op.push(o);
+        }
+        drop(cb);
+        st.placed = placed;
+        out.push(&rects.to_variant());
+        out.push(&shown.to_variant());
+        out.push(&op.to_variant());
+        out.push(&which.to_variant());
+        out
+    }
+
     /// Records every element's canvas item again.
     #[func]
     fn draw(&mut self) {
@@ -450,13 +687,99 @@ impl UxmlRuntimeV2 {
     fn set_text(&mut self, i: i64, text: GString) -> bool {
         let Some(st) = self.st.as_mut() else { return false };
         let i = i as usize;
-        if i >= st.n || st.kind[i] != K_LABEL {
+        if i >= st.n || (st.kind[i] != K_LABEL && st.kind[i] != K_BUTTON) {
             return false;
         }
         st.texts_src[i] = text;
         st.make_text(i);
         st.dirty[i] = true;
         true
+    }
+
+    /// Element i's interaction Control has the focus (a Button then draws
+    /// its focus box).
+    #[func]
+    fn set_focused(&mut self, i: i64, on: bool) {
+        let Some(st) = self.st.as_mut() else { return };
+        let i = i as usize;
+        if i < st.n && st.focused[i] != on {
+            st.focused[i] = on;
+            st.dirty[i] = true;
+        }
+    }
+
+    /// The editor Control of element i (K_EDIT): the layout measures it.
+    #[func]
+    fn set_edit_control(&mut self, i: i64, ctl: Option<Gd<Control>>) {
+        let Some(st) = self.st.as_mut() else { return };
+        let i = i as usize;
+        if i < st.n {
+            st.leaves_mut().ctls[i] = ctl;
+            st.measure_dirty = true;
+        }
+    }
+
+    /// Element i's visibility as drawn: shown (it and its ancestors), and
+    /// the product of their opacities (an editor Control follows them).
+    #[func]
+    fn draw_state(&self, i: i64) -> VarArray {
+        let mut a = VarArray::new();
+        let Some(st) = self.st.as_ref() else { return a };
+        let i = i as usize;
+        let mut shown = st.rects.get(i).is_some_and(|r| r.is_some());
+        let mut op = 1.0f32;
+        if i < st.n {
+            let cb = st.casc.bind();
+            let c = cb.inner.as_ref().unwrap();
+            let mut k = i as i32;
+            while k >= 0 {
+                let v = &st.vis[k as usize];
+                if v.gone || v.hidden {
+                    shown = false;
+                }
+                op *= v.opacity;
+                k = c.parent_of(k as usize);
+            }
+        }
+        a.push(&shown.to_variant());
+        a.push(&op.to_variant());
+        a
+    }
+
+    /// The size element i is drawn at: its layout size, or a Button's size
+    /// floored at its minimum (bench/equiv_v2.gd traces).
+    #[func]
+    fn drawn_size(&self, i: i64) -> Vector2 {
+        let Some(st) = self.st.as_ref() else { return Vector2::ZERO };
+        let i = i as usize;
+        let Some(r) = st.rects.get(i).copied().flatten() else { return Vector2::ZERO };
+        if st.kind[i] == K_BUTTON {
+            let (s0, e0) = st.insets[i].unwrap_or((Vector2::ZERO, Vector2::ZERO));
+            if let Some(b) = st.leaves.btexts.borrow().get(i).and_then(|b| b.as_ref()) {
+                return b.fit(r.size, [s0.x, s0.y, e0.x, e0.y], st.vis[i].bclip).1;
+            }
+        }
+        r.size
+    }
+
+    /// The size of element i at its last layout (zero before one).
+    #[func]
+    fn last_size(&self, i: i64) -> Vector2 {
+        self.st.as_ref().and_then(|s| s.last_size.get(i as usize).copied()).unwrap_or(Vector2::ZERO)
+    }
+
+    /// Whether a record's display, visibility, opacity, clip or translate
+    /// changed since the last call.
+    #[func]
+    fn take_vis_changed(&mut self) -> bool {
+        let Some(st) = self.st.as_mut() else { return false };
+        std::mem::replace(&mut st.vis_changed, false)
+    }
+
+    /// Whether Label i shows its text elided (its last draw).
+    #[func]
+    fn is_elided(&self, i: i64) -> bool {
+        self.st.as_ref().and_then(|s| s.elided.get(i as usize).copied()).unwrap_or(false)
     }
 
     /// The first element (preorder) named `name`, -1 for none.
@@ -490,6 +813,35 @@ impl UxmlRuntimeV2 {
     #[func]
     fn local_rect(&self, i: i64) -> Rect2 {
         self.st.as_ref().and_then(|s| s.rects.get(i as usize).copied().flatten()).unwrap_or(Rect2::new(Vector2::ZERO, Vector2::ZERO))
+    }
+
+    /// The part of element i's border box (host coordinates) inside the
+    /// clips of its clipping ancestors (empty when clipped away).
+    #[func]
+    fn visible_rect(&self, i: i64) -> Rect2 {
+        let Some(st) = self.st.as_ref() else { return Rect2::new(Vector2::ZERO, Vector2::ZERO) };
+        let i = i as usize;
+        let mut r = st.host_rect(i);
+        let cb = st.casc.bind();
+        let c = cb.inner.as_ref().unwrap();
+        let mut a = c.parent_of(i);
+        while a > 0 {
+            let au = a as usize;
+            if st.vis[au].clip {
+                let ar = st.host_rect(au);
+                let ins = st.clip_inset_of(au);
+                let cr = Rect2::new(
+                    ar.position + Vector2::new(ins[0], ins[1]),
+                    Vector2::new((ar.size.x - ins[0] - ins[2]).max(0.0), (ar.size.y - ins[1] - ins[3]).max(0.0)),
+                );
+                r = match r.intersect(cr) {
+                    Some(x) => x,
+                    None => return Rect2::new(r.position, Vector2::ZERO),
+                };
+            }
+            a = c.parent_of(au);
+        }
+        r
     }
 
     /// The border box of element i in the host's coordinates.
@@ -555,6 +907,8 @@ impl UxmlRuntimeV2 {
         d.set("hidden", v.hidden);
         d.set("opacity", v.opacity);
         d.set("clip", v.clip);
+        d.set("clip_inset", &PackedFloat32Array::from(&v.clip_inset[..]).to_variant());
+        d.set("clip_item", st.clips.get(i as usize).is_some_and(|c| c.is_valid()));
         d.set("boxed", v.boxed);
         d.set("box", &v.box_sb.clone().map(|b| b.to_variant()).unwrap_or_default());
         if let Some(t) = &v.text {
@@ -601,14 +955,46 @@ impl St {
         self.restyle_some(&all)
     }
 
+    /// Property ids registered after the build (a declaration seen first
+    /// in an inline style set later) get their entries.
+    fn ensure_props(&mut self) {
+        let cb = self.casc.bind();
+        let c = cb.inner.as_ref().unwrap();
+        let pc = c.prop_count();
+        let mut add: Vec<(i16, bool)> = vec![];
+        for pid in self.vp.len()..pc {
+            let name = c.prop_name(pid as u32).to_string();
+            let k = VIS_PROPS.iter().position(|p| *p == name).map(|k| k as i16).unwrap_or(-1);
+            let ok = k >= 0 || name.starts_with("--") || layout::LAYOUT_PROPS.contains(&name.as_str()) || QUIET_PROPS.contains(&name.as_str());
+            add.push((k, ok));
+        }
+        drop(cb);
+        for (k, ok) in add {
+            self.vp.push(k);
+            self.allowed.push(ok);
+        }
+    }
+
     fn restyle_some(&mut self, which: &[usize]) -> Result<(), String> {
         let _p = crate::prof::scope("v2.restyle");
-        let gone = {
+        self.ensure_props();
+        let (dis, gone) = {
             let mut cb = self.casc.bind_mut();
             let c = cb.inner.as_mut().unwrap();
-            c.effective_flags().2
+            let f = c.effective_flags();
+            (f.1, f.2)
         };
         let gone = gone.as_slice().to_vec();
+        // A Button without a USS colour draws the theme colour of its draw
+        // mode: its disabled flag matters.
+        for (i, &d) in dis.as_slice().iter().enumerate() {
+            if i < self.n && self.disabled[i] != (d == 1) {
+                self.disabled[i] = d == 1;
+                if self.kind[i] == K_BUTTON {
+                    self.dirty[i] = true;
+                }
+            }
+        }
         for &i in which {
             if i >= self.n || self.kind[i] == K_NONE {
                 continue;
@@ -621,6 +1007,7 @@ impl St {
             if self.vis[i].gone != (gone[i] == 1) {
                 self.vis[i].gone = gone[i] == 1;
                 self.dirty[i] = true;
+                self.vis_changed = true;
             }
         }
         Ok(())
@@ -668,10 +1055,16 @@ impl St {
                 v.picking_ignore = self.vis[i].picking_ignore;
                 v.gone = gone;
                 let hp = *hp;
-                self.leaves_mut().hpad[i] = hp;
+                if Self::placement_differs(&self.vis[i], &v) {
+                    self.vis_changed = true;
+                }
+                if self.leaves.hpad[i] != hp {
+                    self.leaves_mut().hpad[i] = hp;
+                    self.measure_dirty = true;
+                }
                 self.vis[i] = v;
                 self.dirty[i] = true;
-                if self.kind[i] == K_LABEL {
+                if self.kind[i] == K_LABEL || self.kind[i] == K_BUTTON {
                     self.make_text(i);
                 }
                 return Ok(());
@@ -766,8 +1159,13 @@ impl St {
         let any_border = widths.iter().any(|&w| w > 0.0);
         let has_visual = bg.is_some() || any_border || any_bcolor || any_radius || any_pad;
         let bg_img = vals[P_BGIMG].is_some();
-        let label = self.kind[i] == K_LABEL;
-        if bg_img {
+        let button = self.kind[i] == K_BUTTON;
+        // A Button's box and background image are those of a themed
+        // control, as a Label's (UxmlStyleApplier._apply_themed_inner).
+        let label = self.kind[i] == K_LABEL || button;
+        if self.kind[i] == K_EDIT {
+            // The editor Control draws its own box.
+        } else if bg_img {
             // The background image (and the box it goes with) as runtime v1
             // builds them (UxmlStyleApplier._apply_box / _apply_themed_inner).
             let r = self.helper.call("v2_boxes", &[(i as i64).to_variant(), label.to_variant()]);
@@ -874,28 +1272,31 @@ impl St {
         // Text (a Label: UxmlStyleApplier._apply_themed_inner).
         if label {
             let to = str_of(P_TOVER);
-            if !to.is_empty() && to != "clip" {
+            if !to.is_empty() && to != "clip" && !(to == "ellipsis" && !button) {
                 return Err("text-overflow".into());
             }
             let pos = str_of(P_TOVERPOS);
             if !pos.is_empty() && !["start", "middle", "end"].contains(&pos.as_str()) {
                 return Err("text overflow position".into());
             }
+            v.color_set = vals[P_COLOR].is_some();
             let color = match vals[P_COLOR].clone() {
                 Some(x) => self.color(&x)?,
+                None if button => self.btheme.font_color,
                 None => self.theme.font_color,
             };
             // Font and size (memoized by the values that choose them).
             let url = [P_FONT, P_FONTDEF].iter().any(|&k| str_of(k).starts_with("url("));
             let fkey = format!(
-                "{}|{}|{}|{}|{}|{}",
+                "{}|{}|{}|{}|{}|{}|{}",
+                self.kind[i],
                 str_of(P_FONT), str_of(P_FONTDEF), str_of(P_FONTSTYLE), str_of(P_LSP), str_of(P_WSP), str_of(P_FONTSIZE)
             );
             let hit = if url { None } else { self.font_memo.get(&fkey).cloned() };
             let (font, size) = match hit {
                 Some(h) => h,
                 None => {
-                    let r = self.helper.call("v2_font", &[(i as i64).to_variant()]);
+                    let r = self.helper.call("v2_font", &[(i as i64).to_variant(), button.to_variant()]);
                     let a = r.try_to::<VarArray>().map_err(|_| "font".to_string())?;
                     let f = a.get(0).and_then(|x| x.try_to::<Gd<Font>>().ok()).ok_or("font")?;
                     let z = a.get(1).and_then(|x| x.try_to::<i64>().ok()).unwrap_or(16) as i32;
@@ -927,13 +1328,22 @@ impl St {
             let ws = str_of(P_WS);
             let trim = if ws == "pre-wrap" { 0 } else { DEFAULT_TRIM };
             let autowrap = match ws.as_str() {
+                // A Button does not wrap (the applier sets autowrap on
+                // Labels only).
+                _ if button => AUTOWRAP_OFF,
                 "normal" | "pre-wrap" => AUTOWRAP_WORD_SMART,
                 "nowrap" | "pre" | "" => AUTOWRAP_OFF,
                 _ => return Err("white-space".into()),
             };
+            if button {
+                v.bclip = hidden_ov;
+            } else if to == "ellipsis" && hidden_ov && autowrap == AUTOWRAP_OFF {
+                // UxmlStyleApplier._apply_elision: elided after the layout.
+                v.elide = Some(GString::from(if pos.is_empty() { "end" } else { pos.as_str() }));
+            }
             // -unity-text-outline (UxmlStyleApplier._apply_text_outline).
-            let mut outline_size = self.theme.outline_size;
-            let mut outline_color = self.theme.outline_color;
+            let mut outline_size = if button { self.btheme.outline_size } else { self.theme.outline_size };
+            let mut outline_color = if button { self.btheme.outline_color } else { self.theme.outline_color };
             if let Some(x) = vals[P_OUTW].clone() {
                 let raw = s(&x);
                 let mut w = layout::parse_number(&raw);
@@ -954,7 +1364,13 @@ impl St {
             v.text = Some(TextStyle {
                 font,
                 size,
-                line_spacing: if self.unity_metrics { 0 } else { self.theme.line_spacing },
+                line_spacing: if button {
+                    self.btheme.line_spacing
+                } else if self.unity_metrics {
+                    0
+                } else {
+                    self.theme.line_spacing
+                },
                 paragraph_spacing: self.theme.paragraph_spacing,
                 autowrap,
                 trim,
@@ -979,17 +1395,36 @@ impl St {
                     v.image = Some((t, m as i32, c));
                 }
             }
-            self.leaves_mut().natural[i] = v.image.as_ref().map(|x| x.0.get_size()).unwrap_or(Vector2::ZERO);
+            let nat = v.image.as_ref().map(|x| x.0.get_size()).unwrap_or(Vector2::ZERO);
+            if self.leaves.natural[i] != nat {
+                self.leaves_mut().natural[i] = nat;
+                self.measure_dirty = true;
+            }
+        }
+        // translate (UxmlStyleApplier._apply_transform: an offset of the
+        // drawn box and of the hit test, never of the layout).
+        if let Some(x) = vals[P_TRANSLATE].clone() {
+            let r = self.helper.call("v2_translate", &[x]);
+            let a = r.try_to::<VarArray>().map_err(|_| "translate".to_string())?;
+            let px = a.get(0).and_then(|x| x.try_to::<Vector2>().ok()).ok_or("translate")?;
+            let ratio = a.get(1).and_then(|x| x.try_to::<Vector2>().ok()).ok_or("translate")?;
+            v.translate = Some((px, ratio));
         }
         // The box's horizontal border and padding, as the stylebox content
         // margins carry them before the layout resolves percentages.
         let hp = if v.boxed { widths[3] + pads[3] + widths[1] + pads[1] } else { (self.theme.normal_margins[0] + self.theme.normal_margins[2]) as f64 };
-        self.leaves_mut().hpad[i] = hp;
+        if self.leaves.hpad[i] != hp {
+            self.leaves_mut().hpad[i] = hp;
+            self.measure_dirty = true;
+        }
         if memo_ok {
             if self.vis_memo.len() > 4096 {
                 self.vis_memo.clear();
             }
             self.vis_memo.insert(key, (keep, v.clone(), hp));
+        }
+        if Self::placement_differs(&self.vis[i], &v) {
+            self.vis_changed = true;
         }
         self.vis[i] = v;
         self.dirty[i] = true;
@@ -997,6 +1432,12 @@ impl St {
             self.make_text(i);
         }
         Ok(())
+    }
+
+    /// What the interaction Controls follow differs between two records.
+    fn placement_differs(a: &Vis, b: &Vis) -> bool {
+        a.gone != b.gone || a.hidden != b.hidden || a.opacity != b.opacity || a.clip != b.clip
+            || a.clip_inset != b.clip_inset || a.translate != b.translate
     }
 
     fn leaves_mut(&mut self) -> &mut Leaves {
@@ -1008,6 +1449,19 @@ impl St {
     fn make_text(&mut self, i: usize) {
         let Some(ts) = self.vis[i].text.clone() else { return };
         let text = self.texts_src[i].clone();
+        if self.kind[i] == K_BUTTON {
+            let mut t = self.leaves.btexts.borrow_mut();
+            if let Some(b) = t[i].as_mut() {
+                if b.same_shape(&text, &ts) {
+                    b.st = ts;
+                    return;
+                }
+            }
+            t[i] = Some(ButtonText::new(text, ts, self.locale.clone()));
+            drop(t);
+            self.measure_dirty = true;
+            return;
+        }
         let mut t = self.leaves.texts.borrow_mut();
         if let Some(b) = t[i].as_mut() {
             if b.same_shape(&text, &ts) {
@@ -1016,11 +1470,24 @@ impl St {
             }
         }
         t[i] = Some(TextBlock::new(text, ts));
+        drop(t);
+        self.measure_dirty = true;
+    }
+
+    /// Whether a layout record changed since the last layout.
+    fn records_changed(&mut self) -> bool {
+        let cb = self.casc.bind();
+        let c: &Cascade = cb.inner.as_ref().unwrap();
+        if self.recs.recs.len() != c.len() {
+            return true;
+        }
+        (0..c.len()).any(|i| c.layout_version(i) != self.recs.vers[i])
     }
 
     fn layout(&mut self, host: Vector2) -> bool {
         let _p = crate::prof::scope("v2.layout");
         self.host_size = host;
+        self.measure_dirty = false;
         let leaves = self.leaves.clone();
         let src: Rc<dyn LeafSource> = leaves;
         let n = self.n;
@@ -1051,6 +1518,11 @@ impl St {
         let out = layout::Pass::new(c, &io, &self.recs.recs, 0.0, self.warned.clone(), self.warnings.clone()).run(host);
         let changed = out.rects != self.rects;
         self.rects = out.rects;
+        for (k, r) in self.rects.iter().enumerate() {
+            if let Some(r) = r {
+                self.last_size[k] = r.size;
+            }
+        }
         self.insets = out.insets;
         drop(io);
         changed
@@ -1060,15 +1532,24 @@ impl St {
         let Some(r) = self.rects.get(i).copied().flatten() else { return Rect2::new(Vector2::ZERO, Vector2::ZERO) };
         let cb = self.casc.bind();
         let c = cb.inner.as_ref().unwrap();
-        let mut pos = r.position;
+        let mut pos = r.position + self.tr_of(i);
         let mut p = c.parent_of(i);
         while p > 0 {
             if let Some(pr) = self.rects[p as usize] {
-                pos += pr.position;
+                pos += pr.position + self.tr_of(p as usize);
             }
             p = c.parent_of(p as usize);
         }
         Rect2::new(pos, r.size)
+    }
+
+    /// The offset of element i's `translate` (px plus the ratio of its
+    /// own size).
+    fn tr_of(&self, i: usize) -> Vector2 {
+        match (&self.vis[i].translate, self.rects[i]) {
+            (Some((px, ratio)), Some(r)) => *px + *ratio * r.size,
+            _ => Vector2::ZERO,
+        }
     }
 
     fn shown(&self, i: usize) -> bool {
@@ -1104,7 +1585,7 @@ impl St {
             let p = c.parent_of(i);
             let (po, pok) = if p >= 0 { (origin[p as usize], ok[p as usize]) } else { (Vector2::ZERO, true) };
             let v = &self.vis[i];
-            let pos = if i == 0 { Vector2::ZERO } else { po + r.position };
+            let pos = if i == 0 { Vector2::ZERO } else { po + r.position + self.tr_of(i) };
             origin[i] = pos;
             ok[i] = pok && !v.gone && !v.hidden;
             if !ok[i] {
@@ -1229,10 +1710,31 @@ impl St {
             return;
         };
         r.canvas_item_set_visible(it, !(v.gone || v.hidden));
-        let pos = if i == 0 { Vector2::ZERO } else { rect.position };
-        r.canvas_item_set_transform(it, Transform2D::from_angle_origin(0.0, pos));
+        if v.translate.is_some() && i > 0 {
+            // UxmlStyleApplier._apply_transform: the Control's rotation of
+            // 1e-5 rad (no pixel snap) times the offset transform.
+            const NO_SNAP: f32 = 1e-5;
+            let rot = Transform2D::from_angle_origin(NO_SNAP, Vector2::ZERO);
+            let tr = self.tr_of(i);
+            let o = rot.basis_xform(tr) + rect.position;
+            r.canvas_item_set_transform(it, Transform2D::from_angle_origin(NO_SNAP, o));
+        } else {
+            let pos = if i == 0 { Vector2::ZERO } else { rect.position };
+            r.canvas_item_set_transform(it, Transform2D::from_angle_origin(0.0, pos));
+        }
         r.canvas_item_set_modulate(it, Color::from_rgba(1.0, 1.0, 1.0, v.opacity));
-        let size = rect.size;
+        // A Button is fitted into its box and never smaller than its
+        // minimum size (UxmlStyleApplier.fit_button, Godot's floor).
+        let mut bfit: Option<[f32; 4]> = None;
+        let mut size = rect.size;
+        if self.kind[i] == K_BUTTON {
+            let (s0, e0) = self.insets[i].unwrap_or((Vector2::ZERO, Vector2::ZERO));
+            if let Some(b) = self.leaves.btexts.borrow().get(i).and_then(|b| b.as_ref()) {
+                let (m, sz) = b.fit(size, [s0.x, s0.y, e0.x, e0.y], v.bclip);
+                bfit = Some(m);
+                size = sz;
+            }
+        }
         r.canvas_item_set_custom_rect_ex(it, true).rect(Rect2::new(Vector2::ZERO, size)).done();
         r.canvas_item_set_clip(it, v.clip);
         // The clip of the children (UxmlClip).
@@ -1274,6 +1776,8 @@ impl St {
                 None => {
                     r.canvas_item_set_canvas_group_mode(ci, godot::classes::rendering_server::CanvasGroupMode::DISABLED);
                     r.canvas_item_set_material(ci, Rid::Invalid);
+                    // Disabling the canvas group turns the item's clip off.
+                    r.canvas_item_set_clip(ci, true);
                 }
             }
             self.reparent_children(i, ci);
@@ -1285,9 +1789,17 @@ impl St {
         if v.gone {
             return;
         }
+        if self.kind[i] == K_EDIT {
+            // The editor Control draws it.
+            return;
+        }
         let full = Rect2::new(Vector2::ZERO, size);
         if let Some(sb) = &v.box_sb {
             sb.draw(it, full);
+            if self.kind[i] == K_BUTTON && self.focused[i] {
+                // Button draws its focus stylebox (the same box) over it.
+                sb.draw(it, full);
+            }
         }
         if let Some(sb) = &v.img_sb {
             sb.draw(it, full);
@@ -1300,6 +1812,22 @@ impl St {
             let area = Rect2::new(s0, Vector2::new((size.x - s0.x - e0.x).max(0.0), (size.y - s0.y - e0.y).max(0.0)));
             draw_texture_rect(it, tex, *mode, area, *tint);
         }
+        if self.kind[i] == K_BUTTON && !self.text_hidden {
+            if let (Some(m), Some(b)) = (bfit, self.leaves.btexts.borrow_mut().get_mut(i).and_then(|b| b.as_mut())) {
+                // Button's colour of its draw mode (DRAW_DISABLED, the focus
+                // colour over DRAW_NORMAL); a USS colour is on every slot.
+                if !v.color_set {
+                    b.st.color = if self.disabled[i] {
+                        self.btheme.font_disabled_color
+                    } else if self.focused[i] {
+                        self.btheme.font_focus_color
+                    } else {
+                        self.btheme.font_color
+                    };
+                }
+                b.draw(it, size, m);
+            }
+        }
         if self.kind[i] == K_LABEL && !self.text_hidden {
             let m = if v.boxed {
                 let (s0, e0) = self.insets[i].unwrap_or((Vector2::ZERO, Vector2::ZERO));
@@ -1308,7 +1836,36 @@ impl St {
                 self.theme.normal_margins
             };
             let mut t = self.leaves.texts.borrow_mut();
-            if let Some(b) = t[i].as_mut() {
+            // An elided Label draws its elided text (UxmlStyleApplier.
+            // update_elision, at the width of its content box).
+            let mut shown: Option<TextBlock> = None;
+            self.elided[i] = false;
+            if let (Some(pos), Some(b)) = (&v.elide, t[i].as_ref()) {
+                let width = size.x - (m[0] + m[2]);
+                let full = b.text.clone();
+                let key = (full.clone(), width, pos.clone(), b.st.size);
+                let el = match &self.elide_memo[i] {
+                    Some((k, e)) if *k == key => e.clone(),
+                    _ => {
+                        let e = self
+                            .helper
+                            .call("v2_elide", &[full.to_variant(), width.to_variant(), pos.to_variant(), b.st.font.to_variant(), b.st.size.to_variant()])
+                            .try_to::<GString>()
+                            .unwrap_or(full.clone());
+                        self.elide_memo[i] = Some((key, e.clone()));
+                        e
+                    }
+                };
+                if el != full {
+                    shown = Some(TextBlock::new(el, b.st.clone()));
+                    self.elided[i] = true;
+                }
+            }
+            let block = match shown.as_mut() {
+                Some(x) => Some(x),
+                None => t[i].as_mut(),
+            };
+            if let Some(b) = block {
                 // A Label is never smaller than its minimum height (Godot);
                 // a narrower box keeps its width (the runtime's fit).
                 let content_w = ((size.x - (m[0] + m[2])) as i32).max(if b.st.autowrap != AUTOWRAP_OFF { 1 } else { 0 });

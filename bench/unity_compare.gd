@@ -207,9 +207,14 @@ func _big() -> void:
 	await _time_op("big: restyle, no change", d, func(_i): pass)
 	await _time_op("big: class change (card)", d, func(i):
 		d.set_class("card-20", "card card--selected" if i % 2 == 0 else "card"))
+	# Runtime v2 draws a Label with no Control: set_text.
 	var body := d.get_native("card-30-body") as Label
 	await _time_op("big: label text change + layout", d, func(i):
-		body.text = "short" if i % 2 == 0 else "a much longer body text that wraps over lines"
+		var t := "short" if i % 2 == 0 else "a much longer body text that wraps over lines"
+		if body == null:
+			d.set_text("card-30-body", t)
+		else:
+			body.text = t
 		d.relayout())
 	await _time_op("big: resize", d, func(i):
 		d.size = Vector2(1024, 720) if i % 2 == 0 else Vector2(1280, 800))
@@ -311,7 +316,11 @@ func _dialog() -> void:
 		await process_frame
 	var body := d.get_native("body") as Label
 	await _time_op("dialog: typewriter character + layout", d, func(i):
-		body.text = DIALOG.substr(0, 1 + (i * 3) % DIALOG.length())
+		var t := DIALOG.substr(0, 1 + (i * 3) % DIALOG.length())
+		if body == null:
+			d.set_text("body", t)  # runtime v2: the core draws the Label
+		else:
+			body.text = t
 		d.relayout(), _iters * 2)
 	await _time_op("dialog: hover choice", d, func(i):
 		d.set_element_state("choice-%d" % (i % 4), "hover", i % 2 == 0))

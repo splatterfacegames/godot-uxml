@@ -77,7 +77,13 @@ func _initialize() -> void:
 	_unity_project_data()
 	var unity_ok := _unity_section(unity_cases)
 	var scaled_ok := _scaled_section()
-	quit(0 if negatives_ok and unity_ok and scaled_ok else 1)
+	# The runtime section loads documents in the tree: after the first frame.
+	_finish.call_deferred(unity_cases, 0 if negatives_ok and unity_ok and scaled_ok else 1)
+
+
+func _finish(unity_cases: Array, code: int) -> void:
+	await _runtime_section(unity_cases)
+	quit(code)
 
 
 ## The other files of a corpus case (<name>.files/: templates, sheets),
@@ -551,6 +557,69 @@ func _unity_section(cases: Array) -> bool:
 		tot["geo_half"], tot["style_ok"], tot["style"], tot["props_ok"], tot["props"], tot["diag_ok"], tot["diag"],
 		"detected" if negatives_ok else "NOT DETECTED"])
 	return negatives_ok
+
+
+## The runtimes' rects against Unity's, for the corpus cases whose sidecar
+## has `"runtime": true`: the sections above lay the model out without
+## Controls; here each case loads in a UxmlDocument on runtime v1 (one Control
+## per element, which Godot floors at its minimum size) and on runtime v2,
+## and every element's get_element_rect() is compared with Unity's panel
+## rect (to 0.5px). Measured, not gated.
+func _runtime_section(cases: Array) -> void:
+	var tot := {1: [0, 0], 2: [0, 0]}
+	var notes: Array = []
+	var names: Array = []
+	for c in cases:
+		var side_path: String = CASES_DIR + String(c["name"]) + ".json"
+		var dpath: String = UNITY_DIR + String(c["name"]) + ".json"
+		if not FileAccess.file_exists(side_path) or not FileAccess.file_exists(dpath):
+			continue
+		var side = JSON.parse_string(FileAccess.get_file_as_string(side_path))
+		if not side is Dictionary or not bool(side.get("runtime", false)):
+			continue
+		names.append(c["name"])
+		var dump: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(dpath))
+		var size := Vector2(float(side.get("width", 400)), float(side.get("height", 300)))
+		for rt in [1, 2]:
+			var d := UxmlDocument.new()
+			d.auto_load = false
+			d.runtime = rt
+			root.add_child(d)
+			d.size = size
+			d._clear()
+			var base := "user://godot_uxml_parity_runtime/" + String(c["name"])
+			DirAccess.make_dir_recursive_absolute(base + "/Assets/GoldenCases")
+			d._resolver = UxmlResourceResolver.new(base)
+			d._doc = UxmlLoader.load_source(c["uxml"], base + "/Assets/GoldenCases/case.uxml", d._resolver, c["uss"])
+			UxmlTheme.attach(d._doc, d.theme_path, d.editor_theme, d.editor_skin)
+			d._start_runtime()
+			# Runtime v1 settles over frames (bench/equiv_v2.gd _settle).
+			for k in 4:
+				d._restyle_now()
+				await process_frame
+			var ours := _paths(d._doc.root)
+			for e in dump["elements"]:
+				var el = ours.get(String(e["path"]))
+				if el == null:
+					continue
+				var u: Dictionary = e["rect"]
+				var ur := Rect2(float(u["x"]), float(u["y"]), float(u["width"]), float(u["height"]))
+				var gr := d.get_element_rect(el)
+				tot[rt][1] += 1
+				if absf(gr.position.x - ur.position.x) <= 0.5 and absf(gr.position.y - ur.position.y) <= 0.5 						and absf(gr.size.x - ur.size.x) <= 0.5 and absf(gr.size.y - ur.size.y) <= 0.5:
+					tot[rt][0] += 1
+				elif notes.size() < 6:
+					notes.append("%s runtime v%d %s %s: %s vs Unity %s" % [c["name"], d.get_runtime(), e["path"],
+						e["type"] + ("#" + String(e["name"]) if not String(e["name"]).is_empty() else ""), gr, ur])
+			root.remove_child(d)
+			d.free()
+	if names.is_empty():
+		return
+	print("")
+	for n in notes:
+		print("  " + n)
+	print("UNITY RUNTIME RECTS: runtime v1 %d/%d, runtime v2 %d/%d within 0.5px (%s)" % [
+		tot[1][0], tot[1][1], tot[2][0], tot[2][1], ", ".join(PackedStringArray(names))])
 
 
 ## Part 3: the panel-scaling dumps (see the header). Prints one row per

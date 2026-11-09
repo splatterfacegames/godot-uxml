@@ -1,0 +1,27 @@
+/* The cards of the big-static benchmark document (bench.gd: base.uss,
+   components.uss, static.uss): runtime v1 lays card-0 out 159px high,
+   runtime v2 175px (docs/design.md, "Runtime v2"). */
+:root { --accent: #3a7bd5; --text: rgb(220, 220, 220); --muted: rgba(200, 200, 200, 0.6); --panel: #2a2a2a; --pad: 4px 8px; --radius: 4px; --font: 13px; }
+Label { color: var(--text); font-size: var(--font); }
+.row { flex-direction: row; }
+.wrap { flex-wrap: wrap; }
+.grid { justify-content: flex-start; align-content: flex-start; padding: 2px; }
+.card { width: 200px; margin: 4px; padding: var(--pad); background-color: var(--panel); border-width: 1px; border-color: #444; border-radius: var(--radius); }
+.card > .card-header { justify-content: space-between; align-items: center; }
+.card .title { font-size: 15px; }
+.badge { font-size: 10px; color: var(--accent); padding: 0 4px; border-width: 1px; border-color: var(--accent); border-radius: 6px; }
+.card-body { white-space: normal; margin-top: 4px; margin-bottom: 4px; }
+.card .card-body { color: var(--muted); }
+.card-actions { justify-content: flex-end; }
+.card-actions > .btn { flex-grow: 1; margin: 2px; height: 24px; }
+.card-slider { margin-top: 4px; }
+.card-field { margin-top: 4px; }
+.btn { color: var(--text); background-color: #3c3c3c; border-radius: var(--radius); padding: 2px 6px; -unity-text-align: middle-center; }
+.btn.btn-primary { background-color: var(--accent); color: white; }
+.slider { height: 18px; justify-content: center; }
+.slider-track { height: 4px; background-color: #555; border-radius: 2px; }
+.slider-dragger { position: absolute; top: -5px; width: 10px; height: 14px; margin-left: -5px; background-color: #aaa; border-radius: 3px; }
+.field { align-items: center; }
+.field-label { width: 60px; }
+.field-input { flex-grow: 1; height: 20px; border-width: 1px; border-color: #555; background-color: #1a1a1a; padding: 0 4px; justify-content: center; }
+.field-text { margin: 0; padding: 0; }

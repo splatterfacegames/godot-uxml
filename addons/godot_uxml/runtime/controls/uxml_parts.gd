@@ -44,6 +44,8 @@ const HIDDEN := "display: none;"
 ## Author children of a control that live in its content container: the
 ## control (WeakRef), their logical parent.
 const META_LOGICAL_PARENT := &"uxml_logical_parent"
+## Set on a model whose part trees are built.
+const META_EXPANDED := &"uxml_parts_expanded"
 
 
 ## Build the part trees of every control in `doc` (once per load, before the
@@ -52,6 +54,11 @@ const META_LOGICAL_PARENT := &"uxml_logical_parent"
 static func expand(doc: UxmlDocumentModel) -> void:
 	if doc == null or doc.root == null:
 		return
+	# Once per model: runtime v2 expands a model that may then load on
+	# runtime v1 (UxmlDocument._v2_fallback).
+	if doc.has_meta(META_EXPANDED):
+		return
+	doc.set_meta(META_EXPANDED, true)
 	_mark_live(doc)
 	# Containers and collections: UxmlObjects (<Columns>) leave the tree.
 	UxmlContainerParts.before_expand(doc)

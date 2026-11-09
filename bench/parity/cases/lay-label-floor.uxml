@@ -1,0 +1,28 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+  <ui:VisualElement name="grid" class="grid row wrap">
+    <ui:VisualElement name="card-0" class="card" style="margin-left: 0px;">
+      <ui:VisualElement class="card-header row">
+        <ui:Label class="card-title title" text="Card 0" />
+        <ui:Label class="badge" text="new" />
+      </ui:VisualElement>
+      <ui:Label name="card-0-body" class="card-body body-text" text="Body text for card 0 with a few words" />
+      <ui:VisualElement class="card-actions row">
+        <ui:Label name="card-0-ok" class="btn btn-primary" text="OK" />
+        <ui:Label class="btn" text="Cancel" />
+      </ui:VisualElement>
+      <ui:VisualElement class="card-slider slider"><ui:VisualElement class="slider-track"><ui:VisualElement class="slider-dragger" style="left: 0%;" /></ui:VisualElement></ui:VisualElement>
+      <ui:VisualElement class="card-field field row"><ui:Label class="field-label" text="Name" /><ui:VisualElement class="field-input"><ui:Label class="field-text" text="card 0" /></ui:VisualElement></ui:VisualElement>
+    </ui:VisualElement>
+    <ui:VisualElement name="card-1" class="card">
+      <ui:VisualElement class="card-header row">
+        <ui:Label class="card-title title" text="Card 1" />
+        <ui:Label class="badge" text="new" />
+      </ui:VisualElement>
+      <ui:Label name="card-1-body" class="card-body body-text" text="Body text for card 1 with a few words" />
+      <ui:VisualElement class="card-actions row">
+        <ui:Label name="card-1-ok" class="btn btn-primary" text="OK" />
+        <ui:Label class="btn" text="Cancel" />
+      </ui:VisualElement>
+    </ui:VisualElement>
+  </ui:VisualElement>
+</ui:UXML>

@@ -177,10 +177,27 @@ on structure only.
 
 ### Unity
 
-**177 of 178 cases match exactly. Structure: 4466/4466 elements.
-Geometry: 15023/15024 values. Style: 314548/314549 values. Element
-properties: 5429/5429. Import diagnostics: 86/86.** The one value that differs is a Unity-internal
-1px (`ctl-numeric`, below).
+**178 of 179 cases match exactly. Structure: 4490/4490 elements.
+Geometry: 15119/15120 values. Style: 316947/316948 values. Element
+properties: 5477/5477. Import diagnostics: 86/86.** The one value that differs is a Unity-internal
+1px (`ctl-numeric`, below). (Before `lay-label-floor`: 177 of 178; structure
+4466/4466, geometry 15023/15024, style 314548/314549, element properties
+5429/5429.)
+
+**The runtimes against Unity.** The sections above lay the model out
+without Controls. `lay-label-floor` (the first two cards of the `big-static`
+benchmark document) has `"runtime": true` in its sidecar: `bench/parity.gd`
+also loads it in a UxmlDocument on runtime v1 and on runtime v2 and compares
+every element's `get_element_rect` with Unity's panel rect, to 0.5px
+(`UNITY RUNTIME RECTS`): **runtime v1 8/24, runtime v2 24/24.** Unity lays
+card-0 out 200 x 175 (its wrapping body Label 176 x 40); runtime v1's Label
+Control is measured one line high (24px) at its stale width, the card is
+laid out 159 high and the Label then grows to 40px over the buttons below
+it. The layout of this harness gives 175, as runtime v2 does. Runtime v1 is
+not changed (a wrapping Label measured at a stale width that no later
+layout corrects; docs/design.md, "Runtime v2"): the measured case is the
+record. Add
+`"runtime": true` to a case's sidecar to measure the runtimes on it.
 
 The seven `px-*` paint cases (borders, backgrounds and images, clipping,
 transforms, text, `filter`, `-unity-material`; see "Pixels") match on

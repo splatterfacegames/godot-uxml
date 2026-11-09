@@ -147,6 +147,8 @@ class Behavior extends RefCounted:
 		var c := control_of(p)
 		if c != null:
 			doc._set_control_text(c, t)
+		if doc._v2 != null:
+			doc._v2.part_text(p)  # runtime v2 draws the part's text
 		if UxmlParts._live(el, source):
 			var hidden := t.is_empty()
 			if (p.get_attribute("style") == UxmlParts.HIDDEN) != hidden:

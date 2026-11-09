@@ -16,8 +16,10 @@ first round).
 
 Runtime v1 must not regress:
 
-- `python tests/run_tests.py --godot $G --timeout 1700` (3811 checks);
-- `$G --headless --path . -s res://bench/parity.gd` (177/178);
+- `python tests/run_tests.py --godot $G --timeout 1700` (3932 checks, of which
+  54 of runtime v2's interaction suite `tests/test_runtime_v2.gd`);
+- `$G --headless --path . -s res://bench/parity.gd` (178/179; the runtime
+  rects of `lay-label-floor`: v1 8/24, v2 24/24);
 - the 8 equivalence runs (`bench/equiv.gd`, `equiv_layout.gd`,
   `equiv_parse.gd`, `equiv_runtime.gd`, each native and `-- --gdscript`);
 - `python bench/pixels.py` (box 99.806% exact, text IoU 0.917, runtime
@@ -50,37 +52,53 @@ return null: the elements have no Control.
 Covered: 46 of the 177 pixel cases, 61 of the 215 documents of
 `bench/equiv_v2.gd`, the HUD of the benchmarks and `big-static`.
 
-## Phase 2: interactive widgets
+## Phase 2: interactive widgets (done)
 
-- Button, RepeatButton, Toggle, RadioButton, Foldout: the box and the text
-  drawn by the core (their part trees become table elements, styled by the
-  default theme as today); a behaviour Control per widget (focus,
-  keyboard and controller navigation, `pressed`, accessibility) with no
-  drawing of its own, placed at the element's rect. `button_pressed`,
-  `value_changed` keep their signatures.
-- TextField and the numeric fields: a LineEdit / TextEdit Control for the
-  editor part (IME, selection, caret), drawn with transparent styleboxes
-  over the core-drawn box; the label part drawn by the core.
-- Slider, SliderInt, MinMaxSlider, ProgressBar, Scroller: the track and
-  dragger drawn by the core, input from the core's hit test plus a
-  focusable Control for the keyboard.
-- DropdownField, EnumField: the field drawn by the core, the popup as
-  today (a second document).
-- Focus ring and navigation: `tabindex`, `focusable`, focus order over the
-  behaviour Controls (Godot's focus_next/previous chains, as
-  UxmlCommonAttributes builds them now); `:focus` from Godot's focus.
-- Tooltips (the `tooltip` attribute and elided text) from the core's hit
-  test; `picking-mode` already comes from it.
-- `get_control_for` / `get_native` hand out the behaviour Control; for an
-  element without one, a Control made on request (as parked subtrees are
-  exposed today) so that existing callers keep working.
-- Gate: the big document, settings, inventory and dialog on v2.
+Button, Toggle, RadioButton, RadioButtonGroup, Foldout, Slider, SliderInt,
+MinMaxSlider, DropdownField, EnumField, ProgressBar, TextField (one line;
+multiline without a scroller), ScrollView and `focusable="true"` elements
+(docs/design.md, "Phase 2: interactive widgets"):
 
-## Phase 3: collections and containers
+- the part trees are table elements drawn by the core with the default
+  theme; a Button's text is Godot's Button text ported (`v2button.rs`),
+  fitted and floored as runtime v1's;
+- one interaction Control per focusable or interactive element (focus,
+  keyboard and controller navigation, signals, accessibility), drawing
+  nothing; the text field editors are real LineEdit / TextEdit Controls;
+- runtime v1's behaviors run on those Controls (the geometry readers
+  subclassed to read the table), so `button_pressed`, `value_changed`,
+  `set_field_value` / `get_field_value`, `set_field_placeholder`,
+  `set_enabled`, `:checked`, `:focus`, `:disabled` are the same code;
+  pointer input from the core's hit test; tooltips from the root box;
+- `get_element` / `get_native` / `get_control_for` / `get_native_for` hand
+  out the interaction Control (null for core-drawn elements; `set_text` for
+  their text);
+- `translate` (the draggers, the scroll offset) and `text-overflow:
+  ellipsis` on Labels are drawn.
 
-- ScrollView: the viewport clip and the content translate as placement-only
-  values of the table (no cascade pass per scroll), scrollbars as phase-2
-  sliders; wheel and drag input from the core.
+Gate met: big, settings, inventory and dialog load on v2, equal to v1
+(`bench/equiv_v2.gd`: 3,329 checks, 0 failures) and pixel-identical.
+Covered: 125 of the 216 documents of `bench/equiv_v2.gd` (phase 1: 61 of
+215), 204 of 204 pixel comparisons identical (phase 1: 113); 102 of the 177
+cases of `bench/pixels.py --runtime 2` (phase 1: 46), every render identical
+to runtime v1's.
+
+Moved to phase 3: panel scaling on v2 (the shared `UxmlPanelScale` /
+`panel_scale.rs` layer: the box records need the device pixel grid,
+`UxmlBoxStyle.px`, the line fix of scaled text and the oversampling of the
+root box; a scaled document loads on v1), `tabindex`, `show-input-field`
+sliders, a multiline TextField with a scroller, RepeatButton outside a
+Scroller, ToggleButtonGroup, GroupBox, HelpBox, the numeric and composite
+fields; the editor Controls clipped by `overflow: hidden` ancestors.
+
+## Phase 3: collections, containers, the rest of the fields, scaling
+
+- ScrollView (drawn and scrolled in phase 2 through runtime v1's model: the
+  content translate is an inline style that restyles one element): the
+  scroll offset as a placement-only value of the table (no cascade pass per
+  scroll).
+- Panel scaling on v2, tabindex, the numeric and composite fields,
+  ToggleButtonGroup, GroupBox, HelpBox, standalone RepeatButton.
 - ListView, TreeView, MultiColumnListView/TreeView: the row pool as table
   ranges (Slint's repeater: instances for the visible rows, rebinding by
   row index); selection, reorder and drag from the core's hit test.
