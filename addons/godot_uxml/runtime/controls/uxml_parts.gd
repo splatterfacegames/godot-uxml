@@ -60,16 +60,31 @@ static func expand(doc: UxmlDocumentModel) -> void:
 		return
 	doc.set_meta(META_EXPANDED, true)
 	_mark_live(doc)
-	# Containers and collections: UxmlObjects (<Columns>) leave the tree.
-	UxmlContainerParts.before_expand(doc)
 	var todo: Array = []
-	var depth := {}  # Foldout -> number of Foldout ancestors
-	_foldout_depths(doc.root, 0, depth)
-	for el in doc.root.walk():
-		if el.part_of != null:
+	var views: Array = []  # TabView, TwoPaneSplitView (UxmlContainerParts.after_expand)
+	# One preorder walk: the number of Foldout ancestors of each Foldout
+	# (parts included), then the elements that are not parts.
+	var stack: Array = [doc.root]
+	var depths: Array = [0]
+	while not stack.is_empty():
+		var el: UxmlElement = stack.pop_back()
+		var d: int = depths.pop_back()
+		var fold := el.local == "Foldout"
+		# Containers and collections: UxmlObjects (<Columns>) leave the
+		# tree before its walk goes into them.
+		UxmlContainerParts.before_expand_el(el)
+		if el.local == "TabView" or el.local == "TwoPaneSplitView":
+			views.append(el)
+		var ch: Array = el.children
+		var k := ch.size() - 1
+		while k >= 0:
+			stack.append(ch[k])
+			depths.append(d + 1 if fold else d)
+			k -= 1
+		if el._part_of != null:
 			continue
-		if depth.has(el):
-			el.set_meta(&"uxml_foldout_depth", depth[el])
+		if fold and el != doc.root:
+			el.set_meta(&"uxml_foldout_depth", d)
 		# Unity's SetEnabled(false) adds `unity-disabled` to the element
 		# itself (not its subtree), which `enabled="false"` does at load.
 		var en = el.get_attribute("enabled")
@@ -80,7 +95,7 @@ static func expand(doc: UxmlDocumentModel) -> void:
 	for el in todo:
 		build(el)
 	# Containers and collections: steps that need every part tree built.
-	UxmlContainerParts.after_expand(doc)
+	UxmlContainerParts.after_expand(views)
 
 
 ## Record the text attributes that <Bindings> write (META_LIVE).
@@ -111,17 +126,15 @@ static func _text_part(el: UxmlElement, attr_name: String, role: String, classes
 	return p
 
 
-static func _foldout_depths(el: UxmlElement, d: int, out: Dictionary) -> void:
-	for c in el.children:
-		if c.local == "Foldout":
-			out[c] = d
-			_foldout_depths(c, d + 1, out)
-		else:
-			_foldout_depths(c, d, out)
+static var _has_parts := {}
 
 
 static func has_parts(local: String) -> bool:
-	return _builder(local).is_valid()
+	var h = _has_parts.get(local)
+	if h == null:
+		h = _builder(local).is_valid()
+		_has_parts[local] = h
+	return h
 
 
 ## Build `el`'s parts (no-op for elements without a part tree).
@@ -190,9 +203,17 @@ static func content_container(el: UxmlElement) -> UxmlElement:
 ## The first part of `owner` with `role` (searching owner's whole subtree,
 ## parts of nested controls excluded), or null.
 static func find_part(owner: UxmlElement, role: String) -> UxmlElement:
-	for x in owner.walk():
-		if x.part_of == owner and x.part_role == role:
+	# Preorder, stopping at the first (owner.walk() order).
+	var stack: Array = [owner]
+	while not stack.is_empty():
+		var x: UxmlElement = stack.pop_back()
+		if x.part_role == role and x.part_of == owner:
 			return x
+		var ch: Array = x.children
+		var k := ch.size() - 1
+		while k >= 0:
+			stack.append(ch[k])
+			k -= 1
 	return null
 
 

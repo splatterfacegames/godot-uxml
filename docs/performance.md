@@ -2960,3 +2960,101 @@ of the loaded machine in this phase.
   where v1's Buttons keep a Control a fraction of a pixel larger than their
   layout rect (51.33 px for a 51 px rect at 1.33 pixels per point) and v2
   draws the layout's rect, Unity's.
+
+## Runtime v2: the load (`runtime/v2-load`)
+
+Lazy interaction Controls, fewer model walks, shared parsed author sheets,
+native readers for the cascade setup, the slider hooks and background-image
+boxes, UxmlBoxStyle draws replayed natively (`docs/design.md`, "The load").
+v2 stays an opt-in.
+
+### Method
+
+`python tools/unity-bench/run.py --arms godot-release,godot-release-v2,unity-il2cpp --rounds 5 --iters 60 --skip-build`
+after a fresh release export of the branch (`81f4f91`), the IL2CPP player of
+phase 1. The machine was loaded by other sessions throughout (Unity's big
+load 58.9 ms against 44.7 in phase 3, runtime v1's 770 against 633): compare
+the ratios.
+
+### Results (ms, release template, median of the 5 rounds)
+
+| Operation | v1 | v2 | Unity (IL2CPP) | v2 / v1 | v2 / Unity | phase 3 v2 / Unity |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| big: load | 770 | **269** | 58.9 | 0.35 | 4.6 | 6.7 |
+| big: load + first frame | 834 | **269** | 85.0 | 0.32 | 3.2 | 4.1 |
+| settings: load | 67.7 | **37.1** | 5.54 | 0.55 | 6.7 | 8.0 |
+| inventory: load | 66.9 | **24.7** | 4.22 | 0.37 | 5.8 | 8.1 |
+| dialog: load | 8.30 | **6.46** | 0.474 | 0.78 | 13.6 | 22 |
+| listview: load, 10,000 items | 105 | **39.7** | 5.66 | 0.38 | 7.0 | 9.4 |
+| big: class change (card) | 6.46 | **3.54** | 2.03 | 0.55 | 1.7 | 2.3 |
+| big: hover toggle (button) | 0.718 | **0.699** | 1.282 | 0.97 | 0.55 | 0.41 |
+| settings: switch tab | 5.55 | **1.55** | 1.70 | 0.28 | 0.91 | 0.78 |
+| frame: big document, idle | 0.995 | 0.927 | 2.033 | 0.93 | 0.46 | 0.27 |
+
+The full table: `tools/unity-bench/out/summary.md` of the run.
+
+### Where a v2 load of the big document goes (editor binary, ms)
+
+`bench/v2/load_cost.gd -- --doc=big --n=9`, before (main `4a2b81f`) and
+after (`81f4f91`), the same harness and session, a loaded machine (runtime
+v1 859 and 907 ms in the two runs):
+
+| Step | before | after |
+| --- | ---: | ---: |
+| parse, theme, rest | 46 | about 25 |
+| part trees | 44 | 26 |
+| cascade setup | 29 | 22 |
+| index | 14 | 8.5 |
+| interaction Controls (creation, behaviors) | 86 | 30 |
+| first cascade | 35 | 35 |
+| build | 37 | 30 |
+| editors applied | (in layout) | 13 |
+| layout (native pass 34, hooks 8, hook restyle and pass 6, placement 2) | 83 | 53 |
+| draw | 17 | 16 |
+| total | 387 | 282 |
+
+What changed per step: the Controls of the 305 Buttons and 60 focusable
+elements are not made at the load (Buttons alone were 46 ms: about 150 us
+each to make and enter the tree); the part trees, the glue's index and
+coverage check walk the model once; a document's author sheets are parsed
+and compiled once per text (the dialog: 7.5 to 5.7 ms); the native cascade
+setup reads packed arrays instead of five property reads per element (12 to
+5 ms); the slider hooks read four lengths instead of the whole computed
+style (18 to 8 ms); a background-image box reads the style without the
+origins it does not use; UxmlBoxStyle draws are replayed (895 draws, 39
+recordings).
+
+### What remains
+
+The steps left are each 15 to 35 ms: the first cascade and the build
+(native, about 10 us per element), the native layout pass (line breaking of
+547 texts, 12 ms; the wrapping measures), the parse into UxmlElement objects
+(16 ms for 1,531 elements) and the part trees (phase 5), the Controls that
+hold values (Toggles, Sliders, popup fields: about 8 ms) and the 30 text
+editors (made and applied: about 20 ms; a core-drawn unfocused field would
+make them lazy).
+
+### Equivalence and gates
+
+`bench/equiv_v2.gd` (windowed) 3,987 checks, 0 failures, 237/237 pixels; the
+focus order of lazy and eager Controls is the same in all 150 covered
+documents (4,458 keys). Pixels and scaled pixels unchanged (box 99.806%,
+IoU 0.917, rects 3369/3551; scaled 99.904%, 0.954, 4036/4248); `--runtime 2`
+renders identical to v1's (358 of 358; scaled 332 of 344, the 12 others
+`scl-settings`). A/A/B (`bench.gd --quick`, `workloads.gd --quick`, 3
+rounds) was dominated by the machine's load: B/A 0.83 and 1.21 against A'/A
+1.14 and 1.25.
+
+### Crash hunt
+
+Three unexplained crashes had been seen. `bench/equiv_v2.gd` run headless
+crashes on main (3 of 3 runs; the windowed gate run takes other random
+changes): a MinMaxSlider's layout hook alternating between two results
+restyled forever in one message-queue flush until the process died (fixed:
+restyles bounded per frame; `tests/test_runtime.gd` reproduces it without the
+bound). The other scripts ran under cdb (dumps on access violations, stack
+overflows, heap corruption, second-chance exceptions) in a loop; see the
+merge message of `runtime/v2-load` for the counts. Headless equiv_v2 still
+reports two pre-existing mismatches (not gates): `child-combinator-through-parts`
+(a hit test after a tracker class on a ScrollView child) and the alternating
+hook of `ctl-hover-minmax`, which has no fixed point.

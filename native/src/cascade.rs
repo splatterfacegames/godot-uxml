@@ -739,6 +739,7 @@ impl Cascade {
         // Convert the blocks the base does not have yet against the base
         // tables (before anything of this document is interned), then start
         // this cascade from a copy of the base tables.
+        let p_base = crate::prof::scope("cs.base");
         let mut cached: Vec<Rc<Block>> = Vec::with_capacity(blocks.len());
         BASE.with(|cell| {
             let mut base = cell.borrow_mut();
@@ -766,6 +767,8 @@ impl Cascade {
             }
         });
 
+        drop(p_base);
+        let p_els = crate::prof::scope("cs.els");
         // Line starts of the UXML source (code-point offsets, like Godot).
         let chars: Vec<char> = source.to_string().chars().collect();
         let mut newlines: Vec<usize> = vec![];
@@ -786,14 +789,35 @@ impl Cascade {
         let sn_children = StringName::from("children");
         let sn_offset = StringName::from("open_tag_start");
         let sn_end = StringName::from("open_tag_end");
+        // The fields UssCascade._index_tree reads into packed arrays (no
+        // property read per element), when it gives them.
+        let p_local = get("_local").try_to::<PackedStringArray>().ok().filter(|a| a.len() == n);
+        let p_prefix = get("_prefix").try_to::<PackedStringArray>().ok().filter(|a| a.len() == n);
+        let p_ots = get("_ots").try_to::<PackedInt32Array>().ok().filter(|a| a.len() == n);
+        let p_ote = get("_ote").try_to::<PackedInt32Array>().ok().filter(|a| a.len() == n);
+        let packed = p_local.is_some() && p_prefix.is_some() && p_ots.is_some() && p_ote.is_some() && end.len() == n;
         for i in 0..n {
             let var = els.at(i);
             let obj = var.try_to::<Gd<Object>>().ok()?;
-            let local = gs(&obj.get(&sn_local)).to_string();
-            let prefix = gs(&obj.get(&sn_prefix)).to_string();
-            let leaf = obj.get(&sn_children).to::<VarArray>().is_empty();
-            let offset = obj.get(&sn_offset).try_to::<i64>().unwrap_or(0);
-            let end = obj.get(&sn_end).try_to::<i64>().unwrap_or(offset);
+            let (local, prefix, leaf, offset, end) = if packed {
+                let o = p_ots.as_ref().unwrap().as_slice()[i] as i64;
+                (
+                    p_local.as_ref().unwrap().as_slice()[i].to_string(),
+                    p_prefix.as_ref().unwrap().as_slice()[i].to_string(),
+                    end.as_slice()[i] as usize == i + 1,
+                    o,
+                    p_ote.as_ref().unwrap().as_slice()[i] as i64,
+                )
+            } else {
+                let o = obj.get(&sn_offset).try_to::<i64>().unwrap_or(0);
+                (
+                    gs(&obj.get(&sn_local)).to_string(),
+                    gs(&obj.get(&sn_prefix)).to_string(),
+                    obj.get(&sn_children).to::<VarArray>().is_empty(),
+                    o,
+                    obj.get(&sn_end).try_to::<i64>().unwrap_or(o),
+                )
+            };
             // UxmlDiagnostic.line_col
             let limit = (offset.max(0) as usize).min(chars.len());
             let (line, column) = if offset <= 0 || limit == 0 {
@@ -838,6 +862,8 @@ impl Cascade {
         c.lay_vals = vec![vec![None; crate::layout::LAYOUT_PROPS.len()]; n];
         c.lay_ver = vec![0; n];
 
+        drop(p_els);
+        let p_rules = crate::prof::scope("cs.rules");
         // Compiled rules. Theme blocks come from the base cache; the
         // per-cascade fields (scope, sheet, item, file, selector rule and
         // specificity) are read from the GDScript tables for every rule.
@@ -887,6 +913,8 @@ impl Cascade {
             c.sels.push(sel);
             s += 1;
         }
+        drop(p_rules);
+        let _p_ix = crate::prof::scope("cs.index_sels");
         c.block_ranges = blocks.clone();
         c.index_sels();
         Some(c)
@@ -1965,6 +1993,42 @@ impl Cascade {
         d
     }
 
+    /// Element i's computed style as style_dict gives it, with the origins
+    /// of `origin_props` only (the others `{value}`): what a reader of values
+    /// and of the files of a few url() properties needs.
+    pub fn style_dict_lite(&self, i: usize, origin_props: &PackedStringArray) -> VarDictionary {
+        let want: Vec<u32> = origin_props.as_slice().iter().filter_map(|p| self.props.index.get(&p.to_string()).copied()).collect();
+        let mut d = VarDictionary::new();
+        for it in self.out_items[i].iter() {
+            let mut e = VarDictionary::new();
+            e.set(&self.k_value, &*it.value);
+            if want.contains(&it.pid) {
+                e.set(&self.k_origin, &self.origin_of(i, it));
+            }
+            d.set(&self.props.keys[it.pid as usize], &e);
+        }
+        d
+    }
+
+    /// The entries `{value}` of `props` in element i's computed style (those
+    /// it has): the values style_dict gives, without the origins and the
+    /// other properties (a layout hook reading a few lengths).
+    pub fn style_values(&self, i: usize, props: &PackedStringArray) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let want: Vec<u32> = props.as_slice().iter().filter_map(|p| self.props.index.get(&p.to_string()).copied()).collect();
+        if want.is_empty() {
+            return d;
+        }
+        for it in self.out_items[i].iter() {
+            if want.contains(&it.pid) {
+                let mut e = VarDictionary::new();
+                e.set(&self.k_value, &*it.value);
+                d.set(&self.props.keys[it.pid as usize], &e);
+            }
+        }
+        d
+    }
+
     /// Computed overrides for element i (empty clears them); see
     /// UssCascade.set_override.
     pub fn set_override(&mut self, i: usize, entries: VarDictionary) {
@@ -2274,6 +2338,7 @@ impl UxmlNativeCascade {
     /// not in the expected shape.
     #[func]
     fn setup(&mut self, cascade: Gd<Object>, callbacks: VarDictionary) -> bool {
+        let _p = crate::prof::scope("cs.setup");
         self.inner = Cascade::setup(&cascade, &callbacks);
         self.inner.is_some()
     }
@@ -2735,6 +2800,25 @@ impl UxmlNativeCascade {
     fn style_of(&self, i: i64) -> VarDictionary {
         match self.inner.as_ref() {
             Some(c) if i >= 0 && (i as usize) < c.len() => c.style_dict(i as usize),
+            _ => VarDictionary::new(),
+        }
+    }
+
+    /// The values of `props` in element i's computed style ({prop: {value}},
+    /// the properties it has): style_of's values, without the rest.
+    #[func]
+    fn style_values(&self, i: i64, props: PackedStringArray) -> VarDictionary {
+        match self.inner.as_ref() {
+            Some(c) if i >= 0 && (i as usize) < c.len() => c.style_values(i as usize, &props),
+            _ => VarDictionary::new(),
+        }
+    }
+
+    /// style_of with the origins of `origin_props` only.
+    #[func]
+    fn style_of_lite(&self, i: i64, origin_props: PackedStringArray) -> VarDictionary {
+        match self.inner.as_ref() {
+            Some(c) if i >= 0 && (i as usize) < c.len() => c.style_dict_lite(i as usize, &origin_props),
             _ => VarDictionary::new(),
         }
     }

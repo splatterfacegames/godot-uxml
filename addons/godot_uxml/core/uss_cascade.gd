@@ -95,6 +95,9 @@ var _parent: PackedInt32Array
 var _sel_parent: PackedInt32Array
 var _end: PackedInt32Array             # subtree end (exclusive)
 var _local: PackedStringArray
+var _prefix: PackedStringArray         # per element: prefix, open tag span (for the native setup)
+var _ots: PackedInt32Array
+var _ote: PackedInt32Array
 var _cls_set: Array = []               # per element Dictionary class -> true (explicit + implicit)
 var _name: Array = []                  # per element name attribute (null when absent)
 
@@ -200,6 +203,9 @@ func _index_tree() -> void:
 		index[el] = i
 		_parent.append(p)
 		_local.append(el.local)
+		_prefix.append(el.prefix)
+		_ots.append(el.open_tag_start)
+		_ote.append(el.open_tag_end)
 		var ch: Array = el.children
 		var k := ch.size() - 1
 		while k >= 0:
@@ -501,12 +507,14 @@ func _add_rule(f: Dictionary) -> void:
 	# The compiled form of a rule depends only on the rule and its layer.
 	# Theme sheets are parsed once and shared by every load (UxmlTheme), so
 	# their compiled rules are kept on the shared rule (key CC) and reused.
+	# Author sheets are shared the same way by the loads of the same text
+	# (UxmlLoader._parse_sheet), at their own layer (key CC_AUTHOR).
 	var theme := bool(doc.sheets[f["sheet"]].get("theme", false))
-	var cc = rule.get(CC) if theme else null
+	var ck := CC if theme else CC_AUTHOR
+	var cc = rule.get(ck)
 	if cc == null:
 		cc = _compile_rule(rule, 0 if theme else AUTHOR_LAYER)
-		if theme:
-			rule[CC] = cc
+		rule[ck] = cc
 	_rule_dprop.append(cc[0])
 	_rule_dval.append(cc[1])
 	_rule_dflag.append(cc[2])
@@ -543,6 +551,7 @@ func _add_rule(f: Dictionary) -> void:
 
 ## Key of a theme rule's compiled form (see _add_rule).
 const CC := "_uxml_compiled"
+const CC_AUTHOR := "_uxml_compiled_author"
 
 
 ## The compiled form of `rule`: [declaration properties, values, flags,

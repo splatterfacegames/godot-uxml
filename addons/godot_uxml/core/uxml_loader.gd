@@ -52,7 +52,9 @@ static func load_source(
 	# scope to their clones. A document without template syntax skips this
 	# step and loads exactly as before.
 	var style_from := {}
-	var templated := UxmlTemplates.has_template_syntax(doc.root)
+	# A tag name is in the text: without these words no element has them.
+	var maybe := source.contains("Template") or source.contains("Instance") or source.contains("AttributeOverrides")
+	var templated := maybe and UxmlTemplates.has_template_syntax(doc.root)
 	if templated:
 		# Entry-file checks run on the authored tree; each template file
 		# reports its own content once.
@@ -73,7 +75,9 @@ static func load_source(
 	var chain: Array = [] ## paths currently being loaded (cycle detection)
 	var style_reported := {} ## template <Style> failures, once per location
 
-	for ref in _collect_style_refs(doc.root):
+	# Without "Style" in the text (and no template content) no <Style>.
+	var refs: Array = _collect_style_refs(doc.root) if templated or source.contains("Style") else []
+	for ref in refs:
 		var from = style_from.get(ref["element"])
 		if ref.has("problem"):
 			if from == null: # a template file reported its own
@@ -172,7 +176,7 @@ static func _load_sheet(
 	chain: Array
 ) -> int:
 	var index := doc.sheets.size()
-	var parsed := UssParser.new().parse(text, origin)
+	var parsed := _parse_sheet(text, origin)
 	_check_values(parsed, text, origin, doc, resolver)
 	doc.sheets.append({
 		"index": index,
@@ -186,6 +190,45 @@ static func _load_sheet(
 		loaded[origin] = index
 	_link_sheet(parsed["items"], text, origin, scope, doc, resolver, loaded, chain)
 	return index
+
+
+## Parsed author sheets by (parser, origin, text): a sheet loaded again (the
+## same document, another document using it) shares its parsed items, as the
+## theme sheets do (UxmlTheme), so the cascade's compiled form of its rules
+## (UssCascade.CC on each rule) is made once. The items are not changed after
+## the parse (reparse_sheet makes new ones); the diagnostics are copied.
+static var _sheet_cache := {}
+const _SHEET_CACHE_MAX := 64
+
+
+static func _parse_sheet(text: String, origin: String) -> Dictionary:
+	var key := "%d|%s|%s" % [1 if UssParser.use_native else 0, origin, text]
+	var hit = _sheet_cache.get(key)
+	if hit == null:
+		hit = UssParser.new().parse(text, origin)
+		var imports := false
+		for item in hit["items"]:
+			if item["kind"] == "import":
+				imports = true
+				break
+		hit["imports"] = imports
+		if _sheet_cache.size() >= _SHEET_CACHE_MAX:
+			_sheet_cache.clear()
+		_sheet_cache[key] = hit
+	var items: Array = hit["items"]
+	if hit["imports"]:
+		# The import items get the sheet index of the document that loads
+		# them (resolved_sheet): each load has its own; the rules are shared.
+		items = items.duplicate()
+		for k in items.size():
+			if items[k]["kind"] == "import":
+				items[k] = (items[k] as Dictionary).duplicate(true)
+	return {"items": items, "warnings": (hit["warnings"] as Array).duplicate(true)}
+
+
+## Drop the parsed author sheets (tests that change the parser's statics).
+static func clear_sheet_cache() -> void:
+	_sheet_cache.clear()
 
 
 ## Parse `text` again as the stylesheet at `index` of `doc` (same origin

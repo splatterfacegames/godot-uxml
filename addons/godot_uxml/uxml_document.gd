@@ -1362,7 +1362,37 @@ func _queue_restyle() -> void:
 	if _restyle_queued:
 		return
 	_restyle_queued = true
-	call_deferred("_restyle_now")
+	if _restyles_this_frame():
+		call_deferred("_restyle_now")
+
+
+## Restyles queued in one frame are deferred calls, which the message queue
+## runs in the same flush, also those queued while it flushes. A layout hook
+## whose writes change the sizes it reads (two results that alternate: a
+## dragger given a thumb's class) would restyle forever in that flush, and
+## the call queue grows until the process crashes. Past
+## _MAX_RESTYLES_PER_FRAME restyles queued in one frame, the next runs on the
+## next frame (false: it is scheduled there). Shared by runtime v2's glue.
+const _MAX_RESTYLES_PER_FRAME := 64
+var _rq_frame := -1
+var _rq_count := 0
+
+
+func _restyles_this_frame(target: Callable = _restyle_now) -> bool:
+	var f := Engine.get_process_frames()
+	if f != _rq_frame:
+		_rq_frame = f
+		_rq_count = 0
+	_rq_count += 1
+	if _rq_count <= _MAX_RESTYLES_PER_FRAME:
+		return true
+	# The main loop's frame (also for a document out of the tree).
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return true
+	if not tree.process_frame.is_connected(target):
+		tree.process_frame.connect(target, CONNECT_ONE_SHOT)
+	return false
 
 
 ## Re-resolve the cascade with the current runtime states, re-apply the
