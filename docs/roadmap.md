@@ -16,8 +16,10 @@ first round).
 
 Runtime v1 must not regress:
 
-- `python tests/run_tests.py --godot $G --timeout 1700` (3811 checks);
-- `$G --headless --path . -s res://bench/parity.gd` (177/178);
+- `python tests/run_tests.py --godot $G --timeout 1700` (3932 checks, of which
+  54 of runtime v2's interaction suite `tests/test_runtime_v2.gd`);
+- `$G --headless --path . -s res://bench/parity.gd` (178/179; the runtime
+  rects of `lay-label-floor`: v1 8/24, v2 24/24);
 - the 8 equivalence runs (`bench/equiv.gd`, `equiv_layout.gd`,
   `equiv_parse.gd`, `equiv_runtime.gd`, each native and `-- --gdscript`);
 - `python bench/pixels.py` (box 99.806% exact, text IoU 0.917, runtime
@@ -75,9 +77,11 @@ multiline without a scroller), ScrollView and `focusable="true"` elements
   ellipsis` on Labels are drawn.
 
 Gate met: big, settings, inventory and dialog load on v2, equal to v1
-(`bench/equiv_v2.gd`) and pixel-identical. Covered: 125 of the 216
-documents of `bench/equiv_v2.gd` (phase 1: 61), 110 with the change steps
-compared; the pixel cases in docs/performance.md.
+(`bench/equiv_v2.gd`: 3,329 checks, 0 failures) and pixel-identical.
+Covered: 125 of the 216 documents of `bench/equiv_v2.gd` (phase 1: 61 of
+215), 204 of 204 pixel comparisons identical (phase 1: 113); 102 of the 177
+cases of `bench/pixels.py --runtime 2` (phase 1: 46), every render identical
+to runtime v1's.
 
 Moved to phase 3: panel scaling on v2 (the shared `UxmlPanelScale` /
 `panel_scale.rs` layer: the box records need the device pixel grid,

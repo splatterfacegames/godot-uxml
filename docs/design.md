@@ -2396,6 +2396,9 @@ Not covered yet (the document loads on v1): `tabindex`, panel scaling
 scroller, ToggleButtonGroup, GroupBox, HelpBox, the numeric and composite
 fields, the collection views, TabView, TwoPaneSplitView, the editor
 controls, transitions, rotate/scale, text-shadow, filters and materials.
+The menu of a popup field (`UxmlPopupMenu`) is a document of its own that
+reads its item Controls: it is always a runtime v1 document
+(`UxmlDocument.pinned_v1`), also under `default_runtime = 2`.
 
 **Two fixes of phase 1 found on the way**: a clip of the children inset by
 the borders (`overflow: hidden` with a border, no radii) did not clip:
