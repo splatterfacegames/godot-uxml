@@ -2274,10 +2274,10 @@ The pieces:
   state, the cascade runs for those elements, and the document is laid out
   and drawn again. `element_at`, `get_element_rect`, `get_element_transform`
   use the table.
-- **Handles**: phase 1 keeps the parser's `UxmlElement` objects (the cascade
-  reads its inputs from them); the API returns them. `get_element`,
-  `get_native`, `get_control_for` and `get_native_for` return null on v2:
-  an element has no Control (phase 2 hands out behaviour Controls).
+- **Handles**: the parser's `UxmlElement` objects (the cascade reads its
+  inputs from them); the API returns them. Phase 1: `get_element`,
+  `get_native`, `get_control_for` and `get_native_for` returned null on v2;
+  phase 2 hands out the interaction Controls (below).
 
 What runtime v2 does not do yet (phase 1), and the phases that add it, are
 in `docs/roadmap.md`. The checks: `bench/equiv_v2.gd` (v2 against v1:
@@ -2292,6 +2292,129 @@ parent keeps the height the layout gave it (`gen:static-cards`: a card 75 px
 high around a Label 83 px high). Runtime v2 reports and draws the layout's
 rects. `bench/equiv_v2.gd` counts these checks separately (geometry that
 differs where a v1 Label is floored) and compares everything else.
+
+#### Phase 2: interactive widgets (`runtime/v2-phase2`)
+
+Covered on v2: Button, Toggle, RadioButton, RadioButtonGroup, Foldout,
+Slider, SliderInt, MinMaxSlider, DropdownField, EnumField, ProgressBar,
+TextField (one line, and multiline without a scroller), ScrollView, and
+`focusable="true"` VisualElements. The four gate documents of
+`bench/workloads.gd` and `bench/bench.gd` (big, settings, inventory,
+dialog) load on v2.
+
+- **Part trees are table elements.** `UxmlParts.expand` runs on the model
+  before the cascade, as for runtime v1 (once per model: the model is
+  marked, so a document that moves to v1 is not expanded twice). The
+  control element and its parts are boxes and Labels of the table, drawn
+  by the core like any element; the default theme styles them as before.
+  The GDScript side hands the core a kind per element (`build(...,
+  kinds)`): the controls' kinds, the parts' kinds, parts whose names stay
+  out of the name index, and parts Unity does not pick (a checkmark, a
+  text part: `UxmlControlFactory._part_input`).
+- **Button** (and a Scroller's RepeatButtons) is the kind `K_BUTTON`: its
+  box (the StyleBox runtime v1 installs on every slot of the Button) and
+  its text, drawn as Godot 4.7.1's `Button` draws it (`native/src/
+  v2button.rs`): a `TextParagraph` shaped as `Button._shape` shapes it
+  (mandatory breaks, the end-edge trim, the theme's line spacing, the
+  locale), measured as `get_minimum_size_for_text_and_icon` (the paragraph,
+  at least one line of the font) and drawn at the offset of the text half
+  of `NOTIFICATION_DRAW` (the content box, the paragraph as wide as it
+  rounded up, centred vertically). A Button too small for its text is
+  fitted as `UxmlStyleApplier.fit_button` fits it and drawn floored at its
+  minimum size as Godot floors it; a focused Button draws its focus
+  stylebox (the same box) over its box, as runtime v1's does. `overflow:
+  hidden` is the Button's `clip_text`; `text-overflow: ellipsis` on a
+  Button stays on v1.
+- **Text editors**: the editor part of a TextField (`K_EDIT`) is a real
+  LineEdit / TextEdit (`UxmlTextInput.create`), applied by the applier as
+  runtime v1 applies it, measured by the layout through the Control
+  (`UxmlDocument._measure_leaf`'s reading: the combined minimum size less
+  the box's margins), placed at the part's rect with the opacity of its
+  ancestors. IME, selection, caret and clipboard are Godot's. The core
+  draws nothing for it. It is a child of the root box, so it draws above
+  the core-drawn elements and is not clipped by their `overflow: hidden`
+  (not found in the gate documents; noted for phase 3).
+- **Interaction Controls**: one per focusable or interactive element
+  (`UxmlRuntimeV2Glue.proxies`): a flat Button with empty styleboxes for a
+  Button (`pressed`, `ui_accept`, `accessibility_name`), a UxmlToggle for a
+  Toggle or RadioButton (parts too: a Foldout's Toggle, the choices of a
+  RadioButtonGroup), a UxmlSlider for the sliders, a UxmlPopupField for the
+  popup fields, the editor for a TextField, a plain Control for a
+  `focusable="true"` element (a focusable ScrollView scrolls on the
+  navigation keys). They draw nothing, ignore the mouse, and sit at their
+  element's rect inside the clips of its clipping ancestors (hidden when
+  clipped away or not shown), in document order: Godot's Tab order and
+  neighbour search run over them. Their focus gives `:focus` (and the
+  focus states the behaviors set on parts); a disabled element's Control
+  is disabled and leaves the focus chain.
+- **Behaviors are runtime v1's.** The glue fills the document's element
+  maps (`_controls`, `_natives`, `_by_name`, `_el_names`, `_parents`,
+  `_el_of`, `_behaviors`) with the interaction Controls and creates the
+  behaviors as `UxmlBehaviors.attach_all` does, before the first cascade
+  (so `:checked` is in it). Values, signals (`button_pressed`,
+  `value_changed`), `set_field_value` / `get_field_value`,
+  `set_field_placeholder`, `set_enabled`, scrolling and the binding writes
+  are therefore the same code on both runtimes. The behaviors that read the
+  geometry of parts are subclassed in the glue (`V2SliderBehavior`,
+  `V2MinMaxBehavior`, `V2PopupBehavior`, `V2ScrollViewBehavior`): they read
+  part sizes and rects from the table (a hidden element keeps the size of
+  its last layout, as a Control does) and take the pointer from the glue.
+  Their layout hooks (a dragger's `translate`, the Scrollers) run after a
+  layout that changed the sizes they read; a hook that writes a style
+  restyles and lays out again in the same pass.
+- **Pointer input** comes from the core's hit test on the root box: the
+  innermost element with an interaction Control or a behavior under the
+  press takes the focus and does what its control does (a Button presses,
+  a Toggle toggles on the release inside it, a Slider jumps or pages and
+  drags, a popup field opens its menu under its input, a Scroller steps,
+  pages and drags; the wheel scrolls the innermost ScrollView that moves).
+- **`translate`** is drawn and hit-tested (px and %), as runtime v1's
+  offset transform, with the 1e-5 rad rotation that keeps v1's Control
+  from snapping to pixels (`UxmlStyleApplier._apply_transform`): the
+  draggers are pixel-identical. Rotate, scale and transform-origin stay on
+  v1 (phase 4).
+- **Elision**: `text-overflow: ellipsis` on a Label that clips and does not
+  wrap draws the text elided at its content width with
+  `UxmlStyleApplier.elide_text`; the full text is the tooltip
+  (`display-tooltip-when-elided`).
+- **Tooltips**: the tooltip of the innermost element under the pointer (or
+  the full text of an elided Label) is the root box's tooltip.
+
+**The API on v2** (what it hands out):
+
+| call | runtime v2 returns |
+| --- | --- |
+| `get_element(name)`, `get_control_for(el)` | the interaction Control of a control or focusable element (the Button, UxmlToggle, UxmlSlider, UxmlPopupField; for a TextField the editor's LineEdit/TextEdit is `get_native`), null for an element the core draws alone (a VisualElement, a Label, an Image, a part) |
+| `get_native(name)`, `get_native_for(el)` | the same Control; for a TextField its editor; null for core-drawn elements |
+| `get_element_for(control)` | the element of an interaction Control |
+| `element_at`, `get_element_rect`, `get_element_transform`, `get_computed_style*` | every element, parts included (translate included) |
+| `set_text(name, text)` | a Label's or a Button's text (code that wrote `Label.text` on `get_native()` uses this on v2: the benchmarks do) |
+| `set_field_value`, `get_field_value`, `set_field_placeholder`, `set_enabled`, `set_element_state`, `get/set_scroll_offset`, `scroll_to` | as on v1 |
+
+Not covered yet (the document loads on v1): `tabindex`, panel scaling
+(`panel_settings`), `show-input-field` sliders, a multiline TextField with a
+scroller, ToggleButtonGroup, GroupBox, HelpBox, the numeric and composite
+fields, the collection views, TabView, TwoPaneSplitView, the editor
+controls, transitions, rotate/scale, text-shadow, filters and materials.
+
+**Two fixes of phase 1 found on the way**: a clip of the children inset by
+the borders (`overflow: hidden` with a border, no radii) did not clip:
+`canvas_item_set_canvas_group_mode(DISABLED)` turns the item's clip off,
+and the clip item is set to clip again after it (`bench/equiv_v2.gd` now
+also compares the pixels of snapshots where runtime v1 floors a Label,
+which found it); a memoized visual record lost its `translate`.
+
+**Where v1 and v2 differ (measured)**: `bench/parity/cases/lay-label-floor`
+is the first card of `big-static` against Unity: Unity lays the card out
+200 x 175, runtime v2 200 x 175, runtime v1 200 x 159. Runtime v1 measures
+the wrapping body Label at its stale (unwrapped) width, lays it out one line
+(24px) high, and the Label Control then grows to its two lines (40px) over
+the buttons below; no later layout follows. The layout of `bench/parity.gd`
+(no Controls) gives 175, so the Unity section matches; the new runtime
+section of `bench/parity.gd` (cases with `"runtime": true`) loads the case
+on both runtimes and compares `get_element_rect` with Unity: runtime v1
+8/24 elements, runtime v2 24/24. Runtime v1 is not changed (the settling of
+its Label measures is the cause; recorded, see docs/parity.md).
 
 ### Native core
 

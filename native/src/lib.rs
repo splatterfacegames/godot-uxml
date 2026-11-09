@@ -10,6 +10,7 @@ pub mod panel_scale;
 mod parse;
 mod prof;
 mod v2;
+mod v2button;
 mod v2text;
 
 struct UxmlNativeExtension;

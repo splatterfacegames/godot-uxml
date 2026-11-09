@@ -3,8 +3,8 @@ extends SceneTree
 ## Runtime v2 against runtime v1 (docs/design.md, "Runtime v2"): the same
 ## documents loaded on both runtimes, compared element by element after
 ## the load and after each step of a random sequence of changes (class
-## toggles, inline styles, text edits, set_enabled, pseudo-states,
-## resizes):
+## toggles, inline styles (not on control parts, whose inline styles their
+## controls write), text edits, set_enabled, pseudo-states, resizes):
 ##
 ##   structure   tag, name and classes per preorder index
 ##   styles      the computed style of every element ({prop: {value,
@@ -40,6 +40,11 @@ var _fallback := {}
 var _pixels := false
 var _pix_same := 0
 var _pix_n := 0
+## Pixel checks of snapshots whose geometry differs where runtime v1 floors
+## a Label's Control (compared, counted apart).
+var _pixc_same := 0
+var _pixc_n := 0
+var _pixc_docs := {}
 var _only := ""
 var _steps := 24
 var _rng := RandomNumberGenerator.new()
@@ -52,6 +57,10 @@ func _initialize() -> void:
 			_only = a.substr(7)
 		elif a.begins_with("--steps="):
 			_steps = int(a.substr(8))
+		elif a.begins_with("--checks0="):
+			# Replays a document's changes as in a longer run (the change
+			# parameters are seeded with the check count).
+			_checks = int(a.substr(10))
 	_rng.seed = 2468
 	_run.call_deferred()
 
@@ -63,10 +72,18 @@ func _run() -> void:
 			continue
 		await _doc(c)
 	var cov := "covered %d, on runtime v1 %d" % [_covered, _fallback.size()]
-	var pix := (", pixels %d/%d identical" % [_pix_same, _pix_n]) if _pixels else ""
+	var pix := (", pixels %d/%d identical (and %d/%d where v1 floors a Label: %s)" % [_pix_same, _pix_n,
+		_pixc_same, _pixc_n, ", ".join(PackedStringArray(_pixc_docs.keys()))]) if _pixels else ""
 	print("EQUIV_V2 %s: %d checks, %d failures; %s%s; geometry differing where runtime v1 floors a Label's Control: %d checks of %d documents: %s (%.1f s)" % [
 		"OK" if _fails == 0 else "FAILED", _checks, _fails, cov, pix, _clamped, _clamped_docs.size(),
 		", ".join(PackedStringArray(_clamped_docs.keys())), (Time.get_ticks_msec() - t0) / 1000.0])
+	if OS.get_environment("EQUIV_V2_OPS") != "":
+		var why := {}
+		for n in _fallback:
+			var k := String(_fallback[n]).get_slice(" (", 0)
+			why[k] = int(why.get(k, 0)) + 1
+		for k in why:
+			print("  on v1 because %s: %d" % [k, why[k]])
 	quit(0 if _fails == 0 else 1)
 
 
@@ -180,6 +197,8 @@ func _doc(c: Dictionary) -> void:
 		await process_frame
 		return
 	_covered += 1
+	if OS.get_environment("EQUIV_V2_OPS") != "":
+		print("  %s starts at check %d" % [name, _checks])
 	await _settle(docs)
 	_cmp(name + " load", a, b)
 	if _pixels:
@@ -260,6 +279,10 @@ func _apply(d: UxmlDocument, op: int, k: int, vocab: Array) -> void:
 	var el: UxmlElement = els[k]
 	var r := RandomNumberGenerator.new()
 	r.seed = hash([op, k, _checks])
+	if OS.get_environment("EQUIV_V2_OPS") != "" and d.get_runtime() == 2:
+		var rr := RandomNumberGenerator.new()
+		rr.seed = r.seed
+		print("  op %d on <%s %s %s> seed %d" % [op, el.local, el.part_role, el.get_attribute("class"), r.seed])
 	match op:
 		0, 1:
 			var cl: String = vocab[r.randi_range(0, vocab.size() - 1)]
@@ -270,6 +293,12 @@ func _apply(d: UxmlDocument, op: int, k: int, vocab: Array) -> void:
 				list.append(cl)
 			el.set_attribute("class", " ".join(PackedStringArray(list)))
 		2:
+			if el.part_of != null:
+				# A part's inline style is its control's (a dragger's
+				# translate, a Scroller's display, a hidden text part): the
+				# runtimes rewrite it at different times (runtime v1 after the
+				# placements that touch the control).
+				return
 			var styles := ["width: %dpx;" % r.randi_range(10, 200), "padding: %dpx;" % r.randi_range(0, 9),
 				"background-color: rgb(%d, 20, 90);" % r.randi_range(0, 255), "border-width: 2px; border-color: red;",
 				"border-radius: %dpx;" % r.randi_range(0, 12), "opacity: 0.5;", "display: none;", "visibility: hidden;",
@@ -437,13 +466,26 @@ func _leaf(a, b, path: String) -> String:
 
 
 func _cmp_pixels(what: String, h1: SubViewport, h2: SubViewport, a: UxmlDocument, b: UxmlDocument) -> void:
-	if _last_clamped:
-		return
+	var clamped := _last_clamped
 	for k in 3:
 		await process_frame
 	await RenderingServer.frame_post_draw
 	var i1 := h1.get_texture().get_image()
 	var i2 := h2.get_texture().get_image()
+	if clamped:
+		# v1 draws a Label floored at its minimum size where v2 draws the
+		# layout's rect: compared, not failed.
+		_pixc_n += 1
+		if i1.get_data() == i2.get_data():
+			_pixc_same += 1
+		else:
+			_pixc_docs[what] = true
+			if OS.get_environment("EQUIV_V2_TRACE") != "":
+				var dir := "user://godot_uxml_equiv_v2/diff"
+				DirAccess.make_dir_recursive_absolute(dir)
+				i1.save_png(dir + "/" + what.validate_filename() + ".v1.png")
+				i2.save_png(dir + "/" + what.validate_filename() + ".v2.png")
+		return
 	_pix_n += 1
 	_checks += 1
 	if i1.get_data() == i2.get_data():
@@ -459,8 +501,26 @@ func _cmp_pixels(what: String, h1: SubViewport, h2: SubViewport, a: UxmlDocument
 					first = Vector2i(x, y)
 	_fails += 1
 	if _fails <= 25:
-		print("FAIL %s pixels: %d differ, first at %s (v1 %s, v2 %s)" % [what, n, first,
+		print("FAIL %s pixels [v2 runtime %d%s]: %d differ, first at %s (v1 %s, v2 %s)" % [what, b.get_runtime(), "" if b.runtime_fallback.is_empty() else ", " + b.runtime_fallback, n, first,
 			i1.get_pixelv(first), i2.get_pixelv(first)])
+		if OS.get_environment("EQUIV_V2_TRACE") != "" and b._v2 != null:
+			# The elements whose v1 Control is not the size v2 draws them at.
+			for el in a._controls:
+				var c: Control = a._controls[el]
+				var i: int = int(a._cascade.index.get(el, -1)) if a._cascade != null else -1
+				if i < 0:
+					continue
+				var ds: Vector2 = b._v2.rt.call("drawn_size", i)
+				var hr: Rect2 = b._v2.rt.call("host_rect", i)
+				var cr := Rect2(c.get_global_rect().position - a.get_global_rect().position, c.size)
+				if not c.size.is_equal_approx(ds) or not cr.position.is_equal_approx(hr.position) or OS.get_environment("EQUIV_V2_TRACE") == "2":
+					print("    <%s %s> v1 control %s vis %s, v2 %s drawn %s shown %s" % [el.local, el.part_role, cr, c.is_visible_in_tree(), hr, ds, b._v2.rt.call("is_shown", i)])
+					var cs: Dictionary = a.get_computed_style_for(el)
+					var keys := []
+					for k in ["overflow", "-unity-overflow-clip-box", "border-left-width", "border-right-width", "border-top-width", "border-right-color", "padding-right", "style"]:
+						if cs.has(k):
+							keys.append("%s=%s" % [k, cs[k]["value"]])
+					print("        ", keys, " inline=", el.get_attribute("style"), " v2 rec=", b._v2.rt.call("record_of", i))
 		var dir := "user://godot_uxml_equiv_v2/diff"
 		DirAccess.make_dir_recursive_absolute(dir)
 		var stem := what.validate_filename()

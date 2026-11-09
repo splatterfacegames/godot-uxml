@@ -128,6 +128,7 @@ const CONTEXT_OUTER := "align-self: flex-start; margin-top: 0;"
 func _build_at(owner: UxmlDocument, global_point: Vector2, entries: Array) -> void:
 	_doc = UxmlDocument.new()
 	_doc.auto_load = false
+	_doc.pinned_v1 = true  # the menu reads its item Controls
 	_doc.theme_path = owner.theme_path
 	var skin := UxmlTheme.editor_skin_of(owner._doc)
 	_doc.editor_theme = "always" if not skin.is_empty() else "never"
@@ -229,6 +230,7 @@ func _build(anchor: Control, items: PackedStringArray, selected: int, theme_path
 	var width := maxf(anchor.size.x, 20.0)
 	_doc = UxmlDocument.new()
 	_doc.auto_load = false
+	_doc.pinned_v1 = true  # the menu reads its item Controls
 	_doc.theme_path = theme_path
 	if owner != null:
 		_doc.shared_sheets = owner._doc

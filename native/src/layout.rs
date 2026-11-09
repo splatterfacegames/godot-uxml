@@ -78,11 +78,11 @@ fn gclamp(v: f64, lo: f64, hi: f64) -> f64 {
     if v < lo { lo } else if v > hi { hi } else { v }
 }
 #[inline]
-fn f(x: f64) -> f32 {
+pub(crate) fn f(x: f64) -> f32 {
     x as f32
 }
 #[inline]
-fn d(x: f32) -> f64 {
+pub(crate) fn d(x: f32) -> f64 {
     x as f64
 }
 
@@ -2783,7 +2783,7 @@ fn hpad_of(m: Option<[f64; 4]>) -> f64 {
 
 /// The `uxml_margins` meta of the control's normal stylebox override, if
 /// both exist (UxmlDocument._measure_leaf / _hpad).
-fn read_margins(c: &Gd<Control>, sn_normal: &StringName, sn_margins: &StringName) -> Option<[f64; 4]> {
+pub(crate) fn read_margins(c: &Gd<Control>, sn_normal: &StringName, sn_margins: &StringName) -> Option<[f64; 4]> {
     if c.has_theme_stylebox_override(sn_normal) {
         if let Some(sb) = c.get_theme_stylebox(sn_normal) {
             let sb: Gd<StyleBox> = sb;

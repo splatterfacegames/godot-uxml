@@ -1782,6 +1782,8 @@ class PopupBehavior extends InputBehavior:
 			var c := control_of(tp)
 			if c != null:
 				doc._set_control_text(c, t)
+			if doc._v2 != null:
+				doc._v2.part_text(tp)  # runtime v2 draws the part's text
 			doc.relayout()
 
 	## A Dropdown value that is a choice selects it; any other value is shown
