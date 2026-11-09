@@ -2925,6 +2925,8 @@ func get_element(element_name: String) -> Control:
 	# Runtime v2: the interaction Control of a control or focusable element,
 	# null for an element the core draws alone.
 	var el := _named(element_name)
+	if _v2 != null:
+		_v2.ensure(el)
 	return null if el == null else _controls.get(el)
 
 
@@ -2940,6 +2942,8 @@ func get_native(element_name: String) -> Control:
 	var el := _named(element_name)
 	if el == null:
 		return null
+	if _v2 != null:
+		_v2.ensure(el)
 	var b = _behaviors.get(el)
 	if b != null:
 		return b.native()
@@ -3020,6 +3024,8 @@ func get_document_model() -> UxmlDocumentModel:
 ## for an element without a control (a <Style>, the <UXML> root's
 ## non-visual children) or of another load.
 func get_control_for(element: UxmlElement) -> Control:
+	if _v2 != null:
+		_v2.ensure(element)
 	var c = _controls.get(element)
 	if c != null and not _parked.is_empty():
 		_expose(element)
@@ -3030,6 +3036,7 @@ func get_control_for(element: UxmlElement) -> Control:
 ## a name), or null.
 func get_native_for(element: UxmlElement) -> Control:
 	if _v2 != null:
+		_v2.ensure(element)
 		var vb = _behaviors.get(element)
 		return vb.native() if vb != null else _natives.get(element)
 	if element == null or not _controls.has(element):
@@ -4848,6 +4855,8 @@ func set_view_data(data: Dictionary) -> void:
 
 ## The focus targets in Tab order, when the document uses tabindex.
 func get_focus_ring() -> Array:
+	if _v2 != null:
+		_v2.ensure_all()
 	for pel in _parked.keys():
 		_unpark(pel)
 	return _attrs.focus_ring()

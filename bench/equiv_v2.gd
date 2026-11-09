@@ -45,6 +45,9 @@ var _pix_n := 0
 var _pixc_same := 0
 var _pixc_n := 0
 var _pixc_docs := {}
+var _focus_docs := 0
+var _focus_steps := 0
+var _focus_reached := 0
 var _only := ""
 var _steps := 24
 var _rng := RandomNumberGenerator.new()
@@ -74,6 +77,8 @@ func _run() -> void:
 	var cov := "covered %d, on runtime v1 %d" % [_covered, _fallback.size()]
 	var pix := (", pixels %d/%d identical (and %d/%d where v1 floors a Label: %s)" % [_pix_same, _pix_n,
 		_pixc_same, _pixc_n, ", ".join(PackedStringArray(_pixc_docs.keys()))]) if _pixels else ""
+	print("EQUIV_V2 focus navigation, lazy against eager interaction Controls: %d documents, %d keys, %d elements focused" % [
+		_focus_docs, _focus_steps, _focus_reached])
 	print("EQUIV_V2 %s: %d checks, %d failures; %s%s; geometry differing where runtime v1 floors a Label's Control: %d checks of %d documents: %s (%.1f s)" % [
 		"OK" if _fails == 0 else "FAILED", _checks, _fails, cov, pix, _clamped, _clamped_docs.size(),
 		", ".join(PackedStringArray(_clamped_docs.keys())), (Time.get_ticks_msec() - t0) / 1000.0])
@@ -285,6 +290,89 @@ func _doc(c: Dictionary) -> void:
 		await _cmp_pixels(name + " after changes", host, host2, a, b)
 	host.queue_free()
 	host2.queue_free()
+	await process_frame
+	await _cmp_focus(c)
+
+
+## Keyboard navigation with lazy interaction Controls against every Control
+## made at the load (UxmlRuntimeV2Glue.eager): the same keys (Tab and
+## Shift+Tab through the document, then random Tabs and arrows) pushed into
+## both documents must focus the same elements in the same order.
+func _cmp_focus(c: Dictionary) -> void:
+	var name: String = c["name"]
+	var hosts: Array = []
+	var docs: Array = []
+	for eager in [true, false]:
+		var host := SubViewport.new()
+		host.size = Vector2i(SIZE)
+		host.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		root.add_child(host)
+		UxmlRuntimeV2Glue.eager = eager
+		var d := UxmlDocument.new()
+		d.auto_load = false
+		d.runtime = 2
+		d.size = SIZE
+		d.transitions_manual = true
+		if c.has("scale"):
+			d.screen_dpi = 96.0
+			d.panel_settings = _panel_settings(c["scale"])
+		host.add_child(d)
+		_load(d, c)
+		if c.has("list"):
+			d.set_list_source(c["list"], 200, _bind_row)
+		hosts.append(host)
+		docs.append(d)
+	UxmlRuntimeV2Glue.eager = false
+	await _settle(docs)
+	if docs[0].get_runtime() == 2 and docs[1].get_runtime() == 2:
+		var n: int = docs[0]._v2.proxies.size()
+		var keys: Array = []
+		for k in n + 2:
+			keys.append([KEY_TAB, false])
+		for k in n + 2:
+			keys.append([KEY_TAB, true])
+		var r := RandomNumberGenerator.new()
+		r.seed = hash(name) ^ 1357
+		for k in mini(4 * (n + 2), 240):
+			keys.append([[KEY_TAB, KEY_TAB, KEY_LEFT, KEY_UP, KEY_RIGHT, KEY_DOWN][r.randi_range(0, 5)], r.randi_range(0, 3) == 0])
+		var seqs: Array = [[], []]
+		# One document at a time: a window has one focus owner, the
+		# SubViewports of both documents share it.
+		for j in 2:
+			for kk in keys:
+				for pressed in [true, false]:
+					var ev := InputEventKey.new()
+					ev.keycode = kk[0]
+					ev.physical_keycode = kk[0]
+					ev.shift_pressed = kk[1] and kk[0] == KEY_TAB
+					ev.pressed = pressed
+					(hosts[j] as SubViewport).push_input(ev)
+				docs[j]._restyle_now()
+				var fo: Control = (hosts[j] as SubViewport).gui_get_focus_owner()
+				var fel: UxmlElement = docs[j].get_element_for(fo) if fo != null else null
+				seqs[j].append(docs[j]._v2.index_of(fel) if fel != null and docs[j]._v2 != null else -1)
+				if OS.get_environment("EQUIV_V2_FOCUS") != "":
+					print("  focus %d key %s: %s" % [j, kk, fo.get_path() if fo != null else "none"])
+			var fo_end: Control = (hosts[j] as SubViewport).gui_get_focus_owner()
+			if fo_end != null:
+				fo_end.release_focus()
+		# Not in _checks: the change parameters are seeded with it.
+		_focus_docs += 1
+		if seqs[0] != seqs[1]:
+			_fails += 1
+			var at := 0
+			while at < seqs[0].size() and seqs[0][at] == seqs[1][at]:
+				at += 1
+			print("FAIL %s focus navigation: lazy Controls differ at key %d (%s): eager %s, lazy %s" % [
+				name, at, keys[at], seqs[0].slice(maxi(0, at - 3), at + 3), seqs[1].slice(maxi(0, at - 3), at + 3)])
+		else:
+			var seen := {}
+			for x in seqs[0]:
+				seen[x] = true
+			_focus_steps += seqs[0].size()
+			_focus_reached += seen.size() - (1 if seen.has(-1) else 0)
+	for hst in hosts:
+		hst.queue_free()
 	await process_frame
 
 

@@ -711,6 +711,38 @@ impl UxmlRuntimeV2 {
         vis_out
     }
 
+    /// The last placement place_states reported for element i: [position,
+    /// size, visible position, visible size, shown, opacity], or [] before
+    /// one (a lazy interaction Control made later takes it).
+    #[func]
+    fn placed_of(&self, i: i64) -> VarArray {
+        let mut out = VarArray::new();
+        let Some(st) = self.st.as_ref() else { return out };
+        if let Some(Some((r, vis, sh, o))) = st.placed.get(i as usize) {
+            out.push(&r.position.to_variant());
+            out.push(&r.size.to_variant());
+            out.push(&vis.position.to_variant());
+            out.push(&vis.size.to_variant());
+            out.push(&sh.to_variant());
+            out.push(&o.to_variant());
+        }
+        out
+    }
+
+    /// Per element `idx[k]`: 1 when its last placement shows it (shown, its
+    /// visible rect not empty), as the glue shows its interaction Control.
+    #[func]
+    fn placed_shown(&self, idx: PackedInt32Array) -> PackedByteArray {
+        let mut out = PackedByteArray::new();
+        let st = self.st.as_ref();
+        for &i in idx.as_slice() {
+            let v = st.and_then(|s| s.placed.get(i as usize).copied().flatten())
+                .is_some_and(|(_, vis, sh, _)| sh && vis.size.x > 0.0 && vis.size.y > 0.0);
+            out.push(if v { 1 } else { 0 });
+        }
+        out
+    }
+
     /// Position offsets outside the layout: element `idx[k]` is drawn,
     /// hit-tested and placed `offs[k]` from its layout position (the rows of
     /// a collection view at their items' places).
