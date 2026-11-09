@@ -2379,6 +2379,19 @@ dialog) load on v2.
   (`display-tooltip-when-elided`).
 - **Tooltips**: the tooltip of the innermost element under the pointer (or
   the full text of an elided Label) is the root box's tooltip.
+- **Restyles**: a restyle with no dirty element, no new state or option
+  (`UxmlDocument._opt_rev`) and no request returns at once; the layout runs
+  only when a layout record, a leaf measure (a text shaped again, an image,
+  a box padding, an editor's minimum size) or the host size changed
+  (`UxmlRuntimeV2.layout_if_needed`), else (a paint-only change) only the
+  layout hooks of restyled parts run. The interaction Controls are placed
+  in one native call (`place_states`: rect, visible rect inside the clips,
+  shown, opacity) that returns only those whose placement changed, after a
+  layout that moved a rect or a restyle that changed a display, visibility,
+  opacity, clip or translate. A layout is a full pass of the table (runtime
+  v1's cross-pass cache, `XCache`, keys its entries on Controls): a class or
+  text change that lays out the big document costs about twice v1's
+  (phase 3: the cache on the table).
 
 **The API on v2** (what it hands out):
 

@@ -2757,3 +2757,117 @@ three interleaved rounds, main / branch): the hover toggle 0.389 / 0.391,
 4.59 / 7.74, 4.66 / 4.59 ms. Neither is slower. The `godot-release` column of
 the run above is at the times of step 0 (the big load 624 ms against 682 and
 637 to 743 in the runs of step 0).
+## Runtime v2, phase 2 (`runtime/v2-phase2`)
+
+Phase 2 puts the interactive widgets on runtime v2 (`docs/design.md`,
+"Phase 2: interactive widgets"): the four benchmark screens with controls
+(big, settings, inventory, dialog) load on v2. v2 stays an opt-in
+(`UxmlDocument.runtime = 2`); v1 is the default.
+
+### Method
+
+- `python tools/unity-bench/run.py --arms godot-release,godot-release-v2,unity-il2cpp`
+  (a fresh release export of the branch, the IL2CPP player of phase 1,
+  whose documents are unchanged; 5 rounds, 60 iterations, the order rotated
+  per round). Other sessions loaded the machine during the run (v1's big
+  load ranges 627 to 847 ms over the rounds; 621 ms in a quieter run of the
+  same day): compare the ratios.
+- The benchmark scripts set a Label's text through `set_text` on v2 (the
+  core draws a Label with no Control; `get_native` gives null for it), as
+  the inventory and HUD ops already did.
+- Steps of a v2 load: `bench/v2/load_cost.gd -- --doc=big` (editor binary,
+  median of 9 loads).
+
+### Results (ms, release template, median of the 5 rounds)
+
+| Operation | v1 | v2 | Unity (IL2CPP) | v1 / Unity | v2 / Unity |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| big: load | 718 | **298** | 45.7 | 15.7 | 6.5 |
+| big: load + first frame | 802 | **303** | 66.8 | 12.0 | 4.5 |
+| settings: load | 64.1 | **35.5** | 4.16 | 15.4 | 8.5 |
+| inventory: load | 63.1 | **23.4** | 2.98 | 21.2 | 7.8 |
+| dialog: load | 8.92 | **6.97** | 0.300 | 29.7 | 23.2 |
+| big-static: load | 588 | **182** | (33.3, phase 1) | | |
+| hud: load | 12.0 | **5.66** | (0.62, phase 1) | | |
+| big: hover toggle (button) | 0.662 | 0.702 | 0.945 | 0.70 | 0.74 |
+| big: hover toggle (card, descendant selector) | 1.655 | **0.976** | 1.048 | 1.6 | 0.93 |
+| big: restyle, no change | 0.014 | **0.006** | 0.014 | 1.0 | 0.43 |
+| big: class change (card) | **5.94** | 8.53 | 1.66 | 3.6 | 5.1 |
+| big: label text change + layout | **3.90** | 7.28 | 1.41 | 2.8 | 5.2 |
+| big: resize | **7.78** | 14.0 | 3.84 | 2.0 | 3.6 |
+| settings: switch tab | 4.79 | **1.30** | 1.23 | 3.9 | 1.06 |
+| settings: hover row | 0.022 | **0.013** | 0.013 | 1.7 | 1.0 |
+| inventory: hover slot | 0.435 | **0.189** | 0.307 | 1.4 | 0.62 |
+| inventory: select slot | 0.903 | **0.575** | 0.393 | 2.3 | 1.5 |
+| inventory: count change + layout | 0.519 | 0.550 | 0.291 | 1.8 | 1.9 |
+| dialog: typewriter character + layout | 0.421 | **0.378** | 0.108 | 3.9 | 3.5 |
+| dialog: hover choice | 0.019 | **0.014** | 0.015 | 1.3 | 0.93 |
+| hud: frame, 8 labels + layout | 0.484 | **0.412** | 0.274 | 1.8 | 1.5 |
+| hud: hover toggle | 0.233 | **0.094** | 0.072 | 3.2 | 1.3 |
+| frame: big document, idle | 0.804 | **0.534** | 2.042 | 0.39 | 0.26 |
+| listview: load, 10,000 items (v1 in both arms) | 94.6 | 92.1 | 3.82 | 24.8 | 24.1 |
+
+A layout on v2 is a full pass of the table: runtime v1's cross-pass layout
+cache (`XCache`) keys its entries on Controls. A change that lays the big
+document out (a class change, a text change, a resize) costs about twice
+v1's; phase 3 moves the cache to the table. Paint-only changes (hovers, the
+tab switch, which shows and hides pages) skip the layout on v2 and are at
+or below v1. The first version of phase 2 placed every interaction Control
+and ran every layout hook after every restyle: 14 to 16 ms per update of
+the big document (its 470 interaction Controls), 2.2 ms for a settings
+hover; the restyle path now returns at once when nothing changed, lays out
+only when a layout record, a leaf measure or the host size changed, and
+places only the Controls whose placement changed (`docs/design.md`,
+"Restyles").
+
+### Where a v2 load of the big document goes (editor binary, ms)
+
+| Step | ms |
+| --- | ---: |
+| parse, theme attach, rest | 40.7 |
+| part trees (`UxmlParts.expand`, GDScript) | 36.9 |
+| cascade setup | 25.4 |
+| index (names, parents, kinds) | 10.4 |
+| interaction Controls and behaviors (about 470 Controls: 305 Buttons, 60 Toggles, 60 focusable rows, the sliders, editors) | 73.3 |
+| first cascade | 32.0 |
+| build | 30.3 |
+| layout, the layout hooks (38 sliders, the ScrollView) and their restyles, the placement | 79.8 |
+| draw | 15.9 |
+| total | 345 (v1 777) |
+
+What remains is GDScript work that v1 also does (parse, part trees,
+behaviors: phase 5 moves the model native) and the interaction Controls,
+which enter the tree as v1's Controls do.
+
+### Equivalence and pixels
+
+- `bench/equiv_v2.gd` (windowed): 3,329 checks, 0 failures; 125 of 216
+  documents on v2 (phase 1: 61 of 215), 204 of 204 pixel comparisons
+  identical (phase 1: 113). The harness now also compares the pixels of
+  the snapshots where v1 floors a Label's Control (36 of 46 identical; the
+  others are v1's floored Labels, among them `big-static`, `static-cards`
+  and `lay-label-floor`, which phase 1 did not compare), replays a document's
+  changes as in a longer run (`--checks0=N`), and leaves the inline styles
+  of control parts to their controls.
+- `python bench/pixels.py --runtime 2`: 103 of 177 cases on v2 (phase 1:
+  46), their 210 renders (with and without text) identical to v1's; the
+  summary is v1's (box 99.806%, text IoU 0.917) but for the runtime rects,
+  3382/3551 (v1 3369: v2 reports the layout's rects where v1 floors Labels).
+
+### Other benchmarks (runtime v1, branch / main)
+
+v1's code changed only behind `_v2` tests (the behaviors' part texts, their
+disabled and style reads, the element API), the part-tree guard of
+`UxmlParts.expand` and `UxmlDocument.pinned_v1`. Interleaved A/A/B rounds
+against two worktrees of `main` (`b22b7e0`) were dominated by other
+sessions' load (A/A geomeans 1.30 and 1.36 over 5 rounds), so the suites
+were measured again as alternating main/branch runs, 6 rounds, the median of
+the per-round ratios:
+
+| Suite | branch / main |
+| --- | ---: |
+| `workloads.gd --quick` (17 ops) | 0.970 geomean; no op above 1.05 |
+| `bench.gd --quick` (25 ops, the 5 A/A/B rounds, paired per round) | 1.032 geomean; above 1.10 only the three HUD frame ops |
+| `bench.gd --only=hud` (4 ops, full iterations) | 0.96 to 1.07 |
+
+No op is slower beyond the spread of its rounds.

@@ -700,6 +700,10 @@ func dispose() -> void:
 	proxies = {}
 	editors = {}
 	_proxy_el = {}
+	_hooked = []  # the behaviors hold the glue: no cycle left
+	_restyled = {}
+	_editor_shown = {}
+	_proxy_idx = PackedInt32Array()
 	if doc != null:
 		if doc._root_box.gui_input.is_connected(_on_gui_input):
 			doc._root_box.gui_input.disconnect(_on_gui_input)
