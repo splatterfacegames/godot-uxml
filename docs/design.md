@@ -2399,9 +2399,9 @@ dialog) load on v2.
 | `set_text(name, text)` | a Label's or a Button's text (code that wrote `Label.text` on `get_native()` uses this on v2: the benchmarks do) |
 | `set_field_value`, `get_field_value`, `set_field_placeholder`, `set_enabled`, `set_element_state`, `get/set_scroll_offset`, `scroll_to` | as on v1 |
 
-Not covered yet (the document loads on v1): `tabindex`, `show-input-field` sliders, a multiline TextField with a
+Not covered yet (the document loads on v1): a multiline TextField with a
 scroller, ToggleButtonGroup, GroupBox, HelpBox, the numeric and composite
-fields, the collection views, TabView, TwoPaneSplitView, the editor
+fields, the collection views but a FixedHeight ListView, TabView, TwoPaneSplitView, the editor
 controls, transitions, rotate/scale, text-shadow, filters and materials.
 The menu of a popup field (`UxmlPopupMenu`) is a document of its own that
 reads its item Controls: it is always a runtime v1 document
@@ -2468,6 +2468,43 @@ the panel size in points, scaled by the pixels per point); on v2:
   editors again and lays out without the cache; the API keeps its contract
   (`get_element_rect` without a space in document pixels, with an element
   as space in points; `element_at` in document pixels).
+
+**ListView (FixedHeight).** The part tree of a ListView is runtime v1's
+(`UxmlContainerParts._build_collection`: the ScrollView part, the pool of
+rows made from the item template); the glue loads the item templates and
+extracts their bindings as `UxmlDocument._index` does, the elements of the
+pooled rows stay out of the names (`F_PART`, v1's `_pooled`). Runtime v1's
+`CollectionBehavior` binds the rows (`V2CollectionBehavior` overrides what
+reads Controls):
+
+- a row slot is laid out at `k * h` and drawn at its item's place by a
+  position offset of the table (`UxmlRuntimeV2.set_offsets`: drawn, hit
+  tested and placed there, no restyle), as v1's `_place` moves the row's
+  Control;
+- the scroll offset is out of the cascade: the ScrollView's content and its
+  Scrollers' draggers get their translate as offsets of the table
+  (`V2ScrollViewBehavior._push`; drawn as v1 draws a translate), and
+  `get_computed_style` gives them the inline `translate` entry v1's model
+  has; a scroll of three rows then restyles only the rebound rows;
+- the press on a row comes from the core's hit test (the content
+  container's focus Control is the innermost target: `v2_press`), the keys
+  from that Control (v1's `_on_key`);
+- the bind callback writes text with `UxmlListRow.set_text` (on v1 the
+  Label's text, on v2 the table's).
+
+Not on v2 yet: DynamicHeight (its row heights are measured from Controls),
+reorderable rows, the foldout header and the footer, TreeView and the
+multi-column views.
+
+**tabindex**: runtime v1's `UxmlCommonAttributes.rebuild_focus_ring` builds
+Unity's ring over the interaction Controls (it reads the element maps the
+glue fills); a change of the attribute builds it again. **Sliders with
+`show-input-field`**: the input field is a TextField part with its editor.
+**Elided placeholders**: the behavior's elision reads the glue's applier and
+runs after the placement. **An editor under `overflow: hidden`**: the
+Control the editor sits in clips it to the visible part of its rect (the
+intersection of the clips of its ancestors), as v1's ancestor Controls clip
+it; a rounded clip does not cut it yet.
 
 `bench/equiv_v2.gd` loads the ten cases of `bench/parity/scaled/matrix.json`
 under three grids (2, 1.33 and 0.8 pixels per point) on both runtimes.

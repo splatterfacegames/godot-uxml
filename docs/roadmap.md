@@ -91,20 +91,39 @@ sliders, a multiline TextField with a scroller, RepeatButton outside a
 Scroller, ToggleButtonGroup, GroupBox, HelpBox, the numeric and composite
 fields; the editor Controls clipped by `overflow: hidden` ancestors.
 
-## Phase 3: collections, containers, the rest of the fields, scaling
+## Phase 3: the layout cache, scaling, collections (in progress)
 
-- ScrollView (drawn and scrolled in phase 2 through runtime v1's model: the
-  content translate is an inline style that restyles one element): the
-  scroll offset as a placement-only value of the table (no cascade pass per
-  scroll).
-- Panel scaling on v2, tabindex, the numeric and composite fields,
-  ToggleButtonGroup, GroupBox, HelpBox, standalone RepeatButton.
-- ListView, TreeView, MultiColumnListView/TreeView: the row pool as table
-  ranges (Slint's repeater: instances for the visible rows, rebinding by
-  row index); selection, reorder and drag from the core's hit test.
-- TabView, TwoPaneSplitView, GroupBox, HelpBox, Box, Toolbar.
+Done (`runtime/v2-phase3`, docs/design.md "Phase 3"):
+
+- The cross-pass layout cache on the table (runtime v1's `XCache`, keyed on
+  layout records and leaf measures instead of Controls); moved items get a
+  new transform, not a new recording; the interaction Controls placed in one
+  native call. Every update of the big document is at or below v1.
+- Panel scaling on v2: the device pixel grid in the layout and the boxes,
+  Unity's text lines, text oversampling, editors placed with v1's f32
+  geometry. The scaled parity cases load on v2 (121 of the 172 scaled pixel
+  cases; the others use phase 4 features).
+- ListView with FixedHeight rows: the pool rows are table elements bound by
+  runtime v1's CollectionBehavior, a row moves to its item's place by a
+  position offset of the table (no restyle), the scroll offset of a
+  ScrollView (content and draggers) is out of the cascade, selection and
+  keyboard from the core's hit test and the content's focus Control.
+  `UxmlListRow.set_text` writes a row's text on both runtimes.
+- tabindex (Unity's focus ring over the interaction Controls), sliders with
+  `show-input-field`, the elided placeholder of a text field, a text editor
+  clipped by `overflow: hidden` ancestors (rect clips).
+
+Left for phase 3:
+
+- DynamicHeight ListViews, reorderable rows and drag and drop, the foldout
+  header and add/remove footer of a ListView, TreeView,
+  MultiColumnListView/TreeView, TabView, TwoPaneSplitView.
+- A multiline TextField with a scroller; an editor under a rounded clip.
 - Data bindings (UxmlBinding) on table handles.
-- Gate: listview 10,000 items load and scroll within 2x of Unity.
+- The numeric and composite fields, ToggleButtonGroup, GroupBox, HelpBox,
+  Box, Toolbar, standalone RepeatButton.
+- Gate: listview 10,000 items load and scroll within 2x of Unity (the
+  ListView loads on v2; see docs/performance.md for the distance).
 
 ## Phase 4: transitions, transforms, filters
 
