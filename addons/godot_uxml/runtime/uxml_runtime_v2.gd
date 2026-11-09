@@ -84,6 +84,10 @@ const CONTROL_ATTRS := {
 		"horizontal-page-size", "vertical-page-size", "nested-interaction-kind", "touch-scroll-type",
 		"elasticity", "scroll-deceleration-rate"],
 }
+## Tags that never have a behavior (UxmlBehaviors._create gives null).
+const NO_BEHAVIOR := {"VisualElement": true, "Label": true, "Image": true, "TemplateContainer": true,
+	"UXML": true, "Style": true, "Button": true, "TextInput": true, "TextElement": true,
+	"PopupTextElement": true, "RepeatButton": true, "ScrollerSlider": true}
 const COMMON_ATTRS := {"name": true, "class": true, "style": true, "tooltip": true, "focusable": true,
 	"picking-mode": true, "enabled": true, "view-data-key": true, "usage-hints": true}
 
@@ -390,7 +394,7 @@ func _make_proxies() -> void:
 	# The behaviors of the other controls, as runtime v1 makes them
 	# (UxmlBehaviors.attach_all: parts included).
 	for el in els:
-		if behaviors.has(el):
+		if behaviors.has(el) or NO_BEHAVIOR.has(el.local):
 			continue
 		var vb = UxmlBehaviors._create(el)
 		if vb != null:
@@ -532,6 +536,8 @@ func v2_label_theme() -> Dictionary:
 func v2_button_theme() -> Dictionary:
 	return {
 		"font_color": _bprobe.get_theme_color(&"font_color"),
+		"font_disabled_color": _bprobe.get_theme_color(&"font_disabled_color"),
+		"font_focus_color": _bprobe.get_theme_color(&"font_focus_color"),
 		"line_spacing": _bprobe.get_theme_constant(&"line_spacing"),
 		"outline_size": _bprobe.get_theme_constant(&"outline_size"),
 		"font_outline_color": _bprobe.get_theme_color(&"font_outline_color"),
@@ -1187,8 +1193,9 @@ class V2SliderBehavior extends UxmlInputBehaviors.SliderBehavior:
 	## placement changed (UxmlDocument._run_layout_hooks): here when the
 	## sizes it reads changed (a value change places the dragger itself).
 	func v2_after_layout() -> bool:
-		var key := [size_of(part("drag-container")), size_of(part("dragger")), size_of(part("input")),
-			size_of(part("thumb-min")), size_of(part("thumb-max"))]
+		var ds := style_of(part("dragger"))
+		var key := [size_of(part("drag-container")), size_of(part("dragger")),
+			UxmlInputParts.style_px(ds, "margin-left"), UxmlInputParts.style_px(ds, "margin-right")]
 		if key == _hook_key:
 			return false
 		_hook_key = key
@@ -1457,7 +1464,10 @@ class V2MinMaxBehavior extends UxmlInputBehaviors.MinMaxBehavior:
 		return glue.is_disabled(el)
 
 	func v2_after_layout() -> bool:
-		var key := [size_of(part("input")), size_of(part("thumb-min")), size_of(part("thumb-max"))]
+		var ds := style_of(part("dragger"))
+		var key := [size_of(part("input")), size_of(part("thumb-min")), size_of(part("thumb-max")),
+			UxmlInputParts.style_px(ds, "border-left-width"), UxmlInputParts.style_px(ds, "margin-left"),
+			UxmlInputParts.style_px(ds, "border-right-width"), UxmlInputParts.style_px(ds, "margin-right")]
 		if key == _hook_key:
 			return false
 		_hook_key = key

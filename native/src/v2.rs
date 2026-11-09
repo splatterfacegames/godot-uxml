@@ -131,6 +131,9 @@ struct Vis {
     /// A Button's clip_text (overflow: hidden on a Button,
     /// UxmlStyleApplier._apply_elision).
     bclip: bool,
+    /// The text colour comes from USS (else a Button's theme colour of its
+    /// draw mode).
+    color_set: bool,
     /// text-overflow: ellipsis on a Label that clips and does not wrap: the
     /// -unity-text-overflow-position ("start", "middle", "end").
     elide: Option<GString>,
@@ -220,6 +223,8 @@ struct LabelTheme {
 #[derive(Clone)]
 struct ButtonTheme {
     font_color: Color,
+    font_disabled_color: Color,
+    font_focus_color: Color,
     line_spacing: i32,
     outline_size: i32,
     outline_color: Color,
@@ -256,6 +261,8 @@ struct St {
     /// Elements whose interaction Control has the focus (a focused Button
     /// draws its focus stylebox, the same box, over its box).
     focused: Vec<bool>,
+    /// The disabled flags of the last restyle (effective_flags).
+    disabled: Vec<bool>,
     /// The last elision of each eliding Label: (text, width, position, font
     /// size) and the text shown; whether it is elided now.
     elide_memo: Vec<Option<((GString, f32, GString, i32), GString)>>,
@@ -478,6 +485,8 @@ impl UxmlRuntimeV2 {
             (
                 ButtonTheme {
                     font_color: col("font_color"),
+                    font_disabled_color: col("font_disabled_color"),
+                    font_focus_color: col("font_focus_color"),
                     line_spacing: int("line_spacing"),
                     outline_size: int("outline_size"),
                     outline_color: col("font_outline_color"),
@@ -517,6 +526,7 @@ impl UxmlRuntimeV2 {
             btheme,
             locale,
             focused: vec![false; n],
+            disabled: vec![false; n],
             elide_memo: vec![None; n],
             elided: vec![false; n],
             unity_metrics,
@@ -869,12 +879,23 @@ impl St {
     fn restyle_some(&mut self, which: &[usize]) -> Result<(), String> {
         let _p = crate::prof::scope("v2.restyle");
         self.ensure_props();
-        let gone = {
+        let (dis, gone) = {
             let mut cb = self.casc.bind_mut();
             let c = cb.inner.as_mut().unwrap();
-            c.effective_flags().2
+            let f = c.effective_flags();
+            (f.1, f.2)
         };
         let gone = gone.as_slice().to_vec();
+        // A Button without a USS colour draws the theme colour of its draw
+        // mode: its disabled flag matters.
+        for (i, &d) in dis.as_slice().iter().enumerate() {
+            if i < self.n && self.disabled[i] != (d == 1) {
+                self.disabled[i] = d == 1;
+                if self.kind[i] == K_BUTTON {
+                    self.dirty[i] = true;
+                }
+            }
+        }
         for &i in which {
             if i >= self.n || self.kind[i] == K_NONE {
                 continue;
@@ -1152,6 +1173,7 @@ impl St {
             if !pos.is_empty() && !["start", "middle", "end"].contains(&pos.as_str()) {
                 return Err("text overflow position".into());
             }
+            v.color_set = vals[P_COLOR].is_some();
             let color = match vals[P_COLOR].clone() {
                 Some(x) => self.color(&x)?,
                 None if button => self.btheme.font_color,
@@ -1655,6 +1677,17 @@ impl St {
         }
         if self.kind[i] == K_BUTTON && !self.text_hidden {
             if let (Some(m), Some(b)) = (bfit, self.leaves.btexts.borrow_mut().get_mut(i).and_then(|b| b.as_mut())) {
+                // Button's colour of its draw mode (DRAW_DISABLED, the focus
+                // colour over DRAW_NORMAL); a USS colour is on every slot.
+                if !v.color_set {
+                    b.st.color = if self.disabled[i] {
+                        self.btheme.font_disabled_color
+                    } else if self.focused[i] {
+                        self.btheme.font_focus_color
+                    } else {
+                        self.btheme.font_color
+                    };
+                }
                 b.draw(it, size, m);
             }
         }
