@@ -158,6 +158,8 @@ static func _scan(doc: UxmlDocumentModel, editor: bool) -> Array:
 	var editors := false
 	if doc.root == null or doc.has_meta(META_CONTAINERS):
 		return [false, false] if not editor else [false, _has_editor(doc)]
+	if doc.table != null:
+		return [_table_containers(doc), editor and doc.table.has_local(PackedStringArray(UxmlEditorParts.TAGS.keys()))]
 	for el in doc.root.walk():
 		if not containers and (CONTAINER_TAGS.has(el.local) or UxmlInputParts.has_inner_scroll_view(el)):
 			containers = true
@@ -173,6 +175,8 @@ static func _scan(doc: UxmlDocumentModel, editor: bool) -> Array:
 static func _has_editor(doc: UxmlDocumentModel) -> bool:
 	if doc.root == null:
 		return false
+	if doc.table != null:
+		return doc.table.has_local(PackedStringArray(UxmlEditorParts.TAGS.keys()))
 	for el in doc.root.walk():
 		if UxmlEditorParts.TAGS.has(el.local):
 			return true
@@ -187,13 +191,27 @@ static func attach_containers(doc: UxmlDocumentModel) -> void:
 	if doc == null or doc.root == null or doc.has_meta(META_CONTAINERS):
 		return
 	var found := false
-	for el in doc.root.walk():
-		if CONTAINER_TAGS.has(el.local) or UxmlInputParts.has_inner_scroll_view(el):
-			found = true
-			break
+	if doc.table != null:
+		found = _table_containers(doc)
+	else:
+		for el in doc.root.walk():
+			if CONTAINER_TAGS.has(el.local) or UxmlInputParts.has_inner_scroll_view(el):
+				found = true
+				break
 	if not found:
 		return
 	_attach_container_sheets(doc)
+
+
+## Whether a document parsed into runtime v2's table has a container
+## control (the walk of _scan, on the rows).
+static func _table_containers(doc: UxmlDocumentModel) -> bool:
+	if doc.table.has_local(PackedStringArray(CONTAINER_TAGS.keys())):
+		return true
+	for i in doc.table.rows_named(PackedStringArray(["TextField"]), true):
+		if UxmlInputParts.has_inner_scroll_view(doc.handle(i)):
+			return true
+	return false
 
 
 static func _attach_container_sheets(doc: UxmlDocumentModel) -> void:

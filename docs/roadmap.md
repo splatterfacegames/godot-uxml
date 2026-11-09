@@ -16,7 +16,7 @@ first round).
 
 Runtime v1 must not regress:
 
-- `python tests/run_tests.py --godot $G --timeout 1700` (3932 checks, of which
+- `python tests/run_tests.py --godot $G --timeout 1700` (3973 checks, of which
   54 of runtime v2's interaction suite `tests/test_runtime_v2.gd`);
 - `$G --headless --path . -s res://bench/parity.gd` (178/179; the runtime
   rects of `lay-label-floor`: v1 8/24, v2 24/24);
@@ -142,13 +142,32 @@ Done (docs/design.md, "The load"; measured in docs/performance.md):
 - A crash fixed: an alternating layout hook restyled forever in one flush of
   the message queue (restyles are bounded per frame).
 
+Done in `runtime/v2-phase5` (docs/design.md, "Phase 5: the model in the
+element table"):
+
+- The parse into the element table and `UxmlElement` handles made on
+  request (phase 5 below); the part trees built on handles and written back
+  in one native call; the index, names, kinds, coverage check and the
+  candidate interaction rows native; the cascade and the build reading the
+  rows.
+- Lazy Toggle Controls (with the lazy Buttons and focusable elements; the
+  `:checked` state from the value at the load).
+- Small loads: the value checks of a parsed sheet kept with it, the
+  editors' and fonts' styles without the inheritance wraps they do not read.
+- The bench and test folders per checkout (`UxmlBenchDir`).
+
 Left (the distance to 2x of Unity is in docs/performance.md):
 
-- The Controls that hold values (Toggles, Sliders, popup fields) and the
-  text editors (a core-drawn unfocused text field, its LineEdit made on
-  focus or a click): about 30 ms of the big document.
-- Phase 5 below: the parse into the table and the elements as handles, the
-  part trees and the index native, the cascade's inputs from the table.
+- The Controls that hold values and run layout hooks (Sliders: their
+  dragger placement is a style write and a restyle per change; popup
+  fields) and the text editors (a core-drawn unfocused text field, its
+  LineEdit made on focus or a click): about 35 ms of the big document
+  (Controls 18, editors 6, hooks and their restyle 12).
+- The native first cascade, build and layout (about 25, 20 and 35 ms of the
+  big document): most of it is TextServer shaping and line breaking (547
+  texts) and canvas items; the cascade's per-element compute.
+- The part builders (runtime v1's GDScript, about 11 ms) and their write
+  back (about 10 ms).
 
 ## Phase 4: transitions, transforms, filters
 
@@ -162,12 +181,16 @@ Left (the distance to 2x of Unity is in docs/performance.md):
 - Rich text in the text block (TextServer spans), or a RichTextLabel
   Control made for the element.
 
-## Phase 5: the model native
+## Phase 5: the model native (in progress)
 
-- The UXML parse into the element table (the native scan exists; the
-  `UxmlElement` objects go): `UxmlElement` becomes a handle (document,
-  index), made on request and cached weakly; templates, attribute
-  overrides and `<Style>` resolution native.
+- Done (`runtime/v2-phase5`): the UXML parse into the element table
+  (`UxmlNativeModel`); `UxmlElement` is a handle (model, row) made on
+  request and kept for the model's life, its children made when first read;
+  `<Style>` references and the import checks from the rows; the part trees
+  on handles, the index native. Runtime v1 and the GDScript path keep their
+  objects; `bench/equiv_v2.gd` compares the two.
+- Left: templates and attribute overrides on the table (a templated
+  document leaves the table), the part builders native.
 - The cascade's inputs from the table (no attribute reads through the
   engine: about a third of a first cascade today) and rule compilation
   native (`UssCascade` setup: about 27 ms of the big document in GDScript).

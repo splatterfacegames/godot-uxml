@@ -2603,6 +2603,83 @@ and the call queue grew until the process crashed. Past 64 restyles queued
 in one frame (`UxmlDocument._restyles_this_frame`, both runtimes), the next
 runs on the next frame.
 
+#### Phase 5: the model in the element table (`runtime/v2-phase5`)
+
+**The table.** A document that asks for runtime v2 (`runtime = 2` or
+`default_runtime = 2`, the native core loaded) is parsed into
+`UxmlNativeModel` (`native/src/v2model.rs`) instead of `UxmlElement`
+objects: the native scan of `UxmlParser._parse_native` fills rows (prefix,
+local name, attributes, open-tag span, parent, children, part owner and
+role, logical parent), the values that need entity decoding are decoded by
+`UxmlParser.decode_entities` (the same function as the object parse) and
+the scan's problems become the same diagnostics. `UxmlLoader.load_source`
+takes the `<Style>` references, the unsupported-tag and attribute checks
+and the template check from the rows (`style_refs`, `unsupported`,
+`has_local`); `UxmlTheme` finds container and editor controls from them.
+
+**Handles.** `UxmlDocumentModel.table` holds the table and
+`UxmlDocumentModel.handle(i)` makes the `UxmlElement` of row i on request,
+once for the model's life (its metas and `changed` live on the object):
+its fields come from the row (`fill`), its part owner is a handle, and its
+children are made when they are first read (`UxmlElement.children` is a
+property whose getter fills a handle's children from its row; runtime
+v1's hot walks read the backing array). The model's `root` is the handle
+of row 0, so every walk of the model (the document API, user code, the
+equivalence harnesses) sees the whole tree and makes what it reads: the
+handles are correct by construction, and only what the load reads is made
+(the big document: 618 handles of 1,952 rows, 420 of them the part
+objects of its controls; the inventory 4 of 245).
+
+**What leaves the table.** Templates (`<Template>`/`<Instance>`), `<Bindings>`
+and the containers whose expansion needs the whole tree (multi-column views,
+TabView, TwoPaneSplitView) work on objects: the model makes every element
+and drops the table (`drop_table`). Runtime v1 and the GDScript path never
+see a table: a document that falls back to v1 (at the load or later,
+`_v2_fallback`) drops it first. A model of objects that loads on v2 (a
+template expansion, `UxmlDocument.load_source` callers that bypass the
+loader flag) is adopted into a new table whose handles are its objects
+(`adopt_objects`).
+
+**Part trees on handles.** `UxmlParts.expand` on a table model takes the
+Foldout depths and `enabled="false"` classes from the rows, makes handles
+of the controls only, runs runtime v1's builders on them (the same code),
+and writes every built part tree back in one native call (`sync_entries`:
+new part rows, the author children under their content container, their
+logical parent, the merged classes); `finalize` puts the rows in preorder
+again and the handles get their new rows (`remap`). A part lookup stops at
+a handle whose children are not made (an author subtree, which holds no
+part of the control).
+
+**The runtime on rows.** The native cascade's table mode reads the rows
+(`UssCascade._index_table`: the tree arrays in one call; attribute reads in
+`update` without the engine), and makes a handle only for the origin wraps
+of a style asked for. `UxmlRuntimeV2.build` reads the attributes it draws
+from the rows. The glue's coverage check (`first_uncovered`), kinds
+(`v2_kinds`), names (`name_index`), and candidate interaction rows
+(`proxy_rows`, `rows_except`) are native; `UxmlDocument`'s element maps
+(`_by_name`, `_el_names`, `_parents`) stay runtime v1's, and on v2 the
+document asks the glue (`_v2_maps`: `_lookup_name`, `_name_of`,
+`_parent_el`, `_has_el`). A model edit through a handle writes its row
+(`_on_model_changed`); `refresh()` writes the rows of every handle made.
+
+**Lazy Toggles.** A Toggle that is not a part holds its value in its
+`value` attribute until something needs its Control: at the load its
+`:checked` (and its input's) is set from the value, as `ToggleBehavior.setup`
+sets it, and the UxmlToggle and its behavior are made by `_ctl` with the
+lazy Buttons (a press, the API: `get_field_value`, `set_field_value` and the
+other field calls make it, navigation). A model edit of a lazy Toggle makes
+it with the value it had, so the edit reaches it as it reaches a Toggle made
+at the load (`value_changed` included).
+
+**Small loads.** The value checks of a cached parsed sheet are kept with it
+(`UxmlLoader._check_values`: the diagnostics per declaration; only the
+url() files are looked up again). The editors, the fonts and the images
+read the computed style with the origins `UxmlStyleApplier` uses only
+(`style_of_lite`, `_APPLY_ORIGINS`), not every inheritance wrap. Splicing
+author sheets as cached blocks, as the theme sheets are, was tried and
+dropped: `reload_stylesheet` patches the rules of a cascade in place, and a
+block's rules are shared.
+
 ### Native core
 
 `native/` is a Rust crate (godot-rust `godot` 0.5, `api-4-7`). Build and

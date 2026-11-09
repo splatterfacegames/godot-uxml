@@ -5,7 +5,7 @@ extends RefCounted
 ## on the native and the GDScript cascade/layout with identical results.
 ## Time is stepped by hand: transitions_manual + advance_transitions().
 
-const ROOT := "user://uxml_transition_tests"
+static var ROOT: String = UxmlBenchDir.of("uxml_transition_tests")
 
 var h = null
 

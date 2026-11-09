@@ -8,7 +8,7 @@ extends RefCounted
 ##
 ## `h` is the SceneTree harness from run_tests.gd.
 
-const TMP := "user://godot_uxml_v2_tests"
+static var TMP: String = UxmlBenchDir.of("godot_uxml_v2_tests")
 
 var h = null
 
@@ -370,7 +370,7 @@ func test_tabindex_focus_ring_on_runtime_v2() -> void:
 	h.eq(doc.get_runtime(), 2, "tabindex loads on v2 (%s)" % doc.runtime_fallback)
 	var names: Array = []
 	for t in doc.get_focus_ring():
-		names.append(doc._el_names.get(doc._el_of.get(t)))
+		names.append(doc._name_of(doc._el_of.get(t)))
 	h.eq(names, ["d", "b", "a", "e"], "positive tabindex first, then 0 in tree order; negative and unfocusable left out")
 	h.eq((doc.get_native("c") as Control).focus_mode, Control.FOCUS_CLICK, "negative tabindex: focusable by pointer only")
 	h.eq(doc.get_native("d").get_node(doc.get_native("d").focus_next), doc.get_native("b"), "focus_next chain")
@@ -378,7 +378,7 @@ func test_tabindex_focus_ring_on_runtime_v2() -> void:
 	doc._restyle_now()
 	names = []
 	for t in doc.get_focus_ring():
-		names.append(doc._el_names.get(doc._el_of.get(t)))
+		names.append(doc._name_of(doc._el_of.get(t)))
 	h.eq(names, ["d", "b", "e", "a"], "a tabindex change rebuilds the ring")
 	_unload(doc)
 

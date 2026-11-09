@@ -27,7 +27,7 @@ func _initialize() -> void:
 	var d := UxmlDocument.new()
 	root.add_child(d)
 	d.size = Vector2(1280, 800)
-	d.load_document("Assets/UI/big.uxml", "user://godot_uxml_bench")
+	d.load_document("Assets/UI/big.uxml", UxmlBenchDir.of("godot_uxml_bench"))
 	for k in 30:
 		await process_frame
 	rows.append(["godot-uxml big doc (%d controls)" % d._controls.size()] + await _measure(vp))

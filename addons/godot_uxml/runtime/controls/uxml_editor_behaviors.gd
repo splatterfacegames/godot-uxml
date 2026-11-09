@@ -104,7 +104,7 @@ static func insert(doc, parent: UxmlElement, sub: UxmlElement, at: int = -1) -> 
 
 ## Remove `sub` (added by insert) from the model and the scene.
 static func remove(doc, sub: UxmlElement) -> void:
-	var parent = doc._parents.get(sub)
+	var parent = doc._parent_el(sub)
 	if parent != null:
 		(parent as UxmlElement).children.erase(sub)
 	var top: Control = doc._controls.get(sub)

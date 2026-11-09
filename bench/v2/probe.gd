@@ -2,7 +2,7 @@ extends SceneTree
 ## The runtime each benchmark document loads on with runtime = 2, and why
 ## a document stays on runtime v1 (UxmlDocument.runtime_fallback).
 ##   Godot --path . -s res://bench/v2/probe.gd
-const ROOT := "user://godot_uxml_ucmp"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_ucmp")
 
 func _initialize() -> void:
 	_run.call_deferred()

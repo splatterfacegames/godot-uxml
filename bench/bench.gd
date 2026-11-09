@@ -20,7 +20,7 @@ extends SceneTree
 ## p95 / mean ms over N iterations (adaptive: stops at max_iters or when
 ## the time budget for that op is spent).
 
-const BENCH_ROOT := "user://godot_uxml_bench"
+static var BENCH_ROOT: String = UxmlBenchDir.of("godot_uxml_bench")
 const CARDS := 150
 const LIST_ITEMS := 60
 

@@ -16,7 +16,21 @@ var id: int = -1
 var prefix: String = ""
 var local: String = ""
 var attributes: Array = []
-var children: Array = []
+## The child elements. A handle of runtime v2's element table
+## (UxmlDocumentModel.handle) makes its children when they are first read.
+var children: Array:
+	get:
+		if _m != null:
+			_fill_children()
+		return _children
+	set(v):
+		_m = null
+		_children = v
+var _children: Array = []
+## A handle (UxmlDocumentModel.handle): the model, weakly, until its
+## children are made, and its row in the model's table (-1: not a handle).
+var _m: WeakRef = null
+var _ix := -1
 ## Observable mutation (Slint-style reactive model): set_attribute() /
 ## remove_attribute() notify `changed` with this element, so a runtime that
 ## owns the tree restyles exactly the elements that changed instead of
@@ -118,7 +132,9 @@ func class_list() -> Array:
 func find_by_name(element_name: String) -> UxmlElement:
 	if get_attribute("name") == element_name:
 		return self
-	for child in children:
+	if _m != null:
+		_fill_children()
+	for child in _children:
 		var found: UxmlElement = child.find_by_name(element_name)
 		if found != null:
 			return found
@@ -128,6 +144,18 @@ func find_by_name(element_name: String) -> UxmlElement:
 ## Depth-first enumeration of this element and all descendants.
 func walk(out: Array = []) -> Array:
 	out.append(self)
-	for child in children:
+	if _m != null:
+		_fill_children()
+	for child in _children:
 		child.walk(out)
 	return out
+
+
+## The children of a handle, made from its row (once).
+func _fill_children() -> void:
+	var m = _m.get_ref()
+	_m = null
+	if m == null:
+		return
+	for k in m.table.children(_ix):
+		_children.append(m.handle(k))

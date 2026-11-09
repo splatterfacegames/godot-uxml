@@ -55,9 +55,20 @@ static func get_part(owner: UxmlElement, role: String) -> UxmlElement:
 	else:
 		# One walk indexes every part of the owner (first part per role).
 		cache = {}
-		for x in owner.walk():
+		# (A handle whose children are not made yet is an author subtree of
+		# runtime v2's table: no part of the owner is in it.)
+		var stack: Array = [owner]
+		while not stack.is_empty():
+			var x: UxmlElement = stack.pop_back()
 			if x.part_of == owner and not cache.has(x.part_role):
 				cache[x.part_role] = weakref(x)
+			if x._m != null and x != owner:
+				continue
+			var ch: Array = x.children
+			var k := ch.size() - 1
+			while k >= 0:
+				stack.append(ch[k])
+				k -= 1
 		owner.set_meta(&"uxml_part_cache", cache)
 	var w = cache.get(role)
 	return null if w == null else (w as WeakRef).get_ref()

@@ -22,7 +22,7 @@ extends SceneTree
 
 const Bench := preload("res://bench/bench.gd")
 const Workloads := preload("res://bench/workloads.gd")
-const ROOT := "user://godot_uxml_ucmp"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_ucmp")
 
 var _iters := 60
 var _rows: Array = []

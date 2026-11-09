@@ -4,7 +4,7 @@ extends SceneTree
 ## construction of the UxmlElement objects.
 ##   Godot --headless --path . -s res://bench/prof/parse_split.gd
 func _initialize() -> void:
-	var dir := ProjectSettings.globalize_path("user://godot_uxml_ucmp/Assets/UI/")
+	var dir := ProjectSettings.globalize_path(UxmlBenchDir.of("godot_uxml_ucmp") + "/Assets/UI/")
 	var ux := FileAccess.get_file_as_string(dir + "big.uxml")
 	var sheets := []
 	for f in ["base.uss", "theme.uss", "components.uss"]: sheets.append(FileAccess.get_file_as_string(dir + f))

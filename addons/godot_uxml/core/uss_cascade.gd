@@ -169,13 +169,23 @@ static var use_native := true
 var _native: Object = null
 
 
+## Runtime v2's element table (UxmlDocumentModel.table) when the elements
+## are its rows: `els` stays empty, el(i) makes the handle of row i, and the
+## native cascade reads the rows (null: the elements are `els`).
+var _table_obj: Object = null
+
+
 func _init(p_doc: UxmlDocumentModel) -> void:
 	doc = p_doc
-	_index_tree()
+	var native := use_native and ClassDB.class_exists("UxmlNativeCascade")
+	if native and doc.table != null:
+		_index_table()
+	else:
+		_index_tree()
 	_compile_rules()
-	if use_native and ClassDB.class_exists("UxmlNativeCascade"):
+	if native:
 		var nc: Object = ClassDB.instantiate("UxmlNativeCascade")
-		if nc.call("setup", self, {
+		var cbs := {
 			"subst": func(v: String, customs: Dictionary, seed_prop: String):
 				return UssStyleResolver._substitute_vars(
 					v, customs, {} if seed_prop.is_empty() else {seed_prop: true}),
@@ -184,8 +194,66 @@ func _init(p_doc: UxmlDocumentModel) -> void:
 			"inherited": UssProperties.INHERITED,
 			"supported": UssProperties.SUPPORTED,
 			"implicit": UssControls.IMPLICIT_CLASSES,
-		}):
+		}
+		if _table_obj != null:
+			cbs["handle"] = doc.handle
+		if nc.call("setup", self, cbs):
 			_native = nc
+	if _native == null and _table_obj != null:
+		# The GDScript cascade works on objects: leave the table.
+		doc.drop_table()
+		_table_obj = null
+		_parent = PackedInt32Array()
+		_local = PackedStringArray()
+		_prefix = PackedStringArray()
+		_ots = PackedInt32Array()
+		_ote = PackedInt32Array()
+		_index_tree()
+
+
+## The number of elements.
+func count() -> int:
+	return _parent.size()
+
+
+## The element of preorder index i (a handle made now in table mode).
+func el(i: int) -> UxmlElement:
+	return doc.handle(i) if _table_obj != null else els[i]
+
+
+## The preorder index of `e`, or -1.
+func index_of(e: UxmlElement) -> int:
+	if _table_obj != null:
+		return doc.row_of(e)
+	return int(index.get(e, -1))
+
+
+## _index_tree from the rows of runtime v2's table (no object is made).
+func _index_table() -> void:
+	_table_obj = doc.table
+	var d: Dictionary = _table_obj.tree_arrays()
+	_parent = d["parent"]
+	_sel_parent = d["sel_parent"]
+	_end = d["end"]
+	_local = d["local"]
+	_prefix = d["prefix"]
+	_ots = d["ots"]
+	_ote = d["ote"]
+	var n := _parent.size()
+	_cls_set.resize(n)
+	_name.resize(n)
+	_sig_cls.resize(n)
+	_sig_name.resize(n)
+	_sig_style.resize(n)
+	_sig_bits.resize(n)
+	_anc_key.resize(n)
+	_fc.resize(n)
+	_fc_customs.resize(n)
+	_bloom.resize(n)
+	_own_bloom.resize(n)
+	_warn.resize(n)
+	_arefs.resize(n)
+	_sig_en.resize(n)
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +274,7 @@ func _index_tree() -> void:
 		_prefix.append(el.prefix)
 		_ots.append(el.open_tag_start)
 		_ote.append(el.open_tag_end)
-		var ch: Array = el.children
+		var ch: Array = el.children if el._m != null else el._children
 		var k := ch.size() - 1
 		while k >= 0:
 			stack.append(ch[k])
@@ -314,20 +382,29 @@ var _blocks: Array = []
 
 ## Splices the block of sheet `si` when it is a theme sheet without
 ## imports; false when the sheet takes the general path.
-func _add_theme_block(si: int, visited: Dictionary, reported_root: Array) -> bool:
+## An author sheet (`scope` given) without imports is spliced the same way:
+## its block is kept per (origin, parsed items) at the author layer, and
+## the scope of its rules is set per cascade.
+func _add_theme_block(si: int, visited: Dictionary, reported_root: Array, scope: UxmlElement = null) -> bool:
 	if si < 0 or si >= doc.sheets.size():
 		return false
 	var sheet: Dictionary = doc.sheets[si]
-	if not bool(sheet.get("theme", false)):
+	var author := scope != null
+	if bool(sheet.get("theme", false)) == author:
 		return false
-	var in_scope: Dictionary = visited.get(null, {})
+	var sx := -1
+	if author:
+		sx = index_of(scope)
+		if sx < 0:
+			return false
+	var in_scope: Dictionary = visited.get(scope, {})
 	if in_scope.has(si):
 		return true  # _walk_sheet would add nothing
-	var b := _theme_block(sheet, si)
+	var b := _theme_block(sheet, si, author)
 	if b.is_empty():
 		return false
 	in_scope[si] = true
-	visited[null] = in_scope
+	visited[scope] = in_scope
 	for ev in b["events"]:
 		if ev[0] == 0:
 			_rule_warnings.append(_unsupported_diag(ev[1], ev[2], si))
@@ -343,9 +420,15 @@ func _add_theme_block(si: int, visited: Dictionary, reported_root: Array) -> boo
 		_rule_sheet.append(si)
 		_rule_file.append(file)
 	_rule_item.append_array(items)
-	_rule_scope_idx.append_array(b["neg1"])
-	_rule_scope_lo.append_array(b["neg2"])
-	_rule_scope_hi.append_array(b["neg2"])
+	if author:
+		for k in nr:
+			_rule_scope_idx.append(sx)
+			_rule_scope_lo.append(sx)
+			_rule_scope_hi.append(_end[sx])
+	else:
+		_rule_scope_idx.append_array(b["neg1"])
+		_rule_scope_lo.append_array(b["neg2"])
+		_rule_scope_hi.append_array(b["neg2"])
 	_rule_dprop.append_array(b["dprop"])
 	_rule_dval.append_array(b["dval"])
 	_rule_dflag.append_array(b["dflag"])
@@ -388,10 +471,11 @@ static func _merge_buckets(dst: Dictionary, src: Dictionary, s0: int) -> void:
 
 ## The cached block of theme `sheet` (index `si` in this document), built
 ## on first use; {} when the sheet has imports (general path).
-func _theme_block(sheet: Dictionary, si: int) -> Dictionary:
+func _theme_block(sheet: Dictionary, si: int, author: bool = false) -> Dictionary:
 	var origin: String = sheet.get("origin", "")
 	var sheet_items: Array = sheet["items"]
-	var hit = _theme_blocks.get(origin)
+	var bkey = [origin, true] if author else origin
+	var hit = _theme_blocks.get(bkey)
 	if hit != null and is_same(hit[0], sheet_items):
 		return hit[1]
 	for item in sheet_items:
@@ -437,10 +521,11 @@ func _theme_block(sheet: Dictionary, si: int) -> Dictionary:
 		b_items.append(i)
 		neg1.append(-1)
 		neg2.append(-2)
-		var cc = rule.get(CC)
+		var ck := CC_AUTHOR if author else CC
+		var cc = rule.get(ck)
 		if cc == null:
-			cc = _compile_rule(rule, 0)
-			rule[CC] = cc
+			cc = _compile_rule(rule, AUTHOR_LAYER if author else 0)
+			rule[ck] = cc
 		b["dprop"].append(cc[0])
 		b["dval"].append(cc[1])
 		b["dflag"].append(cc[2])
@@ -479,7 +564,9 @@ func _theme_block(sheet: Dictionary, si: int) -> Dictionary:
 	b["sel_spec"] = sel_spec
 	b["b_any"] = b_any
 	b["anc_states"] = anc_states
-	_theme_blocks[origin] = [sheet_items, b]
+	if _theme_blocks.size() > 256:
+		_theme_blocks.clear()
+	_theme_blocks[bkey] = [sheet_items, b]
 	return b
 
 
@@ -500,7 +587,7 @@ func _add_rule(f: Dictionary) -> void:
 		_rule_scope_lo.append(-2)
 		_rule_scope_hi.append(-2)
 	else:
-		var si: int = index.get(scope, -1)
+		var si: int = index_of(scope)
 		_rule_scope_idx.append(si)
 		_rule_scope_lo.append(si)
 		_rule_scope_hi.append(_end[si] if si >= 0 else -1)
@@ -1085,7 +1172,7 @@ func _key_bits(options: Dictionary) -> PackedInt32Array:
 	var states_opt: Dictionary = options.get("states", {})
 	if states_opt.is_empty():
 		return key_bits
-	var n := els.size()
+	var n := count()
 	key_bits.resize(n)
 	var entries: Array = []
 	for key in states_opt.keys():
@@ -1105,10 +1192,10 @@ func _key_bits(options: Dictionary) -> PackedInt32Array:
 	if not entries.is_empty():
 		var parents := {}
 		for i in range(1, n):
-			parents[els[i]] = els[_sel_parent[i]]
+			parents[el(i)] = el(_sel_parent[i])
 		var base_ctx := {"parents": parents, "states": {}, "root": doc.root}
 		for i in n:
-			var node: UxmlElement = els[i]
+			var node: UxmlElement = el(i)
 			for entry in entries:
 				for sel in entry[0]:
 					if UssSelector.matches(sel, node, base_ctx):
@@ -1420,7 +1507,7 @@ func target_style(i: int) -> Dictionary:
 		var t2 = _tgt.get(i)
 		if t2 != null:
 			return t2
-	return styles.get(els[i], {})
+	return styles.get(el(i), {})
 
 
 ## Effective disabled (attribute/runtime, descending) and display:none

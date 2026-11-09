@@ -33,7 +33,7 @@ func _initialize() -> void:
 		func(d): d.get_element("deep-button"),
 		func(d): _page(d, 2),
 	])
-	await _case("settings workload", "Assets/UI/wl_settings.uxml", "user://godot_uxml_bench", [
+	await _case("settings workload", "Assets/UI/wl_settings.uxml", UxmlBenchDir.of("godot_uxml_bench"), [
 		func(d): pass,
 		func(d): _settings_tab(d, 1),
 		func(d): _settings_tab(d, 3),

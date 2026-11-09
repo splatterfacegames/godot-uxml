@@ -3,7 +3,7 @@ extends SceneTree
 ## the native scan, the UxmlElement objects, the rest of load_source, the
 ## theme, the part trees and the cascade setup.
 ##   Godot --headless --path . -s res://bench/prof/v2_split.gd [-- --doc=big --n=9]
-const ROOT := "user://godot_uxml_ucmp"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_ucmp")
 
 func _initialize() -> void:
 	_run.call_deferred()

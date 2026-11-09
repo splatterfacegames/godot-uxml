@@ -102,7 +102,7 @@ class Behavior extends RefCounted:
 			doc._set_state(x, state, on)
 
 	func element_name() -> String:
-		return doc._el_names.get(el, "")
+		return doc._name_of(el)
 
 	func attr(n: String, d: String = "") -> String:
 		var v = el.get_attribute(n)
@@ -222,9 +222,9 @@ class ToggleBehavior extends Behavior:
 	## RadioButton under the same nearest GroupBox, or the whole document
 	## (Unity's IGroupBox rule); switching one on switches the rest off.
 	func _exclusive() -> void:
-		var p = doc._parents.get(el)
+		var p = doc._parent_el(el)
 		while p != null and not (p.local in ["GroupBox", "RadioButtonGroup"] and p.part_of == null):
-			p = doc._parents.get(p)
+			p = doc._parent_el(p)
 		if p != null and p.local == "RadioButtonGroup":
 			return  # the group behavior keeps it exclusive
 		var scope: UxmlElement = p if p != null else doc._doc.root
@@ -232,13 +232,13 @@ class ToggleBehavior extends Behavior:
 			if x == el or x.local != "RadioButton":
 				continue
 			# Radios inside a nested group box belong to that box.
-			var q = doc._parents.get(x)
+			var q = doc._parent_el(x)
 			var nested := false
 			while q != null and q != scope:
 				if q.local in ["GroupBox", "RadioButtonGroup"] and q.part_of == null:
 					nested = true
 					break
-				q = doc._parents.get(q)
+				q = doc._parent_el(q)
 			if nested:
 				continue
 			var t := control_of(x) as UxmlToggle

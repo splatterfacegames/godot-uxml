@@ -21,8 +21,8 @@ func _initialize() -> void:
 		["res://tests/fixtures/origin", "Assets/UI/panel.uxml"],
 		["res://tests/fixtures/templates", "Assets/UI/Main.uxml"],
 		["res://tests/fixtures/editor", "Assets/UI/editor.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/big.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/hud.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/big.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/hud.uxml"],
 	]:
 		var d := UxmlDocument.new()
 		root.add_child(d)

@@ -44,9 +44,14 @@ static func load_source(
 	doc.source = source
 	doc.path = uxml_path
 
-	var parsed := UxmlParser.new().parse(source, uxml_path)
-	doc.root = parsed["root"]
-	doc.warnings.append_array(parsed["warnings"])
+	var table := parse_table and ClassDB.class_exists("UxmlNativeModel") and UxmlParser.use_native
+	parse_table = false
+	if table:
+		_parse_table(doc, source, uxml_path)
+	else:
+		var parsed := UxmlParser.new().parse(source, uxml_path)
+		doc.root = parsed["root"]
+		doc.warnings.append_array(parsed["warnings"])
 
 	# Templates expand before any sheet loads, so template <Style> elements
 	# scope to their clones. A document without template syntax skips this
@@ -54,7 +59,14 @@ static func load_source(
 	var style_from := {}
 	# A tag name is in the text: without these words no element has them.
 	var maybe := source.contains("Template") or source.contains("Instance") or source.contains("AttributeOverrides")
-	var templated := maybe and UxmlTemplates.has_template_syntax(doc.root)
+	var templated: bool = maybe and (doc.table.has_local(PackedStringArray(["Template", "Instance", "AttributeOverrides"]))
+		if doc.table != null else UxmlTemplates.has_template_syntax(doc.root))
+	if templated and doc.table != null:
+		# Templates expand on objects: every element is made, and the
+		# runtime adopts the expanded tree (UxmlDocumentModel.adopt_objects).
+		doc.root.walk()
+		doc.table = null
+		doc._handles = []
 	if templated:
 		# Entry-file checks run on the authored tree; each template file
 		# reports its own content once.
@@ -69,6 +81,11 @@ static func load_source(
 	# <Bindings> UxmlObjects are instructions, not elements: they leave the
 	# tree before any sheet, cascade or layout pass sees it.
 	if source.find(UxmlBindings.BINDINGS_TAG) >= 0 or source.find(UxmlBindings.DATA_BINDING_TAG) >= 0 or templated:
+		if doc.table != null:
+			# <Bindings> leave the tree on objects: as templates.
+			doc.root.walk()
+			doc.table = null
+			doc._handles = []
 		doc.warnings.append_array(UxmlBindings.extract(doc))
 
 	var loaded := {} ## resolved path -> sheet index
@@ -76,7 +93,12 @@ static func load_source(
 	var style_reported := {} ## template <Style> failures, once per location
 
 	# Without "Style" in the text (and no template content) no <Style>.
-	var refs: Array = _collect_style_refs(doc.root) if templated or source.contains("Style") else []
+	var refs: Array = []
+	if doc.table != null:
+		if source.contains("Style"):
+			refs = _table_style_refs(doc)
+	elif templated or source.contains("Style"):
+		refs = _collect_style_refs(doc.root)
 	for ref in refs:
 		var from = style_from.get(ref["element"])
 		if ref.has("problem"):
@@ -113,8 +135,91 @@ static func load_source(
 		doc.style_roots.append({"sheet": sheet_index, "scope": doc.root})
 
 	if not templated:
-		_report_unsupported_tags(doc)
+		if doc.table != null:
+			_report_unsupported_rows(doc)
+		else:
+			_report_unsupported_tags(doc)
 	return doc
+
+
+## Parse into runtime v2's element table (UxmlNativeModel) instead of
+## UxmlElement objects: set before a load_source / load_file_with_resolver
+## call (once; UxmlDocument sets it for a document asking for runtime v2).
+static var parse_table := false
+
+
+## The table parse of load_source: the root is a handle (UxmlDocumentModel.
+## handle), the diagnostics are UxmlParser's.
+static func _parse_table(doc: UxmlDocumentModel, source: String, uxml_path: String) -> void:
+	var t: Object = ClassDB.class_call_static("UxmlNativeModel", "parse", source)
+	var raw: Array = t.raw_values()
+	var k := 0
+	while k < raw.size():
+		t.set_attr_value(raw[k], raw[k + 1], UxmlParser.decode_entities(raw[k + 2]))
+		k += 3
+	var w: Dictionary = t.scan_warnings()
+	var wm: PackedStringArray = w["w_msg"]
+	var ws: PackedInt32Array = w["w_start"]
+	var we: PackedInt32Array = w["w_end"]
+	for i in wm.size():
+		var diag := UxmlDiagnostic.make("malformed", wm[i], source, ws[i], uxml_path)
+		diag["end_offset"] = we[i]
+		doc.warnings.append(diag)
+	doc.table = t
+	doc.root = doc.handle(0)
+
+
+## _collect_style_refs on the table: the scopes are handles.
+static func _table_style_refs(doc: UxmlDocumentModel) -> Array:
+	var out: Array = []
+	for r in doc.table.style_refs():
+		var el := doc.handle(r[0])
+		var src = r[2]
+		if src == null:
+			out.append({"problem": "<Style> element is missing its src attribute", "element": el})
+		elif String(src).is_empty():
+			out.append({"problem": '<Style src=""> is empty', "element": el})
+		else:
+			out.append({"url": String(src), "scope": doc.handle(r[1]), "element": el})
+	return out
+
+
+## _report_unsupported_tags on the table (the same diagnostics, in order).
+static func _report_unsupported_rows(doc: UxmlDocumentModel) -> void:
+	var t: Object = doc.table
+	var known := PackedStringArray()
+	var feature := PackedStringArray()
+	for l in t.locals():
+		if UssControls.is_known_control(l):
+			known.append(l)
+		elif UssControls.UNSUPPORTED_FEATURE_TAGS.has(l):
+			feature.append(l)
+	var skip := PackedStringArray([UxmlBindings.BINDINGS_TAG, UxmlBindings.DATA_BINDING_TAG])
+	for ev in t.unsupported(PackedStringArray(UssControls.KNOWN_ATTRIBUTES.keys()), known, feature, skip):
+		var row: int = ev[1]
+		var local: String = t.local(row)
+		var f: Array = t.fill(row)
+		var tag: String = local if String(f[1]).is_empty() else String(f[1]) + ":" + local
+		match int(ev[0]):
+			0:
+				var a: Dictionary = (f[3] as Array)[ev[2]]
+				doc.warnings.append(UxmlDiagnostic.make(
+					"unsupported-attribute",
+					'<%s> attribute "%s" is not used by godot-uxml; it is preserved but has no effect' % [tag, a["name"]],
+					doc.source, a["offset"], doc.path
+				))
+			1:
+				doc.warnings.append(UxmlDiagnostic.make(
+					"unsupported-feature",
+					"<%s>: %s; the element is kept but not interpreted" % [tag, UssControls.UNSUPPORTED_FEATURE_TAGS[local]],
+					doc.source, f[4], doc.path
+				))
+			2:
+				doc.warnings.append(UxmlDiagnostic.make(
+					"unsupported-control",
+					'<%s> has no Godot control mapping; it becomes a plain container and its children are preserved' % tag,
+					doc.source, f[4], doc.path
+				))
 
 
 ## Load the stylesheet `src` (resolved against `from_path`) into an already
@@ -223,7 +328,7 @@ static func _parse_sheet(text: String, origin: String) -> Dictionary:
 		for k in items.size():
 			if items[k]["kind"] == "import":
 				items[k] = (items[k] as Dictionary).duplicate(true)
-	return {"items": items, "warnings": (hit["warnings"] as Array).duplicate(true)}
+	return {"items": items, "warnings": (hit["warnings"] as Array).duplicate(true), "cache": hit}
 
 
 ## Drop the parsed author sheets (tests that change the parser's statics).
@@ -315,6 +420,24 @@ static var _re_dim := RegEx.create_from_string(
 ## zero value: UssProperties.unity_value).
 static func _check_values(parsed: Dictionary, text: String, origin: String, doc: UxmlDocumentModel,
 		resolver: UxmlResourceResolver = null) -> void:
+	# A parsed sheet of the cache (_parse_sheet) keeps what its values
+	# report: [offset, problems, url() path (or "")] per declaration with
+	# something to report; only the url() files are looked up again.
+	var hit = parsed.get("cache")
+	if hit != null and hit.has("checks"):
+		for e in hit["checks"]:
+			for pr in e[1]:
+				doc.warnings.append(UxmlDiagnostic.make(pr[0], pr[1], text, e[0], origin))
+			if resolver != null and not String(e[3]).is_empty():
+				_check_url(String(e[2]), String(e[3]), text, e[0], origin, doc, resolver)
+		if hit["checks_failed"]:
+			var kept0: Array = []
+			for item in parsed["items"]:
+				if item["kind"] != "rule":
+					kept0.append(item)
+			parsed["items"] = kept0
+		return
+	var checks: Array = []
 	var failed := false
 	for item in parsed["items"]:
 		if item["kind"] != "rule":
@@ -334,19 +457,33 @@ static func _check_values(parsed: Dictionary, text: String, origin: String, doc:
 					failed = true
 			# Unity's importer resolves url() at import: a missing file is an
 			# import warning (the runtime reports it again where it applies).
-			if resolver != null and val.find("url(") >= 0 and val.find("var(") < 0:
+			var url := ""
+			if val.find("url(") >= 0 and val.find("var(") < 0:
 				var ref := UssValues.parse_url(val)
 				if ref.get("ok", false) and not String(ref.get("path", "")).is_empty():
-					var rr := resolver.resolve(String(ref["path"]), origin)
-					if rr["ok"] and not FileAccess.file_exists(String(rr["path"])) and not ResourceLoader.exists(String(rr["path"])):
-						doc.warnings.append(UxmlDiagnostic.make("missing-file",
-							'%s: url("%s") names no file (%s)' % [prop, ref["path"], rr["path"]], text, at, origin))
+					url = String(ref["path"])
+			if resolver != null and not url.is_empty():
+				_check_url(prop, url, text, at, origin, doc, resolver)
+			if not found.is_empty() or not url.is_empty():
+				checks.append([at, found, prop, url])
+	if hit != null:
+		hit["checks"] = checks
+		hit["checks_failed"] = failed
 	if failed:
 		var kept: Array = []
 		for item in parsed["items"]:
 			if item["kind"] != "rule":
 				kept.append(item)
 		parsed["items"] = kept
+
+
+## The missing-file diagnostic of a url() in a sheet (_check_values).
+static func _check_url(prop: String, path: String, text: String, at: int, origin: String,
+		doc: UxmlDocumentModel, resolver: UxmlResourceResolver) -> void:
+	var rr := resolver.resolve(path, origin)
+	if rr["ok"] and not FileAccess.file_exists(String(rr["path"])) and not ResourceLoader.exists(String(rr["path"])):
+		doc.warnings.append(UxmlDiagnostic.make("missing-file",
+			'%s: url("%s") names no file (%s)' % [prop, path, rr["path"]], text, at, origin))
 
 
 static var _problem_cache := {}

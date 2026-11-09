@@ -3058,3 +3058,108 @@ merge message of `runtime/v2-load` for the counts. Headless equiv_v2 still
 reports two pre-existing mismatches (not gates): `child-combinator-through-parts`
 (a hit test after a tracker class on a ScrollView child) and the alternating
 hook of `ctl-hover-minmax`, which has no fixed point.
+
+## Runtime v2: phase 5, the model in the table (`runtime/v2-phase5`)
+
+The parse into runtime v2's element table with `UxmlElement` handles made
+on request, the part trees written back in one call, the index, names,
+kinds and coverage check native, lazy Toggle Controls, lighter styles for
+the editors, fonts and images, sheet value checks kept with the parsed
+sheet (`docs/design.md`, "Phase 5: the model in the element table"). v2
+stays an opt-in.
+
+### Method
+
+`python tools/unity-bench/run.py --arms godot-release,godot-release-v2,unity-il2cpp --rounds 5 --iters 60 --skip-build`
+after a release export of the branch (`e108b89`), the IL2CPP player of
+phase 1. Other sessions loaded the machine more and more during the run
+(Unity's big load 41 ms in round 2, 100 ms in round 5; CPU at 100% after
+it): the per-round ratios (each round runs the three arms back to back) and
+the quietest round are given beside the medians.
+
+### Results (ms, release template)
+
+| Operation | v1 | v2 | Unity (IL2CPP) | v2 / v1 | v2 / Unity, per round | v2 / Unity, quietest round | v2-load v2 / Unity |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| big: load | 1152 | **296** | 64.6 | 0.24 | 4.2 | 3.9 (159 / 41.3) | 4.6 |
+| big: load + first frame | 1246 | **281** | 103 | 0.22 | 3.0 | 2.4 (159 / 66.3) | 3.2 |
+| settings: load | 95.1 | **41.7** | 5.45 | 0.44 | 7.1 | 5.5 (24.3 / 4.37) | 6.7 |
+| inventory: load | 100 | **20.2** | 5.44 | 0.20 | 4.4 | 2.8 (12.0 / 4.26) | 5.8 |
+| dialog: load | 11.3 | **7.31** | 0.567 | 0.65 | 13.3 | 11.4 (4.60 / 0.403) | 13.6 |
+| listview: load, 10,000 items | 158 | **58.0** | 6.44 | 0.35 | 8.7 | 5.6 (32.4 / 5.77) | 7.0 |
+| big: class change (card) | 7.22 | **4.73** | 2.47 | 0.58 | 2.0 | 1.8 | 1.7 |
+| big: hover toggle (button) | 0.814 | **0.775** | 1.55 | 0.93 | 0.53 | 0.46 | 0.55 |
+| settings: switch tab | 6.57 | **1.99** | 2.01 | 0.24 | 1.06 | 0.69 | 0.91 |
+| listview: scroll 3 rows | 3.73 | **2.24** | 0.089 | 0.56 | 21 | 13 (1.10 / 0.083) | 20 |
+| frame: big document, idle | 1.24 | 1.22 | 2.05 | 0.81 | 0.58 | 0.35 | 0.46 |
+
+v2 / v1 is the median of the per-round ratios. The full table:
+`tools/unity-bench/out/summary.md` of the run.
+
+### Where a v2 load of the big document goes (editor binary, ms)
+
+`bench/v2/load_cost.gd -- --doc=big`, before (main `73a953a`, windowed, at
+the start of the work: runtime v1 1035 ms) and after (`e108b89`, headless,
+runtime v1 810 to 830 ms in the same session, the machine less loaded than
+at the start):
+
+| Step | before | after |
+| --- | ---: | ---: |
+| parse, theme, rest | about 50 | about 15 |
+| part trees | 31 | 26 (builders 11, write back 10, finalize 3) |
+| cascade setup | 25 | 16 |
+| index | 11 | 1.8 |
+| interaction Controls (creation, behaviors) | 34 | 18 |
+| first cascade | 41 | 26 |
+| build | 38 | 23 |
+| editors applied | 15 | 6 |
+| layout (native pass, hooks, hook restyle and pass, placement) | 62 | 49 |
+| draw | 19 | 18 |
+| total | 328 | 191 to 207 |
+
+What changed per step: the parse makes no object per element (the table
+scan and decode: 10 ms against 38 ms of `load_source`); 618 handles are
+made for the 1,952 rows, 420 of them the part objects of the controls; the
+cascade setup reads the tree arrays of the table in one call and the
+element index is native; the first cascade and the build read attributes
+from the rows (the build's attribute scan 13 to 2.5 ms), and a var()
+declaration's expansion is kept per custom-property set; the 60 Toggles
+make no Control at the load; the editors read their style with the origins
+they use (the computed style with every inheritance wrap was 0.33 ms per
+editor).
+
+### What remains
+
+The steps left are each 15 to 50 ms: the native layout (TextServer shaping
+and line breaking of 547 texts, about 12 ms; the measures), the native
+first cascade (about 10 us per element) and build (the text blocks and
+visual records), the draw (canvas items), the part builders and their write
+back, and the Controls that hold values with layout hooks (38 Sliders: the
+dragger placement is a style write and a restyle) and the 30 text editors.
+The small documents keep about 4 ms of fixed cost per load (dialog, editor
+binary: reading the two files 0.5 ms, the loader 0.7, the cascade setup
+0.9, the glue's probes, the theme reads of the build). The ListView scroll
+rebinds through runtime v1's GDScript collection behavior (the row classes
+by attribute writes and a restyle, the scroller styles, a layout of the
+rows): 1.1 ms against Unity's 0.08.
+
+### Equivalence and gates
+
+`bench/equiv_v2.gd` (windowed) 3,987 checks, 0 failures, 237/237 pixels;
+the focus order of lazy and eager Controls is the same in all 150 covered
+documents (4,458 keys). Tests 3,973 checks. Parity 178/179, scaled
+172/172. The eight equivalence runs 0 failures. Pixels and scaled pixels
+unchanged (box 99.806%, IoU 0.917, rects 3369/3551; scaled 99.904%, 0.954,
+4036/4248); `--runtime 2` renders identical to v1's (358 of 358; scaled
+332 of 344, the 12 others `scl-settings`). Coverage unchanged: 150 of the
+247 documents of `bench/equiv_v2.gd`, 108 of the 177 pixel cases, 121 of
+the 172 scaled cases. A/A/B, 10 rounds (`bench.gd --quick`,
+`workloads.gd --quick`): B/A 1.070 and 0.929 against A'/A 1.129 and 0.949.
+
+Tried and dropped: splicing author sheets into a cascade as cached blocks
+(as the theme sheets are) broke `reload_stylesheet`'s in-place rule patches
+(`bench/equiv_runtime.gd`: 450 failures, the editor API tests).
+
+The bench and test folders are per checkout now (`UxmlBenchDir.of`: the
+checkouts of the repository are one Godot project and shared
+`user://godot_uxml_bench`; `GODOT_UXML_BENCH_SLOT` gives a run its own).

@@ -8,7 +8,7 @@ func _initialize() -> void:
 	var d := UxmlDocument.new()
 	root.add_child(d)
 	d.size = Vector2(1280, 800)
-	d.load_document(path, "user://godot_uxml_ucmp")
+	d.load_document(path, UxmlBenchDir.of("godot_uxml_ucmp"))
 	d._restyle_now()
 	var counts := {}
 	for el in d._controls:

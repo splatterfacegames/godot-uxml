@@ -15,16 +15,16 @@ func _initialize() -> void:
 		["res://tests/fixtures/runtime", "Assets/UI/review.uxml"],
 		["res://tests/fixtures/options", "Assets/UI/Options.uxml"],
 		["res://tests/fixtures/origin", "Assets/UI/panel.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/hud.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/big.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/hud.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/big.uxml"],
 		["res://tests/fixtures/controls", "Assets/UI/controls.uxml"],
 		["res://tests/fixtures/editor", "Assets/UI/editor.uxml"],
 		["res://tests/fixtures/runtime", "Assets/UI/collections.uxml"],
 		["res://tests/fixtures/templates", "Assets/UI/Main.uxml"],
-		["user://godot_uxml_ucmp", "Assets/UI/wl_settings.uxml"],
-		["user://godot_uxml_ucmp", "Assets/UI/wl_inventory.uxml"],
-		["user://godot_uxml_ucmp", "Assets/UI/wl_dialog.uxml"],
-		["user://godot_uxml_ucmp", "Assets/UI/wl_listview.uxml"],
+		[UxmlBenchDir.of("godot_uxml_ucmp"), "Assets/UI/wl_settings.uxml"],
+		[UxmlBenchDir.of("godot_uxml_ucmp"), "Assets/UI/wl_inventory.uxml"],
+		[UxmlBenchDir.of("godot_uxml_ucmp"), "Assets/UI/wl_dialog.uxml"],
+		[UxmlBenchDir.of("godot_uxml_ucmp"), "Assets/UI/wl_listview.uxml"],
 	]:
 		var docs := []
 		for flag in [false, true]:

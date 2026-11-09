@@ -267,7 +267,7 @@ func _native() -> void:
 
 func _uxml() -> void:
 	var path := "Assets/UI/big.uxml"
-	var proj := "user://godot_uxml_bench"
+	var proj := UxmlBenchDir.of("godot_uxml_bench")
 	if not FileAccess.file_exists(proj + "/" + path):
 		print("run bench/bench.gd once first")
 		return

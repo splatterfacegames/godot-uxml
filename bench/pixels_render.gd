@@ -62,7 +62,7 @@ func _initialize() -> void:
 			for n in args[i + 1].split(",", false):
 				_only[n] = true
 	if _out.is_empty():
-		_out = ProjectSettings.globalize_path("user://godot_uxml_pixels/out")
+		_out = ProjectSettings.globalize_path(UxmlBenchDir.of("godot_uxml_pixels") + "/out")
 	DirAccess.make_dir_recursive_absolute(_out)
 	_unity_project_data()
 	_run.call_deferred()
@@ -274,7 +274,7 @@ func _render_case(c: Dictionary, dump: Dictionary) -> void:
 		var hy := UxmlPanelScale.pixel(host_pts.y, ppp)
 		_crop = Vector2i(mini(panel.x, ceili(hx * ppp - 0.01)), mini(panel.y, ceili(hy * ppp - 0.01)))
 	# Files as bench/parity.gd lays them out.
-	var root := "user://godot_uxml_pixels/cases/%s" % name
+	var root := UxmlBenchDir.of("godot_uxml_pixels") + "/cases/%s" % name
 	var dir := root + "/Assets/GoldenCases/"
 	DirAccess.make_dir_recursive_absolute(dir)
 	var files: Dictionary = c["files"]

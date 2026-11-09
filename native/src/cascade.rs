@@ -221,7 +221,9 @@ struct AncKey {
 }
 
 struct Elem {
-    obj: Gd<Object>,
+    /// The element's UxmlElement (None: a row of runtime v2's table, whose
+    /// handle is made on request).
+    obj: Option<Gd<Object>>,
     var: Variant,
     local: u32,
     local_var: Variant,
@@ -246,6 +248,10 @@ struct Props {
 }
 
 pub struct Cascade {
+    /// Runtime v2's element table (phase 5): the elements are its rows.
+    pub model: Option<Gd<crate::v2model::UxmlNativeModel>>,
+    /// Makes the handle of a row (UxmlDocumentModel.handle).
+    cb_handle: Option<Callable>,
     // shared strings
     interned: HashMap<String, u32>,
     props: Props,
@@ -265,6 +271,10 @@ pub struct Cascade {
     var_ent: HashMap<(usize, usize, usize, usize), (Rc<Vec<Pair>>, Rc<Vec<Variant>>, Variant)>,
     inline_cache: HashMap<String, Rc<Inline>>,
     subst_memo: HashMap<(i64, String), Option<GString>>,
+    /// The expansion of a var() declaration under a custom-property set
+    /// (customs id, declaration list, index): substituted and expanded once
+    /// per set. The list is kept, so its address names it.
+    var_exp: HashMap<(i64, usize, usize), (Rc<Vec<Decl>>, bool, GString, Rc<Vec<Pair>>)>,
     // compiled rules
     rules: Vec<Rule>,
     sels: Vec<Sel>,
@@ -623,7 +633,10 @@ impl Cascade {
         let doc = get("doc").try_to::<Gd<Object>>().ok()?;
         let source = gs(&doc.get("source"));
         let path = gs(&doc.get("path"));
+        let model = get("_table_obj").try_to::<Gd<crate::v2model::UxmlNativeModel>>().ok();
         let mut c = Cascade {
+            model: model.clone(),
+            cb_handle: cb.get("handle").and_then(|v| v.try_to::<Callable>().ok()),
             interned: HashMap::new(),
             props: Props { names: vec![], keys: vec![], inherited: vec![], supported: vec![], custom: vec![], lay: vec![], index: HashMap::new() },
             inherited_set: cb.get("inherited")?.try_to().ok()?,
@@ -636,6 +649,7 @@ impl Cascade {
             var_ent: HashMap::new(),
             inline_cache: HashMap::new(),
             subst_memo: HashMap::new(),
+            var_exp: HashMap::new(),
             rules: vec![],
             sels: vec![],
             b_name: HashMap::new(),
@@ -783,7 +797,7 @@ impl Cascade {
         let parent = get("_parent").to::<PackedInt32Array>();
         let sel_parent = get("_sel_parent").to::<PackedInt32Array>();
         let end = get("_end").to::<PackedInt32Array>();
-        let n = els.len();
+        let n = if model.is_some() { parent.len() } else { els.len() };
         let sn_local = StringName::from("local");
         let sn_prefix = StringName::from("prefix");
         let sn_children = StringName::from("children");
@@ -797,8 +811,13 @@ impl Cascade {
         let p_ote = get("_ote").try_to::<PackedInt32Array>().ok().filter(|a| a.len() == n);
         let packed = p_local.is_some() && p_prefix.is_some() && p_ots.is_some() && p_ote.is_some() && end.len() == n;
         for i in 0..n {
-            let var = els.at(i);
-            let obj = var.try_to::<Gd<Object>>().ok()?;
+            let (var, obj) = if model.is_some() {
+                (Variant::nil(), None)
+            } else {
+                let var = els.at(i);
+                let obj = var.try_to::<Gd<Object>>().ok()?;
+                (var, Some(obj))
+            };
             let (local, prefix, leaf, offset, end) = if packed {
                 let o = p_ots.as_ref().unwrap().as_slice()[i] as i64;
                 (
@@ -809,6 +828,7 @@ impl Cascade {
                     p_ote.as_ref().unwrap().as_slice()[i] as i64,
                 )
             } else {
+                let obj = obj.as_ref()?;
                 let o = obj.get(&sn_offset).try_to::<i64>().unwrap_or(0);
                 (
                     gs(&obj.get(&sn_local)).to_string(),
@@ -833,7 +853,9 @@ impl Cascade {
             };
             let tag = if prefix.is_empty() { local.clone() } else { format!("{prefix}:{local}") };
             let lid = c.intern(&local);
-            c.index.insert(obj.instance_id().to_i64(), i);
+            if let Some(o) = &obj {
+                c.index.insert(o.instance_id().to_i64(), i);
+            }
             c.els.push(Elem { obj, var, local: lid, local_var: local.to_variant(), local_name: local.clone(), leaf, tag, line, column, offset, end });
         }
         c.parent = parent.as_slice().to_vec();
@@ -1089,7 +1111,32 @@ impl Cascade {
 
     fn idx_of(&self, v: &Variant) -> Option<usize> {
         let o = v.try_to::<Gd<Object>>().ok()?;
-        self.index.get(&o.instance_id().to_i64()).copied()
+        let id = o.instance_id().to_i64();
+        if let Some(m) = &self.model {
+            return m.bind().row_of_id(id).filter(|&r| r < self.els.len());
+        }
+        self.index.get(&id).copied()
+    }
+
+    /// The attributes of element i as (name, value) Variants, from its
+    /// object or its row.
+    fn attr_pairs(&self, i: usize) -> Vec<(Variant, Variant)> {
+        if let Some(m) = &self.model {
+            let b = m.bind();
+            return b
+                .row(i)
+                .attrs
+                .iter()
+                .map(|a| (GString::from(a.name.as_str()).to_variant(), GString::from(a.value.as_str()).to_variant()))
+                .collect();
+        }
+        let arr = self.els[i].obj.as_ref().map(|o| o.get(&self.sn_attributes).to::<VarArray>()).unwrap_or_default();
+        let mut out = Vec::with_capacity(arr.len());
+        for a in arr.iter_shared() {
+            let ad = a.to::<VarDictionary>();
+            out.push((ad.get(&self.k_name).unwrap_or_default(), ad.get(&self.k_value).unwrap_or_default()));
+        }
+        out
     }
 
     pub fn update(
@@ -1228,8 +1275,31 @@ impl Cascade {
             let mut st = Variant::nil();
             let mut en = Variant::nil();
             let (mut hc, mut hn, mut hs, mut he) = (false, false, false, false);
-            let attrs = if scan_all || reread[i] {
-                self.els[i].obj.get(&self.sn_attributes).to::<VarArray>()
+            let in_table = self.model.is_some() && (scan_all || reread[i]);
+            if in_table {
+                // The row: only the four values are made Variants.
+                let m = self.model.clone().unwrap();
+                let b = m.bind();
+                for a in &b.row(i).attrs {
+                    if !hc && a.name == "class" {
+                        c = GString::from(a.value.as_str()).to_variant();
+                        hc = true;
+                    } else if !hn && a.name == "name" {
+                        nm = GString::from(a.value.as_str()).to_variant();
+                        hn = true;
+                    } else if !hs && a.name == "style" {
+                        st = GString::from(a.value.as_str()).to_variant();
+                        hs = true;
+                    } else if !he && a.name == "enabled" {
+                        en = GString::from(a.value.as_str()).to_variant();
+                        he = true;
+                    }
+                }
+            }
+            let attrs = if in_table {
+                VarArray::new()
+            } else if scan_all || reread[i] {
+                self.els[i].obj.as_ref().map(|o| o.get(&self.sn_attributes).to::<VarArray>()).unwrap_or_default()
             } else {
                 // Only the enabled attribute is needed for state bits.
                 he = self.sig_en_false[i];
@@ -1599,9 +1669,24 @@ impl Cascade {
             let pid = decl.pid;
             let mut failed = false;
             let pairs: Rc<Vec<Pair>>;
-            if flags & F_VAR != 0 {
+            let vkey = (cid, Rc::as_ptr(&c_decls[j]) as usize, c_d[j]);
+            let hit = if flags & F_VAR != 0 && flags & F_CUSTOM == 0 && cid > 0 {
+                self.var_exp.get(&vkey).map(|e| (e.1, e.2.clone(), e.3.clone()))
+            } else {
+                None
+            };
+            if let Some((f, raw, p)) = hit {
+                failed = f;
+                pairs = p;
+                if pairs.is_empty() {
+                    let m = format!("{}: {} -- wrong number of values; declaration dropped", decl.prop, raw);
+                    warns.push(self.diag(i, "invalid-shorthand", m));
+                    continue;
+                }
+            } else if flags & F_VAR != 0 {
                 let val = decl.val.clone();
                 let sub: Option<GString> = if flags & F_CUSTOM != 0 {
+                    let _cbp = crate::prof::scope("c.subst.cb_custom");
                     let r = self.cb_subst.callv(&args(&[val.to_variant(), customs.to_variant(), decl.prop.to_variant()]));
                     r.try_to::<GString>().ok()
                 } else if cid > 0 {
@@ -1609,6 +1694,7 @@ impl Cascade {
                     match self.subst_memo.get(&key) {
                         Some(v) => v.clone(),
                         None => {
+                            let _cbp = crate::prof::scope("c.subst.cb_miss");
                             let r = self.cb_subst.callv(&args(&[val.clone().to_variant(), customs.clone().to_variant(), GString::new().to_variant()]));
                             let v = r.try_to::<GString>().ok();
                             if self.subst_memo.len() > 65536 {
@@ -1619,6 +1705,7 @@ impl Cascade {
                         }
                     }
                 } else {
+                    let _cbp = crate::prof::scope("c.subst.cb_nocid");
                     let r = self.cb_subst.callv(&args(&[val.clone().to_variant(), customs.clone().to_variant(), GString::new().to_variant()]));
                     r.try_to::<GString>().ok()
                 };
@@ -1630,6 +1717,13 @@ impl Cascade {
                     }
                 };
                 pairs = self.expand(pid, &raw);
+                if flags & F_CUSTOM == 0 && cid > 0 {
+                    if self.var_exp.len() > 65536 {
+                        self.var_exp.clear();
+                    }
+                    self.var_exp.insert(vkey, (c_decls[j].clone(), failed, raw.clone(), pairs.clone()));
+                }
+                let decl = &c_decls[j][c_d[j]];
                 if pairs.is_empty() {
                     let m = format!("{}: {} -- wrong number of values; declaration dropped", decl.prop, raw);
                     warns.push(self.diag(i, "invalid-shorthand", m));
@@ -1861,6 +1955,7 @@ impl Cascade {
             self.tgt.remove(&i);
         }
         // Layout-relevant values for the native flex pass (versioned).
+        let _s_lay = crate::prof::scope("c.build.lay");
         let mut lv: Vec<Option<GString>> = vec![None; crate::layout::LAYOUT_PROPS.len()];
         for it in &comp {
             let li = self.props.lay[it.pid as usize];
@@ -1889,6 +1984,8 @@ impl Cascade {
             self.fc_customs[i] = cpair;
             return computed;
         }
+        drop(_s_lay);
+        let _s_fc = crate::prof::scope("c.build.fc");
         let node = self.els[i].var.clone();
         let mut fc_list: Vec<Rc<Item>> = Vec::with_capacity(comp.len());
         let mut fc_dict = VarDictionary::new();
@@ -1974,7 +2071,7 @@ impl Cascade {
         let inner = self.origin_of(p as usize, it);
         let mut wrap = VarDictionary::new();
         wrap.set(&self.k_kind, &self.v_inherited);
-        wrap.set(&self.k_from, &self.els[p as usize].var);
+        wrap.set(&self.k_from, &self.element_var(p as usize));
         wrap.set(&self.k_origin, &inner);
         wrap.to_variant()
     }
@@ -2223,6 +2320,11 @@ impl Cascade {
     }
 
     pub fn element_var(&self, i: usize) -> Variant {
+        if self.els[i].var.is_nil() {
+            if let Some(cb) = &self.cb_handle {
+                return cb.call(&[(i as i64).to_variant()]);
+            }
+        }
         self.els[i].var.clone()
     }
 
@@ -2233,11 +2335,32 @@ impl Cascade {
 
     /// The `attributes` of element i's UxmlElement ([{name, value}]).
     pub fn attributes(&self, i: usize) -> VarArray {
-        self.els[i].obj.get(&self.sn_attributes).try_to::<VarArray>().unwrap_or_default()
+        let mut out = VarArray::new();
+        if self.model.is_some() {
+            for (n, v) in self.attr_pairs(i) {
+                let mut d = VarDictionary::new();
+                d.set(&self.k_name, &n);
+                d.set(&self.k_value, &v);
+                out.push(&d.to_variant());
+            }
+            return out;
+        }
+        self.els[i].obj.as_ref().map(|o| o.get(&self.sn_attributes).try_to::<VarArray>().unwrap_or_default()).unwrap_or(out)
+    }
+
+    /// The attributes of element i as (name, value) strings.
+    pub fn attr_strings(&self, i: usize) -> Vec<(String, String)> {
+        if let Some(m) = &self.model {
+            return m.bind().row(i).attrs.iter().map(|a| (a.name.clone(), a.value.clone())).collect();
+        }
+        self.attr_pairs(i).iter().map(|(n, v)| (gs(n).to_string(), gs(v).to_string())).collect()
     }
 
     /// The first value of attribute `name` of element i.
     pub fn attr_str(&self, i: usize, name: &str) -> Option<String> {
+        if let Some(m) = &self.model {
+            return m.bind().row(i).attr(name).map(|v| v.to_string());
+        }
         for a in self.attributes(i).iter_shared() {
             let Ok(d) = a.try_to::<VarDictionary>() else { continue };
             if gs(&d.get(&self.k_name).unwrap_or_default()).to_string() == name {

@@ -14,7 +14,7 @@ extends SceneTree
 ##   Godot --headless --path <project> -s res://bench/workloads.gd [-- --quick] [-- --no-theme]
 ## Reports median / p95 ms; same timing helpers as bench.gd.
 
-const ROOT := "user://godot_uxml_bench"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_bench")
 
 var _quick := false
 var _rows: Array = []

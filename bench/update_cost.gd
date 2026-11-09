@@ -22,7 +22,7 @@ extends SceneTree
 ##   --gdscript     disable the native core
 ##   --rounds=<n>   samples per kind (default 15)
 
-const ROOT := "user://godot_uxml_update_bench"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_update_bench")
 const PATH := "Assets/UI/editor_update.uxml"
 const USS_PATH := "Assets/UI/editor_update.uss"
 
