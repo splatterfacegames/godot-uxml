@@ -15,7 +15,7 @@ extends SceneTree
 ##
 ## Prints one LOAD_COST line per measure: the median ms of the rounds.
 
-const ROOT := "user://godot_uxml_bench"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_bench")
 const PATH := "Assets/UI/editor_large.uxml"
 
 var _rounds := 15

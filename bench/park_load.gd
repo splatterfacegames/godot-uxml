@@ -17,10 +17,10 @@ func _initialize() -> void:
 		["res://tests/fixtures/options", "Assets/UI/Options.uxml"],
 		["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml"],
 		["res://tests/fixtures/runtime", "Assets/UI/review.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/wl_settings.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/wl_inventory.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/wl_list.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/big.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/wl_settings.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/wl_inventory.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/wl_list.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/big.uxml"],
 		["res://tests/fixtures/parking", "Assets/UI/parking.uxml"],
 	]
 	for cs in cases:

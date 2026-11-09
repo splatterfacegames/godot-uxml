@@ -12,7 +12,7 @@ extends RefCounted
 ## runtime state run on the native and the GDScript paths, and the two
 ## traces must be equal.
 
-const ROOT := "user://uxml_editor_api_tests"
+static var ROOT: String = UxmlBenchDir.of("uxml_editor_api_tests")
 
 var h = null
 

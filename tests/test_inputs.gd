@@ -8,7 +8,7 @@ extends RefCounted
 ##
 ## `h` is the SceneTree harness from run_tests.gd.
 
-const TMP := "user://godot_uxml_inputs_tests"
+static var TMP: String = UxmlBenchDir.of("godot_uxml_inputs_tests")
 
 var h = null
 

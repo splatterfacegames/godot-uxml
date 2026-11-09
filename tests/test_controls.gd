@@ -6,7 +6,7 @@ extends RefCounted
 ## `h` is the SceneTree harness from run_tests.gd.
 
 const FIXTURE := "res://tests/fixtures/controls"
-const TMP := "user://godot_uxml_controls_tests"
+static var TMP: String = UxmlBenchDir.of("godot_uxml_controls_tests")
 
 var h = null
 

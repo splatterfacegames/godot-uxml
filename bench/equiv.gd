@@ -47,8 +47,8 @@ func _initialize() -> void:
 		["res://tests/fixtures/cycle", "Assets/UI/cycle.uxml"],
 		["res://tests/fixtures/origin", "Assets/UI/panel.uxml"],
 		["res://tests/fixtures/templates", "Assets/UI/Main.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/big.uxml"],
-		["user://godot_uxml_bench", "Assets/UI/hud.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/big.uxml"],
+		[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/hud.uxml"],
 	]:
 		var d := UxmlLoader.load_file(pair[1], pair[0])
 		if d.path.is_empty():
@@ -81,7 +81,7 @@ func _initialize() -> void:
 			["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml"],
 			["res://tests/fixtures/options", "Assets/UI/Options.uxml"],
 			["res://tests/fixtures/editor", "Assets/UI/editor.uxml"],
-			["user://godot_uxml_bench", "Assets/UI/hud.uxml"],
+			[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/hud.uxml"],
 		]:
 			var td := UxmlLoader.load_file(pair[1], pair[0])
 			if td.path.is_empty():

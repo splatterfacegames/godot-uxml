@@ -2,7 +2,7 @@ extends SceneTree
 ## An op of bench/unity_compare.gd split into the mutation, the timed restyle
 ## and the settling restyle of the next frame, with the layouts each ran.
 ##   Godot --headless --path . -s res://bench/prof/split.gd -- --op=<op> [--n=N]
-const ROOT := "user://godot_uxml_ucmp"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_ucmp")
 func _bind(row, i):
 	(row.get_native("lname") as Label).text = "Entry %d" % i
 	(row.get_native("lval") as Label).text = str(i * 3)

@@ -120,7 +120,7 @@ func _corpus_names() -> Array:
 ## Write a case to user://, load it with the default theme and part trees.
 func _load_case(name: String, uxml: String, uss: String, files: Dictionary, values: Dictionary = {},
 		actions: Array = [], side: Dictionary = {}) -> UxmlDocumentModel:
-	var root := "user://godot_uxml_parity/%s" % name
+	var root := UxmlBenchDir.of("godot_uxml_parity") + "/%s" % name
 	var dir := root + "/Assets/GoldenCases/"
 	DirAccess.make_dir_recursive_absolute(dir)
 	for path in files:
@@ -587,7 +587,7 @@ func _runtime_section(cases: Array) -> void:
 			root.add_child(d)
 			d.size = size
 			d._clear()
-			var base := "user://godot_uxml_parity_runtime/" + String(c["name"])
+			var base := UxmlBenchDir.of("godot_uxml_parity_runtime") + "/" + String(c["name"])
 			DirAccess.make_dir_recursive_absolute(base + "/Assets/GoldenCases")
 			d._resolver = UxmlResourceResolver.new(base)
 			d._doc = UxmlLoader.load_source(c["uxml"], base + "/Assets/GoldenCases/case.uxml", d._resolver, c["uss"])

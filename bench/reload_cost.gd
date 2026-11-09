@@ -25,7 +25,7 @@ extends SceneTree
 ## "<edit> next" for the first state change after the reload, as an editor
 ## arms a transition run after a render.
 
-const ROOT := "user://godot_uxml_reload_bench"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_reload_bench")
 const PATH := "Assets/UI/editor_large.uxml"
 const USS_PATH := "Assets/UI/editor_large.uss"
 

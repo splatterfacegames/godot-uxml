@@ -30,7 +30,7 @@ func _initialize() -> void:
 			mutations = int(a.substr(12))
 	var files: Array = []
 	_collect("res://tests/fixtures", files)
-	_collect("user://godot_uxml_bench", files)
+	_collect(UxmlBenchDir.of("godot_uxml_bench"), files)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
 	for path in files:

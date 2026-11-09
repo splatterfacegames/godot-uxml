@@ -9,7 +9,7 @@ extends RefCounted
 ## rgba(200, 100, 50, 0.5) ("half"), as premultiplied 0..255 values.
 
 var h = null
-const ROOT := "user://v63"
+static var ROOT: String = UxmlBenchDir.of("v63")
 
 
 func _init(harness) -> void:

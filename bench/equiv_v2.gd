@@ -113,7 +113,7 @@ func _cases() -> Array:
 			"uss": FileAccess.get_file_as_string(up) if FileAccess.file_exists(up) else "", "files": {}})
 	for f in _fixture_files("res://tests/fixtures"):
 		out.append({"name": f, "file": f})
-	var dir := "user://godot_uxml_equiv_v2/bench/Assets/UI/"
+	var dir := UxmlBenchDir.of("godot_uxml_equiv_v2") + "/bench/Assets/UI/"
 	DirAccess.make_dir_recursive_absolute(dir)
 	var b = load("res://bench/bench.gd").new()
 	var w = load("res://bench/workloads.gd").new()
@@ -126,12 +126,12 @@ func _cases() -> Array:
 	b.free()
 	w.free()
 	for f in ["big-static.uxml", "hud.uxml", "big.uxml", "wl_dialog.uxml", "wl_settings.uxml", "wl_inventory.uxml"]:
-		out.append({"name": "gen:" + f, "file": "Assets/UI/" + f, "root": "user://godot_uxml_equiv_v2/bench"})
+		out.append({"name": "gen:" + f, "file": "Assets/UI/" + f, "root": UxmlBenchDir.of("godot_uxml_equiv_v2") + "/bench"})
 	out.append({"name": "gen:static-cards", "uxml": _static_cards(), "uss": ""})
 	# A ListView of 200 items (workloads.gd's listview document), bound,
 	# scrolled and selected by the changes.
 	out.append({"name": "gen:wl_listview.uxml", "file": "Assets/UI/wl_listview.uxml",
-		"root": "user://godot_uxml_equiv_v2/bench", "list": "list"})
+		"root": UxmlBenchDir.of("godot_uxml_equiv_v2") + "/bench", "list": "list"})
 	# Panel scaling: the cases of bench/parity/scaled/matrix.json under
 	# three pixel grids (2, 1.33 and 0.8 pixels per point).
 	for n in ["lay-percent", "lay-minmax", "lay-wrap", "lay-fraction", "lay-absolute",
@@ -385,7 +385,7 @@ func _load(d: UxmlDocument, c: Dictionary) -> void:
 		var root := "res://tests/fixtures/" + f.trim_prefix("res://tests/fixtures/").get_slice("/", 0)
 		d.load_document(f.trim_prefix(root + "/"), root)
 		return
-	var base := "user://godot_uxml_equiv_v2/%s" % String(c["name"]).replace(":", "_")
+	var base := UxmlBenchDir.of("godot_uxml_equiv_v2") + "/%s" % String(c["name"]).replace(":", "_")
 	var dir := base + "/Assets/GoldenCases/"
 	DirAccess.make_dir_recursive_absolute(dir)
 	for p in c.get("files", {}):
@@ -639,7 +639,7 @@ func _cmp_pixels(what: String, h1: SubViewport, h2: SubViewport, a: UxmlDocument
 		else:
 			_pixc_docs[what] = true
 			if OS.get_environment("EQUIV_V2_TRACE") != "":
-				var dir := "user://godot_uxml_equiv_v2/diff"
+				var dir := UxmlBenchDir.of("godot_uxml_equiv_v2") + "/diff"
 				DirAccess.make_dir_recursive_absolute(dir)
 				i1.save_png(dir + "/" + what.validate_filename() + ".v1.png")
 				i2.save_png(dir + "/" + what.validate_filename() + ".v2.png")
@@ -679,7 +679,7 @@ func _cmp_pixels(what: String, h1: SubViewport, h2: SubViewport, a: UxmlDocument
 						if cs.has(k):
 							keys.append("%s=%s" % [k, cs[k]["value"]])
 					print("        ", keys, " inline=", el.get_attribute("style"), " v2 rec=", b._v2.rt.call("record_of", i))
-		var dir := "user://godot_uxml_equiv_v2/diff"
+		var dir := UxmlBenchDir.of("godot_uxml_equiv_v2") + "/diff"
 		DirAccess.make_dir_recursive_absolute(dir)
 		var stem := what.validate_filename()
 		i1.save_png(dir + "/" + stem + ".v1.png")

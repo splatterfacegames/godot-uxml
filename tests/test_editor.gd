@@ -7,7 +7,7 @@ extends RefCounted
 ##
 ## `h` is the SceneTree harness from run_tests.gd.
 
-const TMP := "user://godot_uxml_editor_tests"
+static var TMP: String = UxmlBenchDir.of("godot_uxml_editor_tests")
 const NS := 'xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements"'
 
 var h = null

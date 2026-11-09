@@ -2,7 +2,7 @@ extends SceneTree
 ## One model step of a load under tools/gdprof.py --marked: the step runs
 ## alone in the marked frames (the model is loaded before).
 ##   python tools/gdprof.py --marked --godot <exe> -- --headless --path . -s res://bench/prof/stage_prof.gd -- --stage=parts [--doc=big --n=10]
-const ROOT := "user://godot_uxml_ucmp"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_ucmp")
 
 func _initialize() -> void:
 	_run.call_deferred()

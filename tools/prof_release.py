@@ -9,7 +9,7 @@ loop of the export (a class_name is added to it), exports it with the
 release template (windows_release_x86_64.exe) into
 tools/unity-bench/Builds/godot-prof/ and runs it in a small window at the
 bottom right of the work area, without focus. The documents of
-bench/unity_compare.gd must be in user://godot_uxml_ucmp (any run of
+bench/unity_compare.gd must be in UxmlBenchDir.of("godot_uxml_ucmp") (any run of
 unity_compare.gd or tools/unity-bench/run.py writes them; --write-docs
 writes them first). The release template has no script profiler, so
 function-level profiles (tools/gdprof.py) run on the editor binary; the

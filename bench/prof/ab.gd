@@ -1,7 +1,7 @@
 extends SceneTree
 ## Interleaved A/B of UxmlDocument.ab_flag on one load:
 ##   Godot --headless --path . -s res://bench/prof/ab.gd -- [--doc=big] [--n=20]
-const ROOT := "user://godot_uxml_ucmp"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_ucmp")
 
 func _initialize() -> void:
 	var doc := "big"

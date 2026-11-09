@@ -53,7 +53,7 @@ func _line(source: String, needle: String) -> int:
 
 
 func _inline(body: String, files: Dictionary, root_name: String) -> UxmlDocumentModel:
-	var root := "user://godot_uxml_templates/%s" % root_name
+	var root := UxmlBenchDir.of("godot_uxml_templates") + "/%s" % root_name
 	DirAccess.make_dir_recursive_absolute(root)
 	for p in files:
 		var f := FileAccess.open(root + "/" + p, FileAccess.WRITE)

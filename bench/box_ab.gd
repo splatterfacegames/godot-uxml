@@ -17,13 +17,13 @@ extends SceneTree
 ## (run them once first). The caches are static: side A's loads find what
 ## earlier loads put there, as later loads of a session do.
 
-const BENCH_ROOT := "user://godot_uxml_bench"
-const LOADS := [
+static var BENCH_ROOT: String = UxmlBenchDir.of("godot_uxml_bench")
+static var LOADS: Array = [
 	["res://tests/fixtures/runtime", "Assets/UI/review.uxml"],
 	["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml"],
 	["res://tests/fixtures/options", "Assets/UI/Options.uxml"],
-	["user://godot_uxml_bench", "Assets/UI/wl_settings.uxml"],
-	["user://godot_uxml_bench", "Assets/UI/wl_inventory.uxml"],
+	[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/wl_settings.uxml"],
+	[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/wl_inventory.uxml"],
 ]
 
 var _docs: Array = []

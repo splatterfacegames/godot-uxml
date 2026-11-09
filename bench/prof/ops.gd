@@ -2,7 +2,7 @@ extends SceneTree
 ## Profiling driver: runs one operation of bench/unity_compare.gd many times
 ## between gdprof markers (tools/gdprof.py --marked).
 ##   Godot --path . -s res://bench/prof/ops.gd -- --op=<op> [--n=N]
-const ROOT := "user://godot_uxml_ucmp"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_ucmp")
 var _n := 30
 var _noprof := false
 
@@ -189,7 +189,7 @@ func _profile_load(path: String, steps: Dictionary) -> void:
 	d.size = Vector2(1280, 800)
 	var t := Time.get_ticks_usec()
 	d._clear()
-	var res := d._resolver_for("user://godot_uxml_ucmp", null)
+	var res := d._resolver_for(UxmlBenchDir.of("godot_uxml_ucmp"), null)
 	d._resolver = res
 	d._doc = UxmlLoader.load_file_with_resolver(path, res)
 	d._last_text = null

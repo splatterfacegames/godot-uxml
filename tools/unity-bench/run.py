@@ -93,7 +93,7 @@ def export_godot(godot):
         shutil.rmtree(stage)
     os.makedirs(os.path.join(stage, "bench"))
     shutil.copytree(os.path.join(REPO, "addons"), os.path.join(stage, "addons"))
-    for fn in ("bench.gd", "workloads.gd", "unity_compare.gd"):
+    for fn in ("bench.gd", "workloads.gd", "unity_compare.gd", "bench_dir.gd"):
         src = open(os.path.join(REPO, "bench", fn), encoding="utf-8").read()
         if fn == "unity_compare.gd":
             # The exported game starts this SceneTree as its main loop.

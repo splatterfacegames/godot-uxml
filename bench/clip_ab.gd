@@ -23,13 +23,13 @@ extends SceneTree
 ## The user:// documents come from bench/bench.gd and bench/workloads.gd
 ## (run them once first).
 
-const BENCH_ROOT := "user://godot_uxml_bench"
+static var BENCH_ROOT: String = UxmlBenchDir.of("godot_uxml_bench")
 const BLOCK_START := "/* Unity clips these controls and parts. */"
-const LOADS := [
+static var LOADS: Array = [
 	["res://tests/fixtures/runtime", "Assets/UI/review.uxml"],
 	["res://tests/fixtures/runtime", "Assets/UI/runtime.uxml"],
 	["res://tests/fixtures/options", "Assets/UI/Options.uxml"],
-	["user://godot_uxml_bench", "Assets/UI/wl_settings.uxml"],
+	[UxmlBenchDir.of("godot_uxml_bench"), "Assets/UI/wl_settings.uxml"],
 ]
 
 ## Per side: [UxmlTheme cache entry, UssCascade theme block entry].

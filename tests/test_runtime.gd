@@ -1193,7 +1193,7 @@ func test_list_view_virtualization() -> void:
 ## overflowed and the process crashed (bench/equiv_v2.gd, ctl-hover-minmax).
 ## The restyles queued in one frame are bounded; the rest run one per frame.
 func test_alternating_layout_hook_is_bounded_per_frame() -> void:
-	var dir := "user://godot_uxml_runtime_tests/hook"
+	var dir := UxmlBenchDir.of("godot_uxml_runtime_tests") + "/hook"
 	DirAccess.make_dir_recursive_absolute(dir + "/Assets")
 	var f := FileAccess.open(dir + "/Assets/mm.uxml", FileAccess.WRITE)
 	f.store_string('<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:MinMaxSlider name="h" label="Hover" min-value="2" max-value="6" low-limit="0" high-limit="10" /></ui:UXML>')

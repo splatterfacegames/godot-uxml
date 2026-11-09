@@ -5,7 +5,7 @@ extends RefCounted
 ## usage-hints, view-data-key). `h` is the SceneTree harness from
 ## run_tests.gd.
 
-const ROOT := "user://godot_uxml_binding"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_binding")
 
 var h = null
 

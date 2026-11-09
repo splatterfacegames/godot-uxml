@@ -2,7 +2,7 @@ extends SceneTree
 ## Load time of documents on runtime v1 and v2, interleaved, with the
 ## steps of a v2 load (UxmlDocument.profile).
 ##   Godot --path . -s res://bench/v2/load_cost.gd [-- --n=15 --doc=big-static]
-const ROOT := "user://godot_uxml_ucmp"
+static var ROOT: String = UxmlBenchDir.of("godot_uxml_ucmp")
 
 func _initialize() -> void:
 	_run.call_deferred()
