@@ -292,7 +292,10 @@ func _inventory() -> void:
 		d.set_class("slot-%d" % (i % 80), "slot rarity-%d slot--selected" % (i % 4))
 		d.set_class("slot-%d" % ((i + 79) % 80), "slot rarity-%d" % ((i + 79) % 4)))
 	await _time_op("inventory: count change + layout", d, func(i):
-		(d.get_native("count-%d" % (i % 80)) as Label).text = str(i * 7 % 999)
+		if d.get_runtime() == 2:
+			d.set_text("count-%d" % (i % 80), str(i * 7 % 999))
+		else:
+			(d.get_native("count-%d" % (i % 80)) as Label).text = str(i * 7 % 999)
 		d.relayout())
 	_free_doc(d)
 
