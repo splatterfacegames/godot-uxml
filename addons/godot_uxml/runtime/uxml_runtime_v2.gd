@@ -584,18 +584,20 @@ func _place_proxies() -> void:
 		var wrap: Control = _edit_wrap[i]
 		var r: Rect2 = rt.call("local_rect", i)
 		var host := Rect2(rects[k * 4], rects[k * 4 + 1])
-		var vis := Rect2(rects[k * 4 + 2], rects[k * 4 + 3])
 		var at := r.position
 		var wp: Vector2
-		var clipped := vis.position != host.position or vis.size.x < host.size.x - 0.001 or vis.size.y < host.size.y - 0.001
+		# An ancestor with overflow: hidden clips the editor (runtime v1's
+		# Controls clip their children, also where the editor is taller than
+		# its rect at its minimum size): the Control it sits in is that clip,
+		# unless the clip holds the editor's rect and its minimum size.
+		var clip: Rect2 = rt.call("clip_of", i)
+		var full := Rect2(host.position, host.size.max(c.get_combined_minimum_size()))
+		var clipped := clip.size.x >= 0.0 and not clip.encloses(full)
 		if clipped:
-			# An ancestor with overflow: hidden cuts the editor (runtime v1's
-			# Controls clip their children): the Control it sits in is that
-			# clip, the visible part of its rect.
-			wp = vis.position
-			at = host.position - vis.position
-			if wrap.size != vis.size:
-				wrap.size = vis.size
+			wp = clip.position
+			at = host.position - clip.position
+			if wrap.size != clip.size:
+				wrap.size = clip.size
 		else:
 			wp = _editor_frame(i, host.position - r.position)
 		if wrap.clip_contents != clipped:

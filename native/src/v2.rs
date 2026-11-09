@@ -733,6 +733,41 @@ impl UxmlRuntimeV2 {
         }
     }
 
+    /// The intersection of the clips of element i's clipping ancestors
+    /// (host coordinates), or a rect of size (-1, -1) without one: the
+    /// region an editor Control is clipped to, as runtime v1's ancestor
+    /// Controls clip it whatever its own size.
+    #[func]
+    fn clip_of(&self, i: i64) -> Rect2 {
+        let none = Rect2::new(Vector2::ZERO, Vector2::new(-1.0, -1.0));
+        let Some(st) = self.st.as_ref() else { return none };
+        let i = i as usize;
+        if i >= st.n {
+            return none;
+        }
+        let cb = st.casc.bind();
+        let c = cb.inner.as_ref().unwrap();
+        let mut out: Option<Rect2> = None;
+        let mut k = c.parent_of(i);
+        while k > 0 {
+            let ku = k as usize;
+            if st.vis[ku].clip {
+                let ar = st.host_rect_c(c, ku);
+                let ins = st.clip_inset_of(ku);
+                let cr = Rect2::new(
+                    ar.position + Vector2::new(ins[0], ins[1]),
+                    Vector2::new((ar.size.x - ins[0] - ins[2]).max(0.0), (ar.size.y - ins[1] - ins[3]).max(0.0)),
+                );
+                out = Some(match out {
+                    None => cr,
+                    Some(o) => o.intersect(cr).unwrap_or(Rect2::new(o.position, Vector2::ZERO)),
+                });
+            }
+            k = c.parent_of(ku);
+        }
+        out.unwrap_or(none)
+    }
+
     /// The f32 next to `x` (towards +inf for `dir` > 0, else -inf): the
     /// glue places an editor Control on the f32 grid (_editor_pos).
     #[func]
