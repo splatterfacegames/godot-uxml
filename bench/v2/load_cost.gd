@@ -21,8 +21,9 @@ func _run() -> void:
 		var t := {1: [], 2: []}
 		var steps := {}
 		var on := 0
+		var rts := [2] if OS.get_cmdline_user_args().has("--v2-only") else [1, 2]
 		for i in n + 2:
-			for rt in [1, 2]:
+			for rt in rts:
 				var d := UxmlDocument.new()
 				d.runtime = rt
 				root.add_child(d)
@@ -48,7 +49,7 @@ func _run() -> void:
 				root.remove_child(d)
 				d.free()
 				await process_frame
-		print("%s: v1 %.2f ms, v2 %.2f ms (runtime %d)" % [doc, _med(t[1]), _med(t[2]), on])
+		print("%s: v1 %.2f ms, v2 %.2f ms (runtime %d)" % [doc, _med(t[1]) if not t[1].is_empty() else 0.0, _med(t[2]), on])
 		if OS.get_cmdline_user_args().has("--native"):
 			UxmlNative.prof_enable(true)
 			UxmlNative.prof_take()
