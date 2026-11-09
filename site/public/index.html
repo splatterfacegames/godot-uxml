@@ -205,7 +205,7 @@
             <b>Runtime v2</b> is an opt-in (<code>UxmlDocument.runtime = 2</code>):
             the native core draws the elements itself, with one Control only
             for each focusable or interactive element (and real text editors),
-            loads these screens 2 to 3 times faster, and updates them faster
+            loads these screens 2 to 3 times faster (the big screen 2.9 times), and updates them faster
             than the default runtime. A document it does not cover yet loads on
             the default runtime.
           </p>
@@ -228,7 +228,7 @@
               <tr><th scope="row">Window resize</th><td>7.0 ms</td><td>6.3 ms</td><td class="best">3.9 ms</td><td>1.8</td></tr>
               <tr><th scope="row">Class change</th><td>5.1 ms</td><td>3.7 ms</td><td class="best">1.6 ms</td><td>3.2</td></tr>
               <tr><th scope="row">Label text change and layout</th><td>3.3 ms</td><td>2.7 ms</td><td class="best">1.4 ms</td><td>2.4</td></tr>
-              <tr><th scope="row">Document load</th><td>633 ms</td><td>300 ms</td><td class="best">45 ms</td><td>14</td></tr>
+              <tr><th scope="row">Document load</th><td>770 ms</td><td>269 ms</td><td class="best">59 ms</td><td>13</td></tr>
               <tr><th scope="row">HUD frame, 37 elements, 8 labels</th><td>0.39 ms</td><td>0.41 ms</td><td class="best">0.32 ms</td><td>1.2</td></tr>
             </tbody>
           </table>
@@ -238,10 +238,10 @@
           <div>
             <h3>Game screens, native core and Unity</h3>
             <dl class="readings">
-              <div><dt>Settings, 4 tabs of 12 rows</dt><dd>load 59 / 35 / 4.4 ms, switch tab 4.5 / 1.1 / 1.4 ms, hover 0.015 / 0.011 / 0.015 ms</dd></div>
-              <div><dt>Inventory, 80 slots</dt><dd>load 59 / 23 / 2.9 ms, hover 0.41 / 0.15 / 0.31 ms, select 0.80 / 0.41 / 0.31 ms</dd></div>
-              <div><dt>Dialog</dt><dd>load 8.2 / 6.6 / 0.30 ms, typewriter character 0.34 / 0.33 / 0.093 ms</dd></div>
-              <div><dt><code>ListView</code>, 10,000 items</dt><dd>load 89 / 34 / 3.7 ms, scroll 3 rows 2.1 / 1.1 / 0.055 ms</dd></div>
+              <div><dt>Settings, 4 tabs of 12 rows</dt><dd>load 68 / 37 / 5.5 ms, switch tab 4.5 / 1.1 / 1.4 ms, hover 0.015 / 0.011 / 0.015 ms</dd></div>
+              <div><dt>Inventory, 80 slots</dt><dd>load 67 / 25 / 4.2 ms, hover 0.41 / 0.15 / 0.31 ms, select 0.80 / 0.41 / 0.31 ms</dd></div>
+              <div><dt>Dialog</dt><dd>load 8.3 / 6.5 / 0.47 ms, typewriter character 0.34 / 0.33 / 0.093 ms</dd></div>
+              <div><dt><code>ListView</code>, 10,000 items</dt><dd>load 105 / 40 / 5.7 ms, scroll 3 rows 2.1 / 1.1 / 0.055 ms</dd></div>
             </dl>
             <p class="note">Native core / runtime v2 / Unity.</p>
           </div>
