@@ -2534,6 +2534,75 @@ on both runtimes and compares `get_element_rect` with Unity: runtime v1
 8/24 elements, runtime v2 24/24. Runtime v1 is not changed (the settling of
 its Label measures is the cause; recorded, see docs/parity.md).
 
+#### The load (`runtime/v2-load`)
+
+**Lazy interaction Controls.** The Control of a Button or of a
+`focusable="true"` VisualElement holds no value and no behavior, so it is not
+made at the load (305 Buttons and 60 focusable elements of the big document:
+about 49 ms of the 81 ms of Controls). It is made on first need
+(`UxmlRuntimeV2Glue._ctl`), in its place among the root box's children
+(Godot's Tab order is the tree order) and with the state of now: its last
+placement (`UxmlRuntimeV2.placed_of`), its disabled flag and focus mode, its
+accessibility name (the element's current text). What makes one:
+
+- a press on its element (the core's hit test, `_press`);
+- the API: `get_element`, `get_native`, `get_control_for`, `get_native_for`,
+  `get_focus_ring` (`UxmlRuntimeV2Glue.ensure` / `ensure_all`);
+- keyboard and controller navigation: a Node of the root box (`V2Nav`,
+  internal, so the walks of Godot and of user code do not see it) gets every
+  input event in `_input`, before the GUI handles it. For a focus action
+  (`ui_focus_next`, `ui_focus_prev`, `ui_left/up/right/down`) it makes the
+  Controls that Godot's search can pick, from the core's table: for Tab and
+  Shift+Tab (`Control.find_next_valid_focus` / `find_prev_valid_focus` walk
+  the tree from the focus owner, or from the first Control of the viewport)
+  the next and previous valid slots of the focus owner and the first and the
+  last (the walk enters the root box from either end); for an arrow
+  (`Control._get_focus_neighbor`) the nearest valid slots in the direction
+  by Godot's own distance (the shortest distance between the rects, the
+  slots past the focus owner's far edge), with their ties and a margin for
+  Godot's single-precision sums. A ScrollContainer above the focus owner or
+  the document changes Godot's search: every Control is made then. A slot is
+  valid as Godot's walk sees it: shown at its last placement (visible rect
+  not empty) and focus mode ALL (enabled, `focusable` not false);
+- tabindex (Unity's focus ring is a chain of Controls) and Godot's
+  accessibility (its tree is built from nodes): every Control at the load.
+
+Toggles, Sliders, popup fields and the text editors keep their Controls at
+the load: their values live in them (the behaviors are runtime v1's), and an
+editor draws its text. `UxmlRuntimeV2Glue.eager` makes every Control at the
+load: `bench/equiv_v2.gd` loads each covered document with lazy and with
+eager Controls and pushes the same keys into both (Tab and Shift+Tab through
+the document, then random Tabs and arrows): the same elements take the focus
+in the same order (150 documents, 4,458 keys).
+
+**Model steps.** `UxmlParts.expand` walks the model once (the Foldout depths,
+the Columns of multi-column views and the TabViews in the same preorder
+walk) and caches `has_parts` per tag; the glue's index and coverage check
+read each element's attributes once. A parsed author stylesheet is kept per
+(parser, origin, text) (`UxmlLoader._parse_sheet`), as the theme sheets are:
+a document loaded again shares the parsed items and the cascade's compiled
+form of their rules (`UssCascade.CC_AUTHOR`); a sheet with `@import` gets its
+own copies of its import items, which carry the document's sheet indices.
+`UssCascade._index_tree` records each element's prefix and open-tag span, and
+the native setup reads those arrays instead of five property reads per
+element.
+
+**Hooks and drawing.** The slider hooks read the four edge lengths they use
+(`UxmlNativeCascade.style_values`) instead of the whole computed style; a
+background image's box reads the computed style with the origin of
+`background-image` only (`style_of_lite`, the file its url() resolves
+against). A UxmlBoxStyle (a GDScript StyleBox) records its draw once per
+(style, size, version) as the meshes, transforms, colours and image draws of
+its `_draw` (`v2_ops`, the same code path), and the core replays them.
+
+**Restyles bounded per frame.** A layout hook whose writes change the sizes
+it reads can alternate between two results (a MinMaxSlider's dragger given
+the min thumb's class): each write queued a deferred restyle, which Godot's
+message queue runs in the same flush, so the document restyled without end
+and the call queue grew until the process crashed. Past 64 restyles queued
+in one frame (`UxmlDocument._restyles_this_frame`, both runtimes), the next
+runs on the next frame.
+
 ### Native core
 
 `native/` is a Rust crate (godot-rust `godot` 0.5, `api-4-7`). Build and

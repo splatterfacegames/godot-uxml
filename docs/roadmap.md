@@ -125,6 +125,31 @@ Left for phase 3:
 - Gate: listview 10,000 items load and scroll within 2x of Unity (the
   ListView loads on v2; see docs/performance.md for the distance).
 
+## The load toward 2x of Unity (`runtime/v2-load`, in progress)
+
+Done (docs/design.md, "The load"; measured in docs/performance.md):
+
+- Lazy interaction Controls: the Controls of Buttons and focusable
+  VisualElements are made on first need (a press, the API, keyboard and
+  controller navigation from the core's table, every one for tabindex and
+  accessibility); the focus order is that of eager Controls
+  (`bench/equiv_v2.gd`, 150 documents).
+- The model steps in fewer walks (part trees, the glue's index and coverage
+  check), parsed author sheets and their compiled rules shared by the loads
+  of the same text, the native cascade setup reading packed arrays, the
+  slider hooks and background-image boxes reading only the style values they
+  use, UxmlBoxStyle draws replayed natively.
+- A crash fixed: an alternating layout hook restyled forever in one flush of
+  the message queue (restyles are bounded per frame).
+
+Left (the distance to 2x of Unity is in docs/performance.md):
+
+- The Controls that hold values (Toggles, Sliders, popup fields) and the
+  text editors (a core-drawn unfocused text field, its LineEdit made on
+  focus or a click): about 30 ms of the big document.
+- Phase 5 below: the parse into the table and the elements as handles, the
+  part trees and the index native, the cascade's inputs from the table.
+
 ## Phase 4: transitions, transforms, filters
 
 - USS transitions on the table (the cascade's overrides already run in the

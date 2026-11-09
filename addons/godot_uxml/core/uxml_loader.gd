@@ -52,7 +52,9 @@ static func load_source(
 	# scope to their clones. A document without template syntax skips this
 	# step and loads exactly as before.
 	var style_from := {}
-	var templated := UxmlTemplates.has_template_syntax(doc.root)
+	# A tag name is in the text: without these words no element has them.
+	var maybe := source.contains("Template") or source.contains("Instance") or source.contains("AttributeOverrides")
+	var templated := maybe and UxmlTemplates.has_template_syntax(doc.root)
 	if templated:
 		# Entry-file checks run on the authored tree; each template file
 		# reports its own content once.
@@ -73,7 +75,9 @@ static func load_source(
 	var chain: Array = [] ## paths currently being loaded (cycle detection)
 	var style_reported := {} ## template <Style> failures, once per location
 
-	for ref in _collect_style_refs(doc.root):
+	# Without "Style" in the text (and no template content) no <Style>.
+	var refs: Array = _collect_style_refs(doc.root) if templated or source.contains("Style") else []
+	for ref in refs:
 		var from = style_from.get(ref["element"])
 		if ref.has("problem"):
 			if from == null: # a template file reported its own
