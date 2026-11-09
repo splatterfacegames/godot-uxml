@@ -388,6 +388,8 @@ func _collection_of(content: UxmlElement) -> UxmlElement:
 func _make_proxies() -> void:
 	var els: Array = cascade.els
 	var behaviors := {}
+	_lazy = {}
+	var lazy := not eager and not _needs_all()
 	for i in els.size():
 		var el: UxmlElement = els[i]
 		var c: Control = null
@@ -428,20 +430,15 @@ func _make_proxies() -> void:
 				doc._natives[el.part_of] = c
 			else:
 				continue
+		elif _lazy_kind(el):
+			# Made on first need (_ctl): the focus, a press, the API.
+			if lazy:
+				_lazy[i] = el
+			else:
+				_make_lazy(i, el)
+			continue
 		else:
 			match el.local:
-				"Button":
-					var b := Button.new()
-					b.flat = true
-					for slot in ["normal", "hover", "pressed", "disabled", "focus", "hover_pressed"]:
-						b.add_theme_stylebox_override(slot, _no_box())
-					b.focus_mode = Control.FOCUS_ALL
-					b.accessibility_name = UxmlParts._attr(el, "text")
-					var nm: String = doc._el_names.get(el, "")
-					b.pressed.connect(func(): doc.button_pressed.emit(nm))
-					b.button_down.connect(doc._set_state.bind(el, "active", true))
-					b.button_up.connect(doc._set_state.bind(el, "active", false))
-					c = b
 				"Toggle", "RadioButton":
 					var t := UxmlToggle.new()
 					t.radio = el.local == "RadioButton"
@@ -462,28 +459,12 @@ func _make_proxies() -> void:
 						c = Control.new()
 						c.focus_mode = Control.FOCUS_ALL
 						c.gui_input.connect(_on_scroll_key.bind(el))
-				"VisualElement", "TemplateContainer":
-					if UxmlParts._attr(el, "focusable") == "true":
-						c = Control.new()
-						c.focus_mode = Control.FOCUS_ALL
 			if c == null:
 				continue
-			if el.has_attribute("focusable"):
-				c.focus_mode = Control.FOCUS_ALL if UxmlParts._attr(el, "focusable") == "true" else Control.FOCUS_NONE
-			var tip := UxmlParts._attr(el, "tooltip")
-			if not tip.is_empty():
-				c.tooltip_text = tip
-			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			c.set_meta("uxml_focus", c.focus_mode)
-			doc._natives[el] = c
+			_common_setup(el, c)
 		if not behaviors.has(el) and el.local in ["Toggle", "RadioButton"]:
 			behaviors[el] = UxmlBehaviors.ToggleBehavior.new()
-		c.name = "uxml-v2-%d" % i
-		proxies[i] = c
-		_proxy_el[c] = el
-		doc._controls[el] = c
-		doc._el_of[c] = el
-		c.visible = false
+		_register(i, el, c)
 		if editors.has(i):
 			# The editor sits in a Control at its field's place, as runtime
 			# v1's sits in its field's Control: its position and size are
@@ -530,6 +511,325 @@ func _make_proxies() -> void:
 		if hb is V2SliderBehavior or hb is V2MinMaxBehavior or hb is V2ScrollViewBehavior \
 				or hb is V2CollectionBehavior:
 			_hooked.append(hb)
+	_index_slots()
+	if not _lazy.is_empty() and _nav == null:
+		# Keyboard and controller navigation into an element whose Control
+		# is not made yet: the Controls Godot's search can pick are made
+		# before the GUI sees the event (Node._input runs first).
+		_nav = V2Nav.new()
+		_nav.glue = self
+		_nav.name = "uxml-v2-nav"
+		doc._root_box.add_child(_nav, false, Node.INTERNAL_MODE_BACK)
+
+
+# ---------------------------------------------------------------------------
+# Lazy interaction Controls
+# ---------------------------------------------------------------------------
+# The Controls of Buttons and focusable VisualElements hold no value and no
+# behavior: they are made on first need (_ctl), not at the load. A Control
+# made later is the one the load would have made, in the same place among
+# the root box's children (Godot's Tab order is the tree order) and with the
+# state of now: its placement (UxmlRuntimeV2.placed_of), its disabled flag,
+# its accessibility name. What makes one:
+#   - a press on its element (the core's hit test: _press);
+#   - the API: get_element, get_native, get_control_for, get_native_for,
+#     get_focus_ring (UxmlDocument calls ensure());
+#   - keyboard and controller navigation: before the GUI handles a focus
+#     action, the Controls that Godot's search can pick are made
+#     (_prepare_navigation: the next and previous valid ones in tree order,
+#     the first and last, the nearest in the direction of an arrow);
+#   - tabindex (Unity's focus ring is a chain of Controls) and Godot's
+#     accessibility (the tree is built from nodes): every Control at the load.
+
+## Make every interaction Control at the load (tests, equivalence: the
+## reference of the lazy Controls).
+static var eager := false
+## Element index -> UxmlElement whose Control is not made yet.
+var _lazy: Dictionary = {}
+var _nav: Node = null
+
+
+class V2Nav extends Node:
+	var glue
+
+	func _input(ev: InputEvent) -> void:
+		if glue != null:
+			glue._prepare_navigation(ev)
+
+
+## Whether the Control of `el` is made on first need.
+static func _lazy_kind(el: UxmlElement) -> bool:
+	if el.part_of != null:
+		return false
+	match el.local:
+		"Button":
+			return true
+		"VisualElement", "TemplateContainer":
+			return UxmlParts._attr(el, "focusable") == "true"
+	return false
+
+
+## Every Control at the load: tabindex builds Unity's focus ring over the
+## Controls, Godot's accessibility tree is built from them.
+func _needs_all() -> bool:
+	if doc.is_inside_tree() and doc.get_tree().is_accessibility_enabled():
+		return true
+	for el in cascade.els:
+		if el.has_attribute("tabindex"):
+			return true
+	return false
+
+
+## The Control of a lazy kind (a flat Button, a plain focusable Control).
+func _make_lazy(i: int, el: UxmlElement) -> Control:
+	var c: Control
+	if el.local == "Button":
+		var b := Button.new()
+		b.flat = true
+		for slot in ["normal", "hover", "pressed", "disabled", "focus", "hover_pressed"]:
+			b.add_theme_stylebox_override(slot, _no_box())
+		b.focus_mode = Control.FOCUS_ALL
+		b.accessibility_name = UxmlParts._attr(el, "text") if rt == null else String(rt.call("get_text", i))
+		var nm: String = doc._el_names.get(el, "")
+		b.pressed.connect(func(): doc.button_pressed.emit(nm))
+		b.button_down.connect(doc._set_state.bind(el, "active", true))
+		b.button_up.connect(doc._set_state.bind(el, "active", false))
+		c = b
+	else:
+		c = Control.new()
+		c.focus_mode = Control.FOCUS_ALL
+	_common_setup(el, c)
+	_register(i, el, c)
+	_add_ordered(i, c)
+	c.focus_entered.connect(_on_focus.bind(el, true))
+	c.focus_exited.connect(_on_focus.bind(el, false))
+	return c
+
+
+## The attributes every non-part interaction Control takes.
+func _common_setup(el: UxmlElement, c: Control) -> void:
+	if el.has_attribute("focusable"):
+		c.focus_mode = Control.FOCUS_ALL if UxmlParts._attr(el, "focusable") == "true" else Control.FOCUS_NONE
+	var tip := UxmlParts._attr(el, "tooltip")
+	if not tip.is_empty():
+		c.tooltip_text = tip
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	c.set_meta("uxml_focus", c.focus_mode)
+	doc._natives[el] = c
+
+
+func _register(i: int, el: UxmlElement, c: Control) -> void:
+	c.name = "uxml-v2-%d" % i
+	proxies[i] = c
+	_proxy_el[c] = el
+	doc._controls[el] = c
+	doc._el_of[c] = el
+	c.visible = false
+
+
+## Adds Control `c` of element i to the root box in document order (at the
+## load, in order; later before the next made Control).
+func _add_ordered(i: int, c: Control) -> void:
+	var box := doc._root_box
+	var before: Node = null
+	if not _proxy_idx.is_empty():
+		var w := _proxy_idx.bsearch(i)
+		for k in range(w, _proxy_idx.size()):
+			var n = _proxy_ctls[k]
+			if n != null and _proxy_idx[k] != i:
+				before = _edit_wrap.get(_proxy_idx[k], n)
+				break
+	box.add_child(c)
+	if before != null and before.get_parent() == box:
+		box.move_child(c, before.get_index())
+
+
+## The interaction slots in document order (made and lazy), for the
+## placement (place_states) and the search of _prepare_navigation.
+func _index_slots() -> void:
+	var all: Array = proxies.keys() + _lazy.keys()
+	all.sort()
+	_proxy_idx = PackedInt32Array(all)
+	_proxy_ctls = []
+	_proxy_edit = PackedByteArray()
+	for i in _proxy_idx:
+		_proxy_ctls.append(proxies.get(i))
+		_proxy_edit.append(1 if editors.has(i) else 0)
+
+
+## The interaction Control of element i, made now if it is lazy; null for
+## an element without one.
+func _ctl(i: int) -> Control:
+	var c = proxies.get(i)
+	if c != null or not _lazy.has(i):
+		return c
+	var el: UxmlElement = _lazy[i]
+	_lazy.erase(i)
+	c = _make_lazy(i, el)
+	_proxy_ctls[_proxy_idx.bsearch(i)] = c
+	# The state of now: disabled, placement.
+	if rt != null:
+		var dis: PackedByteArray = _flags[1]
+		var off := i < dis.size() and dis[i] == 1
+		if c is BaseButton:
+			(c as BaseButton).disabled = off
+		var fm: int = Control.FOCUS_NONE if off else int(c.get_meta("uxml_focus", c.focus_mode))
+		if c.focus_mode != fm:
+			c.focus_mode = fm
+		var p: Array = rt.call("placed_of", i)
+		if p.size() == 6:
+			c.position = p[0]
+			c.size = p[1]
+			c.visible = bool(p[4]) and (p[3] as Vector2).x > 0.0 and (p[3] as Vector2).y > 0.0
+	return c
+
+
+## The Control of `el` for the API (made now if it is lazy).
+func ensure(el: UxmlElement) -> void:
+	if not _lazy.is_empty() and el != null:
+		var i := index_of(el)
+		if i >= 0:
+			_ctl(i)
+
+
+func ensure_all() -> void:
+	for i in _lazy.keys():
+		_ctl(i)
+
+
+const _NAV_ACTIONS := [&"ui_focus_next", &"ui_focus_prev", &"ui_left", &"ui_up", &"ui_right", &"ui_down"]
+
+
+## Before the GUI handles a focus action (Viewport._gui_input_event), makes
+## the Controls its search can pick: Control.find_next_valid_focus /
+## find_prev_valid_focus walk the tree from the focus owner (or the first
+## Control of the viewport), and _get_focus_neighbor takes the nearest
+## focusable Control in the direction. A slot is valid as Godot's walk
+## sees it: shown at its last placement, focus mode ALL.
+func _prepare_navigation(ev: InputEvent) -> void:
+	if _lazy.is_empty() or rt == null or not ev.is_pressed():
+		return
+	var act := -1
+	for k in _NAV_ACTIONS.size():
+		if ev.is_action_pressed(_NAV_ACTIONS[k], true, true) or ev.is_action_pressed(_NAV_ACTIONS[k]):
+			act = k
+			break
+	if act < 0:
+		return
+	var vp := doc._root_box.get_viewport()
+	if vp == null:
+		return
+	var from: Control = vp.gui_get_focus_owner()
+	if from == null:
+		for ch in vp.get_children(true):
+			if ch is Control and (ch as Control).is_visible_in_tree() and not (ch as Control).is_set_as_top_level():
+				from = ch
+				break
+	if from == null:
+		return
+	var valid := _valid_slots()
+	var at := -1  # the slot of the focus owner
+	var fel = _proxy_el.get(from)
+	if fel != null:
+		at = _proxy_idx.bsearch(index_of(fel))
+	if act < 2:
+		# Tab order: the next and previous valid slot of the focus owner, the
+		# first and the last (the walk enters the root box from either end).
+		var want := {}
+		for k in valid.size():
+			if valid[k] == 1:
+				want[k] = true
+				break
+		for k in range(valid.size() - 1, -1, -1):
+			if valid[k] == 1:
+				want[k] = true
+				break
+		if at >= 0:
+			for k in range(at + 1, valid.size()):
+				if valid[k] == 1:
+					want[k] = true
+					break
+			for k in range(at - 1, -1, -1):
+				if valid[k] == 1:
+					want[k] = true
+					break
+		for k in want:
+			_ctl(_proxy_idx[k])
+		return
+	# An arrow: Control._get_focus_neighbor. A ScrollContainer above the
+	# focus owner or the document repositions the search: every Control.
+	var n: Node = from
+	while n != null:
+		if n is ScrollContainer:
+			ensure_all()
+			return
+		n = n.get_parent()
+	n = doc._root_box
+	while n != null:
+		if n is ScrollContainer:
+			ensure_all()
+			return
+		n = n.get_parent()
+	var side: int = [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM][act - 2]
+	if not from.get_focus_neighbor(side).is_empty():
+		return
+	var vdir: Vector2 = [Vector2(-1, 0), Vector2(0, -1), Vector2(1, 0), Vector2(0, 1)][act - 2]
+	var fr := from.get_global_rect()
+	var maxd: float = maxf(vdir.dot(fr.position), vdir.dot(fr.end))
+	var g := doc._root_box.get_global_transform()
+	var gs := g.get_scale()
+	var dists := {}
+	var best := INF
+	for k in valid.size():
+		if valid[k] == 0 or k == at:
+			continue
+		var p: Array = rt.call("placed_of", _proxy_idx[k])
+		var c = _proxy_ctls[k]
+		var rc: Rect2
+		if c != null:
+			rc = (c as Control).get_global_rect()
+		else:
+			rc = Rect2(g * (p[0] as Vector2), gs * (p[1] as Vector2))
+		if maxf(vdir.dot(rc.position), vdir.dot(rc.end)) <= maxd + 0.00001:
+			continue
+		var ab: Vector2 = (rc.get_center() - fr.get_center()).abs() - 0.5 * rc.size - 0.5 * fr.size
+		var d := 0.0
+		if ab.x > 0.0:
+			d += ab.x * ab.x
+		if ab.y > 0.0:
+			d += ab.y * ab.y
+		dists[k] = d
+		best = minf(best, d)
+	# The nearest, with its ties (Godot breaks them by alignment), and a
+	# margin for the rounding of Godot's single-precision sums.
+	var lim := best + maxf(1e-3, best * 1e-4)
+	for k in dists:
+		if dists[k] <= lim and _proxy_ctls[k] == null:
+			_ctl(_proxy_idx[k])
+
+
+## Per slot: 1 when Godot's walk takes its Control (shown at its last
+## placement, focus mode ALL, enabled).
+func _valid_slots() -> PackedByteArray:
+	var v: PackedByteArray = rt.call("placed_shown", _proxy_idx)
+	var dis: PackedByteArray = _flags[1]
+	for k in _proxy_idx.size():
+		if v[k] == 0:
+			continue
+		var i := _proxy_idx[k]
+		var c = _proxy_ctls[k]
+		var fm: int
+		if c != null:
+			if not (c as Control).is_visible_in_tree():
+				v[k] = 0
+				continue
+			fm = (c as Control).focus_mode
+		else:
+			fm = Control.FOCUS_NONE if (i < dis.size() and dis[i] == 1) else \
+				(Control.FOCUS_NONE if UxmlParts._attr(_lazy[i], "focusable") == "false" else Control.FOCUS_ALL)
+		if fm != Control.FOCUS_ALL:
+			v[k] = 0
+	return v
 
 
 func _on_focus(el: UxmlElement, on: bool) -> void:
@@ -547,15 +847,8 @@ func _on_focus(el: UxmlElement, on: bool) -> void:
 ## clips of their clipping ancestors) and shows those that are shown: one
 ## native call for all of them (UxmlRuntimeV2.place_states).
 func _place_proxies() -> void:
-	if proxies.is_empty():
+	if _proxy_idx.is_empty():
 		return
-	if _proxy_idx.size() != proxies.size():
-		_proxy_idx = PackedInt32Array(proxies.keys())
-		_proxy_ctls = []
-		_proxy_edit = PackedByteArray()
-		for i in _proxy_idx:
-			_proxy_ctls.append(proxies[i])
-			_proxy_edit.append(1 if editors.has(i) else 0)
 	var st: Array = rt.call("place_states", _proxy_idx)
 	var rects: PackedVector2Array = st[0]
 	var shown_f: PackedByteArray = st[1]
@@ -567,7 +860,7 @@ func _place_proxies() -> void:
 	# visibility changes, the editors.
 	var vis_k: PackedInt32Array = ClassDB.class_call_static(&"UxmlRuntimeV2", &"apply_rects", _proxy_ctls, rects, shown_f, which, _proxy_edit)
 	for k in vis_k:
-		var c: Control = _proxy_ctls[which[k]]
+		var c: Control = _proxy_ctls[which[k]]  # vis_k: made Controls only
 		var shown := shown_f[k] == 1 and rects[k * 4 + 3].x > 0.0 and rects[k * 4 + 3].y > 0.0
 		if c.visible != shown:
 			c.visible = shown
@@ -864,6 +1157,13 @@ func dispose() -> void:
 	if _menu_anchor != null and is_instance_valid(_menu_anchor):
 		_menu_anchor.queue_free()
 	_menu_anchor = null
+	if _nav != null and is_instance_valid(_nav):
+		_nav.glue = null
+		if _nav.get_parent() != null:
+			_nav.get_parent().remove_child(_nav)
+		_nav.free()
+	_nav = null
+	_lazy = {}
 	for c in [_probe, _bprobe] + proxies.values():
 		if c != null and is_instance_valid(c):
 			if c.get_parent() != null:
@@ -936,6 +1236,7 @@ func _on_model_changed(el: UxmlElement) -> void:
 		return
 	_dirty[el] = true
 	if el.changed_attribute == "tabindex":
+		ensure_all()
 		doc._attrs.rebuild_focus_ring()
 	if el.changed_attribute == "text" and el.local == "Label":
 		var i := index_of(el)
@@ -1284,7 +1585,7 @@ func _target_at(p: Vector2) -> UxmlElement:
 	var par: PackedInt32Array = cascade._parent
 	while i > 0:
 		var el: UxmlElement = els[i]
-		if proxies.has(i) or (el.part_of == null and doc._behaviors.has(el)):
+		if proxies.has(i) or _lazy.has(i) or (el.part_of == null and doc._behaviors.has(el)):
 			return el
 		i = par[i]
 	return null
@@ -1296,7 +1597,7 @@ func _press(mb: InputEventMouseButton) -> void:
 	if el == null:
 		return
 	var i := index_of(el)
-	var c: Control = proxies.get(i)
+	var c: Control = _ctl(i)
 	if is_disabled(el):
 		return
 	var b = doc._behaviors.get(el)
@@ -1342,7 +1643,7 @@ func _release(mb: InputEventMouseButton) -> void:
 			return
 	if is_disabled(el) or _target_at(mb.position) != el:
 		return
-	var c: Control = proxies.get(index_of(el))
+	var c: Control = _ctl(index_of(el))
 	if c is UxmlToggle:
 		(c as UxmlToggle)._activate()
 	elif c is Button:

@@ -398,3 +398,48 @@ func test_editor_clipped_by_overflow_hidden() -> void:
 	var ed := UxmlParts.find_part(doc.get_element_model("tf"), "editor")
 	h.eq(Rect2(wrap.position + le.position, le.size), doc.get_element_rect(ed), "the editor keeps its rect")
 	_unload(doc)
+
+
+## The Controls of Buttons and focusable VisualElements are made on first
+## need (UxmlRuntimeV2Glue, "Lazy interaction Controls"): none at the load;
+## Tab and the arrows reach them; a click and the API make them.
+func test_lazy_interaction_controls() -> void:
+	if not _native():
+		return
+	var doc := _doc('''
+<ui:VisualElement style="flex-direction: row;">
+  <ui:Button name="a" text="A" style="width: 60px;" />
+  <ui:Button name="b" text="B" style="width: 60px;" />
+  <ui:Button name="c" text="C" enabled="false" style="width: 60px;" />
+  <ui:Button name="d" text="D" style="width: 60px;" />
+</ui:VisualElement>
+<ui:VisualElement name="fv" focusable="true" style="height: 20px; width: 60px;" />''')
+	await h.process_frame
+	var g: UxmlRuntimeV2Glue = doc._v2
+	h.eq(g.proxies.size(), 0, "no interaction Control at the load")
+	h.eq(g._lazy.size(), 5, "five made on first need")
+	await _press_key(KEY_TAB)
+	var fo := doc.get_viewport().gui_get_focus_owner()
+	h.eq(doc.get_element_for(fo), doc.get_element_model("a"), "Tab reaches the first Button, made on the key")
+	await _press_key(KEY_RIGHT)
+	fo = doc.get_viewport().gui_get_focus_owner()
+	h.eq(doc.get_element_for(fo), doc.get_element_model("b"), "the right arrow reaches its neighbour")
+	await _press_key(KEY_TAB)
+	fo = doc.get_viewport().gui_get_focus_owner()
+	h.eq(doc.get_element_for(fo), doc.get_element_model("d"), "Tab skips the disabled Button")
+	h.check(not g.proxies.has(g.index_of(doc.get_element_model("c"))), "the disabled Button has no Control yet")
+	await _press_key(KEY_TAB)
+	fo = doc.get_viewport().gui_get_focus_owner()
+	h.eq(doc.get_element_for(fo), doc.get_element_model("fv"), "then the focusable VisualElement")
+	fo.release_focus()
+	var got := []
+	doc.button_pressed.connect(func(n): got.append(n))
+	_click(doc, _center(doc, doc.get_element_model("c")))
+	h.eq(got, [], "a click on the disabled Button emits nothing")
+	var c := doc.get_native("c") as Button
+	h.check(c != null and c.disabled, "get_native makes the Control, disabled")
+	h.eq(c.get_index() < doc.get_native("d").get_index(), true, "in document order among the root box's children")
+	h.eq(c.position, doc.get_element_rect(doc.get_element_model("c")).position, "at its element's rect")
+	doc.set_text("c", "See")
+	h.eq(c.accessibility_name, "See", "its accessibility name follows set_text")
+	_unload(doc)
