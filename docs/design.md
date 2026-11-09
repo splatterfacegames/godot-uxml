@@ -2671,15 +2671,14 @@ other field calls make it, navigation). A model edit of a lazy Toggle makes
 it with the value it had, so the edit reaches it as it reaches a Toggle made
 at the load (`value_changed` included).
 
-**Small loads.** An author sheet without imports is spliced into a cascade
-as a cached block, as the theme sheets are (`UssCascade._add_theme_block`
-with a scope: the block per origin and parsed items at the author layer,
-the scope of its rules set per cascade). The value checks of a cached parsed
-sheet are kept with it (`UxmlLoader._check_values`: the diagnostics per
-declaration; only the url() files are looked up again). The editors, the
-fonts and the images read the computed style with the origins
-`UxmlStyleApplier` uses only (`style_of_lite`, `_APPLY_ORIGINS`), not every
-inheritance wrap.
+**Small loads.** The value checks of a cached parsed sheet are kept with it
+(`UxmlLoader._check_values`: the diagnostics per declaration; only the
+url() files are looked up again). The editors, the fonts and the images
+read the computed style with the origins `UxmlStyleApplier` uses only
+(`style_of_lite`, `_APPLY_ORIGINS`), not every inheritance wrap. Splicing
+author sheets as cached blocks, as the theme sheets are, was tried and
+dropped: `reload_stylesheet` patches the rules of a cascade in place, and a
+block's rules are shared.
 
 ### Native core
 

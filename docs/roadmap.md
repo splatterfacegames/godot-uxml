@@ -152,9 +152,8 @@ element table"):
   rows.
 - Lazy Toggle Controls (with the lazy Buttons and focusable elements; the
   `:checked` state from the value at the load).
-- Small loads: author sheets spliced as cached blocks, the value checks of a
-  parsed sheet kept with it, the editors' and fonts' styles without the
-  inheritance wraps they do not read.
+- Small loads: the value checks of a parsed sheet kept with it, the
+  editors' and fonts' styles without the inheritance wraps they do not read.
 - The bench and test folders per checkout (`UxmlBenchDir`).
 
 Left (the distance to 2x of Unity is in docs/performance.md):
