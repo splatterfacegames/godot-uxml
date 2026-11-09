@@ -684,7 +684,7 @@ class CollectionBehavior extends UxmlBehaviors.Behavior:
 		_update_size_field()
 
 	func _handle_column(area: UxmlElement) -> int:
-		var p = doc._parents.get(area)
+		var p = doc._parent_el(area)
 		return -1 if p == null else int(p.get_meta(&"uxml_column", -1))
 
 	func _initial_sort() -> Array:
@@ -1961,7 +1961,7 @@ class TabViewBehavior extends UxmlBehaviors.Behavior:
 	func tab_order() -> Array:
 		var out: Array = []
 		for t in _tabs:
-			out.append(doc._el_names.get(t, ""))
+			out.append(doc._name_of(t))
 		return out
 
 	func restore_view_state(d: Dictionary) -> void:

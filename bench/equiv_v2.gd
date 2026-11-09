@@ -421,10 +421,10 @@ func _settle(docs: Array) -> void:
 
 
 func _apply(d: UxmlDocument, op: int, k: int, vocab: Array) -> void:
-	var els: Array = d._v2.cascade.els if d._v2 != null else d._cascade.els
-	if k >= els.size():
+	var n_els: int = d._v2.cascade.count() if d._v2 != null else d._cascade.els.size()
+	if k >= n_els:
 		return
-	var el: UxmlElement = els[k]
+	var el: UxmlElement = d._v2.cascade.el(k) if d._v2 != null else d._cascade.els[k]
 	var r := RandomNumberGenerator.new()
 	r.seed = hash([op, k, _checks])
 	if OS.get_environment("EQUIV_V2_OPS") != "" and d.get_runtime() == 2:

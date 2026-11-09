@@ -243,11 +243,11 @@ func setup() -> void:
 		for desc in model.bindings.get(el, []):
 			_add(el, desc, "uxml")
 	for n in _named_sources:
-		var el: UxmlElement = _doc._by_name.get(n)
+		var el: UxmlElement = _doc._lookup_name(n)
 		if el != null:
 			_el_source[el] = _named_sources[n]
 	for n in _named_paths:
-		var el: UxmlElement = _doc._by_name.get(n)
+		var el: UxmlElement = _doc._lookup_name(n)
 		if el != null:
 			var parts = UxmlBindings.parse_path(_named_paths[n])
 			if parts != null:
@@ -285,7 +285,7 @@ func element_of(target: Variant) -> UxmlElement:
 	if target is UxmlElement:
 		return target
 	if target is String or target is StringName:
-		return _doc._by_name.get(String(target))
+		return _doc._lookup_name(String(target))
 	if target is Control:
 		var el = _doc._el_of.get(target)
 		if el != null:
@@ -355,7 +355,7 @@ func get_data_source_type(target: Variant) -> String:
 	while cur != null:
 		if _el_type.has(cur):
 			return _el_type[cur]
-		cur = _doc._parents.get(cur)
+		cur = _doc._parent_el(cur)
 	return ""
 
 
@@ -386,7 +386,7 @@ func _hier(el: UxmlElement) -> Array:
 		if cur == root:
 			out = [_root_source, parts]
 			break
-		cur = _doc._parents.get(cur)
+		cur = _doc._parent_el(cur)
 		out = [null, parts]
 	_ctx[el] = out
 	return out
@@ -1200,7 +1200,7 @@ func _store_root_copy(rec: Dictionary, copy: Variant) -> void:
 			_ctx.clear()
 			_gen += 1
 			return
-		cur = _doc._parents.get(cur)
+		cur = _doc._parent_el(cur)
 	_root_source = copy
 	_ctx.clear()
 	_gen += 1

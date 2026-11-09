@@ -11,6 +11,7 @@ mod parse;
 mod prof;
 mod v2;
 mod v2button;
+pub mod v2model;
 mod v2text;
 
 struct UxmlNativeExtension;

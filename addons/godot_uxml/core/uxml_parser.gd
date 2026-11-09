@@ -92,7 +92,7 @@ func _parse_native(source: String) -> Dictionary:
 		e.source_end = se[k]
 		els[k] = e
 		if parent[k] >= 0:
-			(els[parent[k]] as UxmlElement).children.append(e)
+			(els[parent[k]] as UxmlElement)._children.append(e)
 	var ael: PackedInt32Array = d["attr_el"]
 	var an: PackedStringArray = d["attr_name"]
 	var av: PackedStringArray = d["attr_value"]

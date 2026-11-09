@@ -163,6 +163,8 @@ static func uncovered(model: UxmlDocumentModel) -> String:
 		return "no document"
 	if not model.bindings.is_empty():
 		return "data bindings"
+	if model.table != null:
+		return _uncovered_table(model)
 	var stack: Array = [model.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
@@ -197,6 +199,43 @@ static func uncovered(model: UxmlDocumentModel) -> String:
 	return ""
 
 
+## uncovered() on the rows of runtime v2's table (the same checks, the same
+## first element in preorder).
+static func _uncovered_table(model: UxmlDocumentModel) -> String:
+	var t: Object = model.table
+	if _ATTR_LISTS.is_empty():
+		for k in CONTROL_ATTRS:
+			_ATTR_LISTS[k] = PackedStringArray(CONTROL_ATTRS[k])
+	var hit: Array = t.first_uncovered(PackedStringArray(TAGS.keys()), PackedStringArray(PART_KINDS.keys()),
+		_ATTR_LISTS, PackedStringArray(COMMON_ATTRS.keys()))
+	var lim: int = t.size() if hit.is_empty() else int(hit[0])
+	for i in t.rows_named(PackedStringArray(["TextField", "ListView"]), false):
+		if i >= lim:
+			break
+		var el := model.handle(i)
+		match el.local:
+			"TextField":
+				if UxmlInputParts.has_inner_scroll_view(el):
+					return "a TextField with a scroller"
+			"ListView":
+				if UxmlContainerParts.is_dynamic(el):
+					return "a DynamicHeight ListView"
+				if UxmlParts._bool(el, "horizontal-scrolling", false):
+					return "a ListView with horizontal scrolling"
+	if hit.is_empty():
+		return ""
+	var local: String = t.local(hit[0])
+	match int(hit[1]):
+		1:
+			return "part <%s>" % local
+		2:
+			return "element <%s>" % local
+	return "attribute %s of <%s>" % [hit[2], local]
+
+
+static var _ATTR_LISTS := {}
+
+
 static func doc_native_layout() -> bool:
 	return ClassDB.class_exists("UxmlNativeCascade")
 
@@ -219,17 +258,28 @@ func load() -> String:
 	# Control part trees become model elements (as runtime v1's _index
 	# builds them; once per model).
 	# Collection views: their item templates and pools (UxmlDocument._index).
+	var m: UxmlDocumentModel = doc._doc
+	doc._v2_maps = self
 	var collections := false
-	if not doc._doc.has_meta(&"uxml_parts_expanded"):
+	if not m.has_meta(&"uxml_parts_expanded"):
 		collections = doc._prepare_collections()
-	UxmlParts.expand(doc._doc)
-	if collections:
-		doc._rt_warnings.append_array(UxmlBindings.extract(doc._doc))
-		if not doc._doc.bindings.is_empty():
+	UxmlParts.expand(m)
+	if collections and (m.table == null or m.table.has_local(_BINDING_TAGS)):
+		if m.table != null:
+			m.drop_table()
+		doc._rt_warnings.append_array(UxmlBindings.extract(m))
+		if not m.bindings.is_empty():
+			doc._v2_maps = null
 			return "data bindings"
+	if m.table == null:
+		# A model of objects (templates, another load path): its elements
+		# become the handles of a new table.
+		m.adopt_objects()
+		m.sync_parts()
 	t0 = _step("v2: part trees", t0)
-	cascade = UssCascade.new(doc._doc)
+	cascade = UssCascade.new(m)
 	if cascade._native == null:
+		doc._v2_maps = null
 		return "no native cascade"
 	cascade._native.call("set_table_mode", true)
 	t0 = _step("v2: cascade setup", t0)
@@ -277,8 +327,10 @@ func load() -> String:
 		return why
 	_duplicates()
 	var on_changed := _on_model_changed
-	for el in cascade.els:
-		el.changed = on_changed
+	m.on_handle = func(e: UxmlElement) -> void: e.changed = on_changed
+	for e in m._handles:
+		if e != null:
+			e.changed = on_changed
 	for i in editors:
 		rt.call("set_edit_control", i, editors[i])
 	_flags = cascade.effective_flags()
@@ -304,71 +356,60 @@ func load() -> String:
 
 
 ## The kinds the core gives the elements (0: it decides), and the
-## document's element maps: names (first wins, parts excluded), parents.
+## document's names (first wins, parts and pooled rows excluded) and pooled
+## rows, from the rows of the table (UxmlDocument._named and the other
+## element maps ask the glue on runtime v2).
 func _index() -> PackedByteArray:
-	var els: Array = cascade.els
-	var par: PackedInt32Array = cascade._parent
-	var kinds := PackedByteArray()
-	var n_els := els.size()
-	kinds.resize(n_els)
-	_has_tabindex = false
+	var t: Object = doc._doc.table
 	# The elements of the pooled rows of collection views: no names (the
 	# rows repeat them; runtime v1's _pooled).
 	var pooled := {}
-	for el in els:
-		if _COLLECTIONS.has(el.local) and el._part_of == null:
-			for row in UxmlContainerParts.rows_of(el):
-				for sub in row.walk():
-					if sub.part_of == null:
-						pooled[sub] = true
+	var pl := PackedInt32Array()
+	_pooled_ix = {}
+	for ci in t.rows_named(PackedStringArray(_COLLECTIONS.keys()), false):
+		for row in UxmlContainerParts.rows_of(cascade.el(ci)):
+			for sub in row.walk():
+				if sub.part_of == null:
+					pooled[sub] = true
+					var k := cascade.index_of(sub)
+					if k >= 0:
+						_pooled_ix[k] = true
+						pl.append(k)
 	doc._pooled = pooled
-	var parents := doc._parents
-	var by_name := doc._by_name
-	var el_names := doc._el_names
-	for i in n_els:
-		var el: UxmlElement = els[i]
-		if i > 0:
-			parents[el] = els[par[i]]
-		var local := el.local
-		if el._part_of != null:
-			var k: int = PART_KINDS.get(local, 0)
-			var role := el.part_role
-			if role == "editor":
-				k = K_EDIT
-			if UNPICKED.has(role) or UxmlControlFactory.UNPICKED_CONTAINER_PARTS.has(role):
-				k |= F_UNPICKED
-			kinds[i] = k | F_ATTRS_OK | F_PART
-			for a in el.attributes:
-				if a["name"] == "tabindex":
-					_has_tabindex = true
-			continue
-		var ck: int = _CONTROL_KINDS.get(local, 0)
-		if ck != 0:
-			kinds[i] = ck | F_ATTRS_OK
-		# The first `name` (get_attribute) and whether a tabindex is set.
-		var nm = null
-		for a in el.attributes:
-			var an: String = a["name"]
-			if an == "name":
-				if nm == null:
-					nm = a["value"]
-			elif an == "tabindex":
-				_has_tabindex = true
-		if not pooled.is_empty() and pooled.has(el):
-			kinds[i] |= F_PART
-			continue
-		if nm != null and not by_name.has(String(nm)):
-			by_name[String(nm)] = el
-			el_names[el] = String(nm)
+	if _UNPICKED_ROLES.is_empty():
+		for r in UNPICKED:
+			_UNPICKED_ROLES[r] = true
+		for r in UxmlControlFactory.UNPICKED_CONTAINER_PARTS:
+			_UNPICKED_ROLES[r] = true
+	var kinds: PackedByteArray = t.v2_kinds(PART_KINDS, _UNPICKED_ROLES, _CONTROL_KINDS, pl)
+	_has_tabindex = t.any_attr("tabindex")
+	_names = t.name_index(pl)
+	_row_names = {}
+	for nm in _names:
+		_row_names[_names[nm]] = nm
 	return kinds
+
+
+## Element names (first wins) -> row, and row -> name, of this load; the
+## rows of pooled collection rows.
+var _names: Dictionary = {}
+var _row_names: Dictionary = {}
+var _pooled_ix: Dictionary = {}
+static var _UNPICKED_ROLES := {}
+static var _BINDING_TAGS := PackedStringArray(["Bindings", "DataBinding"])
+
+
+## The name of `el` in the document's names ("" for none, a part, a later
+## element of the same name).
+func name_of(el: UxmlElement) -> String:
+	return _row_names.get(index_of(el), "")
 
 
 ## Duplicate names are diagnosed as runtime v1 does (the native side keeps
 ## the first element of each name).
 func _duplicates() -> void:
-	var els: Array = cascade.els
 	for i in (rt.call("duplicate_names") as PackedInt32Array):
-		var el: UxmlElement = els[i]
+		var el: UxmlElement = cascade.el(i)
 		warnings.append(UxmlDiagnostic.make(
 			"duplicate-name",
 			'name "%s" is declared more than once; get_element returns the first' % String(el.get_attribute("name")),
@@ -416,12 +457,16 @@ func _collection_of(content: UxmlElement) -> UxmlElement:
 ## One interaction Control per focusable or interactive element, the
 ## editors of the text fields, and the behaviors of the controls.
 func _make_proxies() -> void:
-	var els: Array = cascade.els
+	var tab: Object = doc._doc.table
 	var behaviors := {}
 	_lazy = {}
 	var lazy := not eager and not _needs_all()
-	for i in els.size():
-		var el: UxmlElement = els[i]
+	for i in tab.proxy_rows(_PROXY_TAGS):
+		if lazy and _lazy_row(tab, i):
+			# Made on first need (_ctl): the focus, a press, the API.
+			_lazy[i] = true
+			continue
+		var el: UxmlElement = cascade.el(i)
 		var c: Control = null
 		var is_part := el._part_of != null
 		var local := el.local
@@ -469,11 +514,7 @@ func _make_proxies() -> void:
 			else:
 				continue
 		elif _lazy_kind(el):
-			# Made on first need (_ctl): the focus, a press, the API.
-			if lazy:
-				_lazy[i] = el
-			else:
-				_make_lazy(i, el)
+			_make_lazy(i, el)
 			continue
 		else:
 			match el.local:
@@ -521,8 +562,9 @@ func _make_proxies() -> void:
 		target.focus_exited.connect(_on_focus.bind(el, false))
 	# The behaviors of the other controls, as runtime v1 makes them
 	# (UxmlBehaviors.attach_all: parts included).
-	for el in els:
-		if behaviors.has(el) or NO_BEHAVIOR.has(el.local):
+	for bi in tab.rows_except(_NO_BEHAVIOR_TAGS, true):
+		var el: UxmlElement = cascade.el(bi)
+		if behaviors.has(el):
 			continue
 		var vb = null
 		if el.local == "ScrollView":
@@ -582,7 +624,7 @@ func _make_proxies() -> void:
 ## Make every interaction Control at the load (tests, equivalence: the
 ## reference of the lazy Controls).
 static var eager := false
-## Element index -> UxmlElement whose Control is not made yet.
+## Element index -> true: its Control is not made yet.
 var _lazy: Dictionary = {}
 var _nav: Node = null
 
@@ -593,6 +635,24 @@ class V2Nav extends Node:
 	func _input(ev: InputEvent) -> void:
 		if glue != null:
 			glue._prepare_navigation(ev)
+
+
+## The tags whose elements can get an interaction Control (proxy_rows), and
+## the tags that never have a behavior.
+static var _PROXY_TAGS := PackedStringArray(_CONTROL_KINDS.keys())
+static var _NO_BEHAVIOR_TAGS := PackedStringArray(NO_BEHAVIOR.keys())
+
+
+## _lazy_kind of row i of table `t`, without its handle.
+static func _lazy_row(t: Object, i: int) -> bool:
+	if t.part_of(i) >= 0:
+		return false
+	match String(t.local(i)):
+		"Button":
+			return true
+		"VisualElement", "TemplateContainer":
+			return t.attr(i, "focusable") == "true"
+	return false
 
 
 ## Whether the Control of `el` is made on first need.
@@ -623,7 +683,7 @@ func _make_lazy(i: int, el: UxmlElement) -> Control:
 			b.add_theme_stylebox_override(slot, _no_box())
 		b.focus_mode = Control.FOCUS_ALL
 		b.accessibility_name = UxmlParts._attr(el, "text") if rt == null else String(rt.call("get_text", i))
-		var nm: String = doc._el_names.get(el, "")
+		var nm: String = name_of(el)
 		b.pressed.connect(func(): doc.button_pressed.emit(nm))
 		b.button_down.connect(doc._set_state.bind(el, "active", true))
 		b.button_up.connect(doc._set_state.bind(el, "active", false))
@@ -696,7 +756,7 @@ func _ctl(i: int) -> Control:
 	var c = proxies.get(i)
 	if c != null or not _lazy.has(i):
 		return c
-	var el: UxmlElement = _lazy[i]
+	var el: UxmlElement = cascade.el(i)
 	_lazy.erase(i)
 	c = _make_lazy(i, el)
 	_proxy_ctls[_proxy_idx.bsearch(i)] = c
@@ -859,7 +919,7 @@ func _valid_slots() -> PackedByteArray:
 			fm = (c as Control).focus_mode
 		else:
 			fm = Control.FOCUS_NONE if (i < dis.size() and dis[i] == 1) else \
-				(Control.FOCUS_NONE if UxmlParts._attr(_lazy[i], "focusable") == "false" else Control.FOCUS_ALL)
+				(Control.FOCUS_NONE if doc._doc.table.attr(i, "focusable") == "false" else Control.FOCUS_ALL)
 		if fm != Control.FOCUS_ALL:
 			v[k] = 0
 	return v
@@ -997,7 +1057,7 @@ func _apply_editors(changed: PackedInt32Array) -> void:
 		if not ch.has(i) and c.has_meta(&"uxml_v2_flags") and int(c.get_meta(&"uxml_v2_flags")) == f:
 			continue
 		c.set_meta(&"uxml_v2_flags", f)
-		var el: UxmlElement = cascade.els[i]
+		var el: UxmlElement = cascade.el(i)
 		var style: Dictionary = cascade._native.call("style_of", i)
 		applier.apply(el, c, c, style, dis[i] == 1, gone[i] == 1)
 		c.set_meta(&"uxml_v2_visible", c.visible)
@@ -1069,7 +1129,7 @@ func v2_button_theme() -> Dictionary:
 ## [font, size] of text element i: the font and size a Label (a Button) of
 ## runtime v1 draws with (UxmlStyleApplier._apply_themed_inner).
 func v2_font(i: int, button: bool = false) -> Array:
-	var el: UxmlElement = cascade.els[i]
+	var el: UxmlElement = cascade.el(i)
 	var style: Dictionary = cascade._native.call("style_of", i)
 	var probe: Control = _bprobe if button else _probe
 	applier._capture_base_font(probe)
@@ -1095,7 +1155,7 @@ static var _URL_PROPS := PackedStringArray(["background-image"])
 
 
 func v2_boxes(i: int, label: bool) -> Array:
-	var el: UxmlElement = cascade.els[i]
+	var el: UxmlElement = cascade.el(i)
 	# The values, and the origin of the url() (the file it resolves against).
 	var style: Dictionary = cascade._native.call("style_of_lite", i, _URL_PROPS)
 	var tex := applier._texture(style, "background-image", el)
@@ -1126,7 +1186,7 @@ func v2_boxes(i: int, label: bool) -> Array:
 ## [texture, stretch mode, tint] of Image i (UxmlControlFactory._create_image
 ## and UxmlStyleApplier._apply_image), or [] without a texture.
 func v2_image(i: int) -> Array:
-	var el: UxmlElement = cascade.els[i]
+	var el: UxmlElement = cascade.el(i)
 	var style: Dictionary = cascade._native.call("style_of", i)
 	var tex: Texture2D = null
 	var ref := factory._first_attr(el, ["src", "image"])
@@ -1174,17 +1234,17 @@ func v2_mask(radii: PackedFloat64Array, widths: PackedFloat64Array) -> Array:
 
 ## The first element named `element_name`, or null.
 func named(element_name: String) -> UxmlElement:
-	if rt == null:
+	if cascade == null:
 		return null
-	var i: int = rt.call("find_name", element_name)
-	return null if i < 0 else cascade.els[i]
+	var i: int = _names.get(element_name, -1)
+	return null if i < 0 else cascade.el(i)
 
 
 func parent_of(el: UxmlElement) -> UxmlElement:
 	var i := index_of(el)
 	if i <= 0:
 		return null
-	return cascade.els[cascade._parent[i]]
+	return cascade.el(cascade._parent[i])
 
 
 func dispose() -> void:
@@ -1239,9 +1299,13 @@ func dispose() -> void:
 		doc._layout_hooks = []
 		doc._post_layout = []
 		doc._placeholder_fields = []
-	if cascade != null:
-		for el in cascade.els:
-			el.changed = Callable()
+	if cascade != null and doc != null and doc._doc != null:
+		doc._doc.on_handle = Callable()
+		for e in doc._doc._handles:
+			if e != null:
+				e.changed = Callable()
+	if doc != null and doc._v2_maps == self:
+		doc._v2_maps = null
 	cascade = null
 	applier = null
 	factory = null
@@ -1258,7 +1322,7 @@ func diagnostics() -> Array:
 func index_of(el: UxmlElement) -> int:
 	if el == null or cascade == null:
 		return -1
-	return int(cascade.index.get(el, -1))
+	return cascade.index_of(el)
 
 
 # ---------------------------------------------------------------------------
@@ -1266,6 +1330,10 @@ func index_of(el: UxmlElement) -> int:
 # ---------------------------------------------------------------------------
 
 func _on_model_changed(el: UxmlElement) -> void:
+	# The table is what the core reads: the handle's attributes into its row.
+	var row := index_of(el)
+	if row >= 0:
+		doc._doc.table.set_attributes(row, el.attributes)
 	var b = doc._behaviors.get(el)
 	if el == doc._quiet_field and el.changed_attribute == doc._quiet_attr:
 		# set_field_value, set_field_placeholder (UxmlDocument._on_model_changed).
@@ -1505,8 +1573,13 @@ func set_text(el: UxmlElement, text: String) -> void:
 
 func refresh() -> void:
 	_restyle_all = true
-	for el in cascade.els:
-		_dirty[el] = true
+	# Every element: the model edits made without set_attribute are read.
+	var m: UxmlDocumentModel = doc._doc
+	for i in cascade.count():
+		var e := m.made(i)
+		if e != null:
+			m.table.set_attributes(i, e.attributes)
+			_dirty[e] = true
 	queue()
 
 
@@ -1616,10 +1689,9 @@ func _on_mouse_exited() -> void:
 func _chain_at(p: Vector2) -> Dictionary:
 	var out := {}
 	var i: int = rt.call("pick", p, true)
-	var els: Array = cascade.els
 	var par: PackedInt32Array = cascade._parent
 	while i > 0:
-		out[els[i]] = true
+		out[cascade.el(i)] = true
 		i = par[i]
 	return out
 
@@ -1628,10 +1700,9 @@ func _chain_at(p: Vector2) -> Dictionary:
 ## `p`, its control for a part.
 func _target_at(p: Vector2) -> UxmlElement:
 	var i: int = rt.call("pick", p, true)
-	var els: Array = cascade.els
 	var par: PackedInt32Array = cascade._parent
 	while i > 0:
-		var el: UxmlElement = els[i]
+		var el: UxmlElement = cascade.el(i)
 		if proxies.has(i) or _lazy.has(i) or (el.part_of == null and doc._behaviors.has(el)):
 			return el
 		i = par[i]
@@ -1717,10 +1788,9 @@ func _wheel(mb: InputEventMouseButton) -> void:
 
 func _wheel_by(p: Vector2, delta: Vector2) -> void:
 	var i: int = rt.call("pick", p, true)
-	var els: Array = cascade.els
 	var par: PackedInt32Array = cascade._parent
 	while i > 0:
-		var el: UxmlElement = els[i]
+		var el: UxmlElement = cascade.el(i)
 		var b = doc._behaviors.get(el)
 		if b is V2ScrollViewBehavior and el.part_of == null:
 			var before: Vector2 = b.offset()
@@ -1763,12 +1833,11 @@ func _on_editor_input(ev: InputEvent, el: UxmlElement) -> void:
 ## element with a tooltip), shown by the root box.
 func _update_tooltip(p: Vector2) -> void:
 	var i: int = rt.call("pick", p, true)
-	var els: Array = cascade.els
 	var par: PackedInt32Array = cascade._parent
 	var tip := ""
 	var at: UxmlElement = null
 	while i > 0:
-		var el: UxmlElement = els[i]
+		var el: UxmlElement = cascade.el(i)
 		if bool(rt.call("is_elided", i)) and UxmlParts._attr(el, "display-tooltip-when-elided", "true") != "false":
 			# display-tooltip-when-elided: the full text (UxmlStyleApplier._elided_tooltip).
 			tip = String(rt.call("get_text", i))
@@ -1896,7 +1965,7 @@ func element_at(local_point: Vector2, respect_picking: bool, include_parts: bool
 	var i: int = rt.call("pick", p, respect_picking)
 	if i <= 0:
 		return null
-	var hit: UxmlElement = cascade.els[i]
+	var hit: UxmlElement = cascade.el(i)
 	if not include_parts:
 		while hit.part_of != null:
 			hit = hit.part_of

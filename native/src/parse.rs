@@ -13,13 +13,26 @@ use godot::prelude::*;
 type S = [char];
 
 fn find(s: &S, pat: &str, from: usize) -> Option<usize> {
-    let p: Vec<char> = pat.chars().collect();
-    if p.is_empty() || from > s.len() {
+    // The patterns are short ASCII literals: compared in place (no
+    // allocation per call).
+    let p = pat.as_bytes();
+    if p.is_empty() || from > s.len() || !pat.is_ascii() {
+        if !pat.is_ascii() {
+            let pc: Vec<char> = pat.chars().collect();
+            let mut i = from;
+            while i + pc.len() <= s.len() {
+                if s[i..i + pc.len()] == pc[..] {
+                    return Some(i);
+                }
+                i += 1;
+            }
+        }
         return None;
     }
+    let first = p[0] as char;
     let mut i = from;
     while i + p.len() <= s.len() {
-        if s[i..i + p.len()] == p[..] {
+        if s[i] == first && p[1..].iter().enumerate().all(|(k, &b)| s[i + 1 + k] == b as char) {
             return Some(i);
         }
         i += 1;
@@ -34,8 +47,8 @@ fn sub(s: &S, from: usize, to: usize) -> String {
 }
 
 fn starts(s: &S, at: usize, pat: &str) -> bool {
-    let p: Vec<char> = pat.chars().collect();
-    at + p.len() <= s.len() && s[at..at + p.len()] == p[..]
+    let n = pat.chars().count();
+    at + n <= s.len() && pat.chars().enumerate().all(|(k, c)| s[at + k] == c)
 }
 
 /// Godot String::strip_edges (code <= 32 at both ends).
@@ -51,26 +64,26 @@ fn gd(s: &str) -> GString {
 // UXML
 // =========================================================================
 
-struct Uxml<'a> {
-    s: &'a S,
-    pos: usize,
-    next_id: i32,
+pub(crate) struct Uxml<'a> {
+    pub(crate) s: &'a S,
+    pub(crate) pos: usize,
+    pub(crate) next_id: i32,
     // kept elements
-    local: Vec<String>,
-    prefix: Vec<String>,
-    parent: Vec<i32>,
-    id: Vec<i32>,
-    open_start: Vec<i32>,
-    open_end: Vec<i32>,
-    source_end: Vec<i32>,
-    attr_el: Vec<i32>,
-    attr_name: Vec<String>,
-    attr_value: Vec<String>,
-    attr_raw: Vec<bool>,
-    attr_offset: Vec<i32>,
-    w_msg: Vec<String>,
-    w_start: Vec<i32>,
-    w_end: Vec<i32>,
+    pub(crate) local: Vec<String>,
+    pub(crate) prefix: Vec<String>,
+    pub(crate) parent: Vec<i32>,
+    pub(crate) id: Vec<i32>,
+    pub(crate) open_start: Vec<i32>,
+    pub(crate) open_end: Vec<i32>,
+    pub(crate) source_end: Vec<i32>,
+    pub(crate) attr_el: Vec<i32>,
+    pub(crate) attr_name: Vec<String>,
+    pub(crate) attr_value: Vec<String>,
+    pub(crate) attr_raw: Vec<bool>,
+    pub(crate) attr_offset: Vec<i32>,
+    pub(crate) w_msg: Vec<String>,
+    pub(crate) w_start: Vec<i32>,
+    pub(crate) w_end: Vec<i32>,
 }
 
 fn uxml_name_start(c: i64) -> bool {
@@ -321,10 +334,12 @@ impl<'a> Uxml<'a> {
     }
 }
 
-pub fn scan_uxml(source: &GString) -> VarDictionary {
-    let chars: Vec<char> = source.to_string().chars().collect();
+/// Runs the UXML scanner over `chars` (code points): the kept elements in
+/// preorder, their attributes and the problems. The second value: the root
+/// was synthesized (no root element).
+pub(crate) fn scan_chars(chars: &[char]) -> (Uxml<'_>, bool) {
     let mut u = Uxml {
-        s: &chars,
+        s: chars,
         pos: 0,
         next_id: 0,
         local: vec![],
@@ -344,6 +359,12 @@ pub fn scan_uxml(source: &GString) -> VarDictionary {
         w_end: vec![],
     };
     let synth = u.run();
+    (u, synth)
+}
+
+pub fn scan_uxml(source: &GString) -> VarDictionary {
+    let chars: Vec<char> = source.to_string().chars().collect();
+    let (u, synth) = scan_chars(&chars);
     let psa = |v: &Vec<String>| {
         let mut a = PackedStringArray::new();
         for x in v {

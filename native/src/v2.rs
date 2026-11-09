@@ -450,28 +450,25 @@ impl UxmlRuntimeV2 {
             drop(p_items);
             let p_get = crate::prof::scope("v2.build.get_attrs");
             // The <UXML> root's attributes are namespaces and editor settings.
-            let attrs = if i == 0 { VarArray::new() } else { c.attributes(i) };
+            let attrs: Vec<(String, String)> = if i == 0 { vec![] } else { c.attr_strings(i) };
             drop(p_get);
             let _p_loop = crate::prof::scope("v2.build.attr_loop");
             let (mut seen_text, mut rich_on, mut escapes) = (false, true, false);
             let texty = kind[i] == K_LABEL || kind[i] == K_BUTTON;
-            for a in attrs.iter_shared() {
-                let Ok(d) = a.try_to::<VarDictionary>() else { continue };
-                let an = s(&d.get(&kn).unwrap_or_default());
-                let avv = d.get(&kv).unwrap_or_default();
+            for (an, avs) in attrs.iter() {
+                let gv = || GString::from(avs.as_str());
                 if attrs_ok {
                     // Checked by the GDScript side; only what the core reads.
                     match an.as_str() {
-                        "name" if names[i].is_none() && !part => names[i] = Some(avv.try_to::<GString>().unwrap_or_default()),
+                        "name" if names[i].is_none() && !part => names[i] = Some(gv()),
                         "text" if texty && !seen_text => {
-                            texts[i] = avv.try_to::<GString>().unwrap_or_default();
+                            texts[i] = gv();
                             seen_text = true;
                         }
-                        "enable-rich-text" if texty => rich_on = s(&avv).trim() != "false",
-                        "parse-escape-sequences" if texty => escapes = s(&avv).trim() == "true",
+                        "enable-rich-text" if texty => rich_on = avs.trim() != "false",
+                        "parse-escape-sequences" if texty => escapes = avs.trim() == "true",
                         "picking-mode" => {
-                            let av = s(&avv);
-                            let v = av.trim();
+                            let v = avs.trim();
                             if v == "Ignore" {
                                 picking[i] = true;
                             } else if v != "Position" {
@@ -489,21 +486,20 @@ impl UxmlRuntimeV2 {
                         // A part, or an element of a pooled row of a
                         // collection view (F_PART), stays out of the names.
                         if names[i].is_none() && !part {
-                            names[i] = Some(avv.try_to::<GString>().unwrap_or_default());
+                            names[i] = Some(gv());
                         }
                     }
                     "text" if kind[i] == K_LABEL => {
                         if !seen_text {
-                            texts[i] = avv.try_to::<GString>().unwrap_or_default();
+                            texts[i] = gv();
                             seen_text = true;
                         }
                     }
-                    "enable-rich-text" if kind[i] == K_LABEL => rich_on = s(&avv).trim() != "false",
-                    "parse-escape-sequences" if kind[i] == K_LABEL => escapes = s(&avv).trim() == "true",
+                    "enable-rich-text" if kind[i] == K_LABEL => rich_on = avs.trim() != "false",
+                    "parse-escape-sequences" if kind[i] == K_LABEL => escapes = avs.trim() == "true",
                     "display-tooltip-when-elided" if kind[i] == K_LABEL => {}
                     "picking-mode" => {
-                        let av = s(&avv);
-                        let v = av.trim();
+                        let v = avs.trim();
                         if v == "Ignore" {
                             picking[i] = true;
                         } else if v != "Position" {

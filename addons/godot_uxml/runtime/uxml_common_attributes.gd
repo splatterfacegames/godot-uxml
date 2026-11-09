@@ -148,7 +148,7 @@ func effective_direction(el: UxmlElement) -> int:
 					_warn(el, 'language-direction="%s" is not Inherit, LTR or RTL; Inherit used' % v)
 			elif i > 0:
 				return i
-		cur = _doc._parents.get(cur)
+		cur = _doc._parent_el(cur)
 	return 0
 
 
@@ -276,7 +276,7 @@ func full_key(el: UxmlElement) -> String:
 		var k = cur.get_attribute("view-data-key")
 		if k != null and not String(k).is_empty():
 			keys.append(String(k))
-		cur = _doc._parents.get(cur)
+		cur = _doc._parent_el(cur)
 	keys.reverse()
 	return "__".join(keys)
 

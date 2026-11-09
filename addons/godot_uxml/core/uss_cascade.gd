@@ -169,13 +169,23 @@ static var use_native := true
 var _native: Object = null
 
 
+## Runtime v2's element table (UxmlDocumentModel.table) when the elements
+## are its rows: `els` stays empty, el(i) makes the handle of row i, and the
+## native cascade reads the rows (null: the elements are `els`).
+var _table_obj: Object = null
+
+
 func _init(p_doc: UxmlDocumentModel) -> void:
 	doc = p_doc
-	_index_tree()
+	var native := use_native and ClassDB.class_exists("UxmlNativeCascade")
+	if native and doc.table != null:
+		_index_table()
+	else:
+		_index_tree()
 	_compile_rules()
-	if use_native and ClassDB.class_exists("UxmlNativeCascade"):
+	if native:
 		var nc: Object = ClassDB.instantiate("UxmlNativeCascade")
-		if nc.call("setup", self, {
+		var cbs := {
 			"subst": func(v: String, customs: Dictionary, seed_prop: String):
 				return UssStyleResolver._substitute_vars(
 					v, customs, {} if seed_prop.is_empty() else {seed_prop: true}),
@@ -184,8 +194,66 @@ func _init(p_doc: UxmlDocumentModel) -> void:
 			"inherited": UssProperties.INHERITED,
 			"supported": UssProperties.SUPPORTED,
 			"implicit": UssControls.IMPLICIT_CLASSES,
-		}):
+		}
+		if _table_obj != null:
+			cbs["handle"] = doc.handle
+		if nc.call("setup", self, cbs):
 			_native = nc
+	if _native == null and _table_obj != null:
+		# The GDScript cascade works on objects: leave the table.
+		doc.drop_table()
+		_table_obj = null
+		_parent = PackedInt32Array()
+		_local = PackedStringArray()
+		_prefix = PackedStringArray()
+		_ots = PackedInt32Array()
+		_ote = PackedInt32Array()
+		_index_tree()
+
+
+## The number of elements.
+func count() -> int:
+	return _parent.size()
+
+
+## The element of preorder index i (a handle made now in table mode).
+func el(i: int) -> UxmlElement:
+	return doc.handle(i) if _table_obj != null else els[i]
+
+
+## The preorder index of `e`, or -1.
+func index_of(e: UxmlElement) -> int:
+	if _table_obj != null:
+		return doc.row_of(e)
+	return int(index.get(e, -1))
+
+
+## _index_tree from the rows of runtime v2's table (no object is made).
+func _index_table() -> void:
+	_table_obj = doc.table
+	var d: Dictionary = _table_obj.tree_arrays()
+	_parent = d["parent"]
+	_sel_parent = d["sel_parent"]
+	_end = d["end"]
+	_local = d["local"]
+	_prefix = d["prefix"]
+	_ots = d["ots"]
+	_ote = d["ote"]
+	var n := _parent.size()
+	_cls_set.resize(n)
+	_name.resize(n)
+	_sig_cls.resize(n)
+	_sig_name.resize(n)
+	_sig_style.resize(n)
+	_sig_bits.resize(n)
+	_anc_key.resize(n)
+	_fc.resize(n)
+	_fc_customs.resize(n)
+	_bloom.resize(n)
+	_own_bloom.resize(n)
+	_warn.resize(n)
+	_arefs.resize(n)
+	_sig_en.resize(n)
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +568,7 @@ func _add_rule(f: Dictionary) -> void:
 		_rule_scope_lo.append(-2)
 		_rule_scope_hi.append(-2)
 	else:
-		var si: int = index.get(scope, -1)
+		var si: int = index_of(scope)
 		_rule_scope_idx.append(si)
 		_rule_scope_lo.append(si)
 		_rule_scope_hi.append(_end[si] if si >= 0 else -1)
@@ -1085,7 +1153,7 @@ func _key_bits(options: Dictionary) -> PackedInt32Array:
 	var states_opt: Dictionary = options.get("states", {})
 	if states_opt.is_empty():
 		return key_bits
-	var n := els.size()
+	var n := count()
 	key_bits.resize(n)
 	var entries: Array = []
 	for key in states_opt.keys():
@@ -1105,10 +1173,10 @@ func _key_bits(options: Dictionary) -> PackedInt32Array:
 	if not entries.is_empty():
 		var parents := {}
 		for i in range(1, n):
-			parents[els[i]] = els[_sel_parent[i]]
+			parents[el(i)] = el(_sel_parent[i])
 		var base_ctx := {"parents": parents, "states": {}, "root": doc.root}
 		for i in n:
-			var node: UxmlElement = els[i]
+			var node: UxmlElement = el(i)
 			for entry in entries:
 				for sel in entry[0]:
 					if UssSelector.matches(sel, node, base_ctx):
@@ -1420,7 +1488,7 @@ func target_style(i: int) -> Dictionary:
 		var t2 = _tgt.get(i)
 		if t2 != null:
 			return t2
-	return styles.get(els[i], {})
+	return styles.get(el(i), {})
 
 
 ## Effective disabled (attribute/runtime, descending) and display:none

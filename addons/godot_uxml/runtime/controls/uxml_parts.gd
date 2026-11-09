@@ -58,6 +58,12 @@ static func expand(doc: UxmlDocumentModel) -> void:
 	# runtime v1 (UxmlDocument._v2_fallback).
 	if doc.has_meta(META_EXPANDED):
 		return
+	if doc.table != null and doc.bindings.is_empty() and not doc.table.has_local(_OBJECT_TAGS):
+		doc.set_meta(META_EXPANDED, true)
+		_expand_table(doc)
+		return
+	if doc.table != null:
+		doc.drop_table()
 	doc.set_meta(META_EXPANDED, true)
 	_mark_live(doc)
 	var todo: Array = []
@@ -96,6 +102,98 @@ static func expand(doc: UxmlDocumentModel) -> void:
 		build(el)
 	# Containers and collections: steps that need every part tree built.
 	UxmlContainerParts.after_expand(views)
+
+
+## Tags whose expansion needs the whole tree as objects (the <Columns> of
+## multi-column views, the steps of after_expand): a model in runtime v2's
+## table with one of them leaves the table first.
+static var _OBJECT_TAGS := PackedStringArray(["MultiColumnListView", "MultiColumnTreeView", "TabView",
+	"TwoPaneSplitView", "Columns", "Column"])
+
+
+## expand() on a model in runtime v2's element table (UxmlDocumentModel.
+## table): the same steps on the rows, the part trees built on handles of
+## the controls by the same builders and written back to the table.
+static func _expand_table(doc: UxmlDocumentModel) -> void:
+	var t: Object = doc.table
+	for i in t.rows_named(PackedStringArray(["Foldout"]), false):
+		if i != 0:
+			doc.handle(i).set_meta(&"uxml_foldout_depth", t.foldout_depth(i))
+	for i in t.disabled_rows():
+		var el := doc.handle(i)
+		_add_control_classes(el, ["unity-disabled"])
+		t.set_attributes(i, el.attributes)
+	var tags := PackedStringArray()
+	for l in t.locals():
+		if has_parts(l):
+			tags.append(l)
+	if tags.is_empty():
+		return
+	var todo: PackedInt32Array = t.rows_named(tags, false)
+	var els: Array = []
+	var pt := Time.get_ticks_usec()
+	for i in todo:
+		els.append(doc.handle(i))
+	if UxmlDocument.profile != null: pt = UxmlDocument._profile_add("parts: handles", pt)
+	for el in els:
+		build(el)
+	if UxmlDocument.profile != null: pt = UxmlDocument._profile_add("parts: build", pt)
+	_sync_built(doc, els)
+	if UxmlDocument.profile != null: pt = UxmlDocument._profile_add("parts: sync", pt)
+	doc.remap(t.finalize())
+	if UxmlDocument.profile != null: pt = UxmlDocument._profile_add("parts: finalize", pt)
+
+
+## Writes the part trees of the controls `els` (handles) back to the table
+## in one native call: new part rows, the author children under their
+## content container, the merged classes.
+static func _sync_built(doc: UxmlDocumentModel, els: Array) -> void:
+	var spec: Array = []
+	var news: Array = []  # [entry, object] of the new rows
+	for el in els:
+		var r := doc.row_of(el)
+		# A control: its children are the entries that follow (explicit:
+		# a control without children gets none).
+		spec.append([r, 0, "", "", el.attributes, null, -1, "", -1, -1, 0, true])
+		_spec_kids(doc, el, spec.size() - 1, spec, news)
+	var pt := Time.get_ticks_usec()
+	var rows: PackedInt32Array = doc.table.sync_entries(spec)
+	if UxmlDocument.profile != null: pt = UxmlDocument._profile_add("parts: sync native", pt)
+	for nk in news:
+		var k: int = nk[0]
+		var c: UxmlElement = nk[1]
+		doc._adopt_row(rows[k], c)
+	_spec_k = {}
+	if UxmlDocument.profile != null: pt = UxmlDocument._profile_add("parts: sync adopt", pt)
+
+
+static var _spec_k := {}
+
+
+static func _spec_kids(doc: UxmlDocumentModel, el: UxmlElement, at: int, spec: Array, news: Array) -> void:
+	for c in el._children:
+		var r := doc.row_of(c)
+		if r >= 0:
+			# An author element (moved into a content container) keeps its
+			# subtree; Unity's parent is the control.
+			var lp := -1
+			if c.has_meta(META_LOGICAL_PARENT):
+				lp = doc.row_of(logical_parent(c))
+			spec.append([r, 0, "", "", c.attributes, null, -1, "", at, lp, 0])
+			continue
+		var po := -1
+		var owner: UxmlElement = c.part_of
+		if owner != null:
+			po = doc.row_of(owner)
+			if po < 0:
+				po = -2 - int(_spec_k.get(owner, -1))
+		var k := spec.size()
+		_spec_k[c] = k
+		spec.append([-1, c.id, c.prefix, c.local, c.attributes,
+			PackedInt32Array([c.open_tag_start, c.open_tag_end, c.source_end]), po, c.part_role, at, -1,
+			c.get_instance_id(), true])
+		news.append([k, c])
+		_spec_kids(doc, c, k, spec, news)
 
 
 ## Record the text attributes that <Bindings> write (META_LIVE).
@@ -209,6 +307,8 @@ static func find_part(owner: UxmlElement, role: String) -> UxmlElement:
 		var x: UxmlElement = stack.pop_back()
 		if x.part_role == role and x.part_of == owner:
 			return x
+		if x._m != null and x != owner:
+			continue  # an author subtree of runtime v2's table: no part of owner
 		var ch: Array = x.children
 		var k := ch.size() - 1
 		while k >= 0:

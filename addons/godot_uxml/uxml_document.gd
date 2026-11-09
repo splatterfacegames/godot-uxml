@@ -457,6 +457,7 @@ func load_document(path: String, root: String = "", resolver: UxmlResourceResolv
 	_clear()
 	var res := _resolver_for(root, resolver)
 	_resolver = res
+	UxmlLoader.parse_table = _wants_v2()
 	_doc = UxmlLoader.load_file_with_resolver(path, _resolver)
 	if _doc.path.is_empty():
 		# The document file itself did not load: keep the diagnostic, show
@@ -514,9 +515,20 @@ func _start_runtime() -> bool:
 			diagnostics = g.diagnostics()
 			return true
 		runtime_fallback = why
+	if _doc != null:
+		_doc.drop_table()
 	_index()
 	_restyle_now()
 	return false
+
+
+## Whether a load asks for runtime v2 (its model is then parsed into the
+## table: UxmlLoader.parse_table).
+func _wants_v2() -> bool:
+	if pinned_v1 or (default_runtime if default_runtime != 0 else runtime) != 2:
+		return false
+	return ClassDB.class_exists("UxmlRuntimeV2") and ClassDB.class_exists("UxmlNativeModel") \
+		and UssCascade.use_native and UxmlRuntimeV2Glue.doc_native_layout()
 
 
 ## The author stylesheets of `src` that style its whole document (no scope,
@@ -569,6 +581,7 @@ func load_source(uxml: String, virtual_path: String = "res://__uxml_source__.uxm
 		_attrs.capture_view_data()
 	_clear()
 	_resolver = _resolver_for(root, resolver)
+	UxmlLoader.parse_table = _wants_v2()
 	_doc = UxmlLoader.load_source(uxml, virtual_path, _resolver)
 	_last_text = uxml
 	_finish_load(true)
@@ -1296,7 +1309,7 @@ func _wire(el: UxmlElement, c: Control) -> void:
 		native.focus_exited.connect(func(): _set_state(el, "focus", false))
 		native.gui_input.connect(func(ev): _on_gui_input(ev, el))
 
-	var el_name := _el_names.get(el, "")
+	var el_name := _name_of(el)
 	if native is Button and (el.local == "Button" or el.local == "RepeatButton"):
 		native.pressed.connect(func(): button_pressed.emit(el_name))
 		native.button_down.connect(_set_state.bind(el, "active", true))
@@ -2090,7 +2103,7 @@ func seek_transitions(seconds: float) -> void:
 
 func _emit_transition_event(kind: int, index: int, property: String, elapsed: float) -> void:
 	var el: UxmlElement = _cascade.els[index]
-	var nm: String = _el_names.get(el, "")
+	var nm: String = _name_of(el)
 	match kind:
 		UssTransitions.Event.RUN:
 			transition_run.emit(nm, property, elapsed)
@@ -2109,7 +2122,7 @@ func _emit_transition_event(kind: int, index: int, property: String, elapsed: fl
 func _percent_base(index: int, property: String, sub: int) -> float:
 	var el: UxmlElement = _cascade.els[index]
 	var own: Control = _controls.get(el)
-	var par = _parents.get(el)
+	var par = _parent_el(el)
 	var pc: Control = null if par == null else _controls.get(par)
 	match property:
 		"top", "bottom", "height", "min-height", "max-height":
@@ -2498,9 +2511,9 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 	if r == null:
 		if _layout_roots.is_empty():
 			return false
-		r = _parents.get(x)
+		r = _parent_el(x)
 		while r != null and not _layout_roots.has(r):
-			r = _parents.get(r)
+			r = _parent_el(r)
 		if r == null:
 			return false
 	# A root inside a root of `local` is laid out with it.
@@ -2510,7 +2523,7 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 			if fresh:
 				local[a] = true
 			return true
-		a = _parents.get(a)
+		a = _parent_el(a)
 	# Roots that cover a third of the document: one layout of the
 	# document costs less than a layout of each.
 	var ri = _cascade.index.get(r)
@@ -2570,9 +2583,9 @@ var _shown_memo: Dictionary = {}
 ## when that view has a fixed size: a new item source or an expand changes
 ## the content height and the rows, and lays out the view alone.
 func _add_local_view(local: Dictionary, x: UxmlElement, fresh: bool) -> bool:
-	var v = _parents.get(x)
+	var v = _parent_el(x)
 	while v != null and not (UxmlContainerParts.is_collection(v.local) and v.part_of == null):
-		v = _parents.get(v)
+		v = _parent_el(v)
 	# A multi-column view sizes its header columns after the layout of the
 	# document (update_columns): it is not laid out alone (seen once R33 let
 	# a view with a large hidden pool take the subtree layout).
@@ -2612,11 +2625,11 @@ func _local_measures(r: UxmlElement) -> Array:
 
 ## True when `el` is strictly inside one of the roots of `local`.
 func _under_local(el: UxmlElement, local: Dictionary) -> bool:
-	var p = _parents.get(el)
+	var p = _parent_el(el)
 	while p != null:
 		if local.has(p):
 			return true
-		p = _parents.get(p)
+		p = _parent_el(p)
 	return false
 
 
@@ -2655,12 +2668,12 @@ func _do_local_layout(local: Dictionary, applied: Array) -> void:
 		var opts := _layout_options()
 		for r in roots:
 			var origin := Vector2.ZERO
-			var p = _parents.get(r)
+			var p = _parent_el(r)
 			while p != null:
 				var pr = _raw_rects.get(p)
 				if pr != null:
 					origin += (pr as Rect2).position
-				p = _parents.get(p)
+				p = _parent_el(p)
 			var res := UxmlFlexLayout.compute_subtree(r, _raw_rects[r], _cbs[r], origin,
 				_styles, _measure_leaf, _rt_warnings, opts)
 			var rects: Dictionary = res["rects"]
@@ -2835,7 +2848,7 @@ func _park_hidden() -> void:
 	var idx: Dictionary = _cascade.index
 	var below := {}
 	for el in _cascade.els:
-		var parent = _parents.get(el)
+		var parent = _parent_el(el)
 		if parent == null:
 			continue
 		if below.has(parent):
@@ -2879,10 +2892,45 @@ static func _theme_above(n: Node) -> bool:
 ## parked subtrees below it in the tree: for API calls that hand out its
 ## control or act on it through its behavior.
 func _named(element_name: String) -> UxmlElement:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _lookup_name(element_name)
 	if el != null and not _parked.is_empty():
 		_expose(el)
 	return el
+
+
+## The element maps of the runtime of this load. Runtime v1 keeps them in
+## `_by_name`, `_el_names` and `_parents`; runtime v2's elements are handles
+## of its table and its glue answers (`_v2_maps`, set from the start of its
+## load).
+var _v2_maps = null
+
+
+## The first element named `element_name` (parts and pooled rows excluded).
+func _lookup_name(element_name: String) -> UxmlElement:
+	if _v2_maps != null:
+		return _v2_maps.named(element_name)
+	return _by_name.get(element_name)
+
+
+## The name `el` is known by in the name index ("" for none).
+func _name_of(el: UxmlElement) -> String:
+	if _v2_maps != null:
+		return _v2_maps.name_of(el)
+	return _el_names.get(el, "")
+
+
+## The parent of `el` in the document tree (parts included), or null.
+func _parent_el(el: UxmlElement) -> UxmlElement:
+	if _v2_maps != null:
+		return _v2_maps.parent_of(el)
+	return _parents.get(el)
+
+
+## Whether `el` is an element of this load other than the root.
+func _has_el(el: UxmlElement) -> bool:
+	if _v2_maps != null:
+		return _v2_maps.index_of(el) > 0
+	return _parents.has(el)
 
 
 ## Put the parked subtrees at, above and below `el` in the tree.
@@ -2890,15 +2938,15 @@ func _expose(el: UxmlElement) -> void:
 	for pel in _parked.keys():
 		var cur: UxmlElement = pel
 		while cur != null and cur != el:
-			cur = _parents.get(cur)
+			cur = _parent_el(cur)
 		if cur == el:
 			_unpark(pel)
-	var up: UxmlElement = _parents.get(el)
+	var up: UxmlElement = _parent_el(el)
 	while up != null:
 		if _parked.has(up):
 			_unpark(up)
 			return
-		up = _parents.get(up)
+		up = _parent_el(up)
 
 
 ## Add a parked subtree's root control to its parent control where it was
@@ -2913,7 +2961,7 @@ func _unpark(el: UxmlElement) -> void:
 		return
 	c.remove_meta(&"uxml_parked")
 	var at := -1
-	var parent: UxmlElement = _parents.get(el)
+	var parent: UxmlElement = _parent_el(el)
 	var sibs: Array = parent.children if parent != null else []
 	var i := sibs.find(el)
 	for k in range(i - 1, -1, -1):
@@ -2982,16 +3030,14 @@ func get_native(element_name: String) -> Control:
 
 ## The semantic element, for attribute/structure access.
 func get_element_model(element_name: String) -> UxmlElement:
-	if _v2 != null:
-		return _v2.named(element_name)
-	return _by_name.get(element_name)
+	return _lookup_name(element_name)
 
 
 ## The last computed style for the element (property -> {value, origin}).
 func get_computed_style(element_name: String) -> Dictionary:
 	if _v2 != null:
 		return _v2.computed_style(_v2.named(element_name))
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _lookup_name(element_name)
 	return {} if el == null else _styles.get(el, {})
 
 
@@ -3000,7 +3046,7 @@ func get_computed_style(element_name: String) -> Dictionary:
 ## The state descends the whole subtree — native disabled flags plus the
 ## :disabled pseudo — until called again. A disabled ancestor still wins.
 func set_enabled(element_name: String, enabled: bool) -> void:
-	var el: UxmlElement = _v2.named(element_name) if _v2 != null else _by_name.get(element_name)
+	var el: UxmlElement = _v2.named(element_name) if _v2 != null else _lookup_name(element_name)
 	if el == null:
 		return
 	_disabled_rt[el] = not enabled
@@ -3014,7 +3060,7 @@ func set_enabled(element_name: String, enabled: bool) -> void:
 ## normally driven by real input; :disabled descends — use set_enabled for
 ## the subtree form.
 func set_element_state(element_name: String, state: String, on: bool) -> void:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _lookup_name(element_name)
 	if el != null:
 		_set_state(el, state, on)
 
@@ -3042,6 +3088,7 @@ func _v2_fallback(why: String) -> void:
 	_v2 = null
 	g.dispose()
 	runtime_fallback = why
+	_doc.drop_table()
 	_index()
 	_restyle_now()
 
@@ -3099,7 +3146,7 @@ func get_element_for(control: Control) -> UxmlElement:
 func get_parent_element(element: UxmlElement) -> UxmlElement:
 	if _v2 != null:
 		return _v2.parent_of(element)
-	return _parents.get(element)
+	return _parent_el(element)
 
 
 ## The last computed style of `element` (property -> {value, origin}), as
@@ -3114,7 +3161,7 @@ func get_computed_style_for(element: UxmlElement) -> Dictionary:
 ## input can clear the state again (a mouse_exited clears :hover); use
 ## set_forced_states() for a state that stays.
 func set_element_state_for(element: UxmlElement, state: String, on: bool) -> void:
-	if element != null and _parents.has(element):
+	if element != null and _has_el(element):
 		_set_state(element, state, on)
 
 
@@ -3547,7 +3594,7 @@ func _context_click(gp: Vector2) -> bool:
 			if got is Array or got is PackedStringArray:
 				for it in got:
 					items.append(it)
-		el = _parents.get(el)
+		el = _parent_el(el)
 	if items.is_empty():
 		return false
 	return show_context_menu(gp, items) != null
@@ -3567,7 +3614,7 @@ const FORCEABLE_STATES := ["hover", "active", "focus", "checked", "selected", "d
 ## cancels an authored enabled="false" as set_enabled(true) does. Unknown
 ## states are ignored with a push_warning().
 func set_forced_states(element: UxmlElement, states: PackedStringArray) -> void:
-	if element == null or not (_parents.has(element) or (_doc != null and element == _doc.root)):
+	if element == null or not (_has_el(element) or (_doc != null and element == _doc.root)):
 		return
 	var kept := PackedStringArray()
 	for s in states:
@@ -3677,7 +3724,7 @@ func explain_style(element: UxmlElement, property: String, states: Dictionary = 
 	var idx: int = i
 	var bits_of := func(j: int) -> int:
 		return own if j == idx and own >= 0 else _state_bits(_cascade.els[j], j)
-	var p = _parents.get(element)
+	var p = _parent_el(element)
 	var parent_style: Dictionary = {} if p == null else _styles.get(p, {})
 	return _cascade.explain(idx, property, bits_of, parent_style)
 
@@ -3731,7 +3778,7 @@ func set_text(element_name: String, text: String) -> void:
 	if _v2 != null:
 		_v2.set_text(_v2.named(element_name), text)
 		return
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _lookup_name(element_name)
 	if el == null:
 		return
 	_set_control_text(_natives.get(el), text)
@@ -3841,7 +3888,7 @@ func _fixed_axis(el: UxmlElement, st: Dictionary, horizontal: bool) -> bool:
 		return (mn == "auto" or _is_px(mn)) and (mx == "none" or _is_px(mx))
 	if _sv(st, "position", "relative") == "absolute":
 		return false
-	var parent: UxmlElement = _parents.get(el)
+	var parent: UxmlElement = _parent_el(el)
 	if parent == null:
 		return false
 	var pst: Dictionary = _styles.get(parent, {})
@@ -3886,7 +3933,7 @@ func _definite(el: UxmlElement, horizontal: bool, depth: int) -> bool:
 		return true
 	if _sv(st, "position", "relative") == "absolute":
 		return false
-	var parent: UxmlElement = _parents.get(el)
+	var parent: UxmlElement = _parent_el(el)
 	if parent == null:
 		return false
 	var pst: Dictionary = _styles.get(parent, {})
@@ -3924,7 +3971,7 @@ func _vertical_viewport(el: UxmlElement, st: Dictionary) -> bool:
 ## ...), as a two-way binding reads it: null for an element without a field
 ## value.
 func get_field_value(element_name: String) -> Variant:
-	var b = _behaviors.get(_by_name.get(element_name))
+	var b = _behaviors.get(_lookup_name(element_name))
 	if b == null:
 		return null
 	var r: Array = b.bind_read("value")
@@ -3940,7 +3987,7 @@ func get_field_value(element_name: String) -> Variant:
 ## (Unity's SetValueWithoutNotify and `value`). Returns false for an element
 ## without a field value.
 func set_field_value(element_name: String, value: Variant, notify: bool = false) -> bool:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _lookup_name(element_name)
 	var b = null if el == null else _behaviors.get(el)
 	if b == null or not (b.bind_read("value") as Array)[0]:
 		return false
@@ -3975,7 +4022,7 @@ var _quiet_attr := "value"
 ## the editor changes (an empty field shapes its placeholder). Returns false
 ## for an element without a placeholder.
 func set_field_placeholder(element_name: String, text: String) -> bool:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _lookup_name(element_name)
 	var b = null if el == null else _behaviors.get(el)
 	if b == null or not b.has_method("native") or not b.has_method("bind_write_common"):
 		return false
@@ -3997,7 +4044,7 @@ func set_field_placeholder(element_name: String, text: String) -> bool:
 
 ## The placeholder of a text field ("" for none or another element).
 func get_field_placeholder(element_name: String) -> String:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _lookup_name(element_name)
 	var b = null if el == null else _behaviors.get(el)
 	if b == null or not b.has_method("bind_write_common"):
 		return ""
@@ -4006,7 +4053,7 @@ func get_field_placeholder(element_name: String) -> String:
 
 ## True for an element of the current load.
 func _is_current(element: UxmlElement) -> bool:
-	return _parents.has(element) or (_doc != null and element == _doc.root)
+	return _has_el(element) or (_doc != null and element == _doc.root)
 
 
 ## The author classes of `element` at runtime; the classes that the control
@@ -4032,7 +4079,7 @@ func get_author_classes(element: UxmlElement) -> PackedStringArray:
 ## Replace the element's `class` attribute and re-resolve. Runtime class
 ## changes are how game code switches authored variants (e.g. .selected).
 func set_class(element_name: String, class_string: String) -> void:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _lookup_name(element_name)
 	if el == null:
 		return
 	# Through the observable model: notifies _on_model_changed (which
@@ -4107,9 +4154,13 @@ func _prepare_collections() -> bool:
 	var found := false
 	UxmlContainerParts.pool_height = _list_pool_height()
 	var views: Array = []
-	for el in _doc.root.walk():
-		if UxmlContainerParts.is_collection(el.local):
-			views.append(el)
+	if _doc.table != null:
+		for i in _doc.table.rows_named(PackedStringArray(["ListView", "TreeView", "MultiColumnListView", "MultiColumnTreeView"]), true):
+			views.append(_doc.handle(i))
+	else:
+		for el in _doc.root.walk():
+			if UxmlContainerParts.is_collection(el.local):
+				views.append(el)
 	for el in views:
 		found = true
 		var hv = el.get_attribute("fixed-item-height")
@@ -4120,12 +4171,16 @@ func _prepare_collections() -> bool:
 					'fixed-item-height="%s" is not a positive number; %s used' % [hv, UxmlContainerParts.DEFAULT_ITEM_HEIGHT],
 					_doc.source, el.open_tag_start, _doc.path))
 				el.attributes = el.attributes.filter(func(a): return a["name"] != "fixed-item-height")
+				if _doc.table != null:
+					_doc.table.set_attributes(_doc.row_of(el), el.attributes)
 		var vm = el.get_attribute("virtualization-method")
 		if vm != null and not String(vm) in ["FixedHeight", "DynamicHeight"]:
 			_rt_warnings.append(UxmlDiagnostic.make("unsupported-value",
 				'virtualization-method="%s" is not FixedHeight or DynamicHeight; FixedHeight used' % vm,
 				_doc.source, el.open_tag_start, _doc.path))
 			el.attributes = el.attributes.filter(func(a): return a["name"] != "virtualization-method")
+			if _doc.table != null:
+				_doc.table.set_attributes(_doc.row_of(el), el.attributes)
 		if el.has_attribute("item-template"):
 			el.set_meta(&"uxml_item_template", _load_template(el, String(el.get_attribute("item-template"))))
 		var k := 0
@@ -4507,7 +4562,7 @@ func _collection_at(gp: Vector2):
 			var b = _behaviors.get(hit)
 			if b != null and b.has_method("drop_args"):
 				return b
-		hit = _parents.get(hit)
+		hit = _parent_el(hit)
 	return null
 
 
@@ -4613,7 +4668,7 @@ func get_sort_descriptions(view_name: String) -> Array:
 
 
 func _column_index(view_name: String, column: String) -> int:
-	var el: UxmlElement = _by_name.get(view_name)
+	var el: UxmlElement = _lookup_name(view_name)
 	if el == null:
 		return -1
 	for c in UxmlContainerParts.columns_of(el):
@@ -4673,7 +4728,7 @@ func _on_focus_changed(c: Control) -> void:
 			var b = _behaviors.get(el)
 			if b != null:
 				b.scroll_to(c)
-		el = _parents.get(el)
+		el = _parent_el(el)
 
 
 ## TabView: select the tab at `index` (emits value_changed).
@@ -4901,7 +4956,7 @@ func get_focus_ring() -> Array:
 ## String or {text, checked, disabled}; "-" is a separator.
 ## `on_chosen.call(index, text)` runs when the user chooses an entry.
 func set_menu_items(element_name: String, items: Array, on_chosen: Callable = Callable()) -> void:
-	var el: UxmlElement = _by_name.get(element_name)
+	var el: UxmlElement = _lookup_name(element_name)
 	var b = _behaviors.get(el) if el != null else null
 	if b == null or not "items" in b:
 		return
