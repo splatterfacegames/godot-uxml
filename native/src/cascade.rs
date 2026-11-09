@@ -271,6 +271,10 @@ pub struct Cascade {
     var_ent: HashMap<(usize, usize, usize, usize), (Rc<Vec<Pair>>, Rc<Vec<Variant>>, Variant)>,
     inline_cache: HashMap<String, Rc<Inline>>,
     subst_memo: HashMap<(i64, String), Option<GString>>,
+    /// The expansion of a var() declaration under a custom-property set
+    /// (customs id, declaration list, index): substituted and expanded once
+    /// per set. The list is kept, so its address names it.
+    var_exp: HashMap<(i64, usize, usize), (Rc<Vec<Decl>>, bool, GString, Rc<Vec<Pair>>)>,
     // compiled rules
     rules: Vec<Rule>,
     sels: Vec<Sel>,
@@ -645,6 +649,7 @@ impl Cascade {
             var_ent: HashMap::new(),
             inline_cache: HashMap::new(),
             subst_memo: HashMap::new(),
+            var_exp: HashMap::new(),
             rules: vec![],
             sels: vec![],
             b_name: HashMap::new(),
@@ -1664,7 +1669,21 @@ impl Cascade {
             let pid = decl.pid;
             let mut failed = false;
             let pairs: Rc<Vec<Pair>>;
-            if flags & F_VAR != 0 {
+            let vkey = (cid, Rc::as_ptr(&c_decls[j]) as usize, c_d[j]);
+            let hit = if flags & F_VAR != 0 && flags & F_CUSTOM == 0 && cid > 0 {
+                self.var_exp.get(&vkey).map(|e| (e.1, e.2.clone(), e.3.clone()))
+            } else {
+                None
+            };
+            if let Some((f, raw, p)) = hit {
+                failed = f;
+                pairs = p;
+                if pairs.is_empty() {
+                    let m = format!("{}: {} -- wrong number of values; declaration dropped", decl.prop, raw);
+                    warns.push(self.diag(i, "invalid-shorthand", m));
+                    continue;
+                }
+            } else if flags & F_VAR != 0 {
                 let val = decl.val.clone();
                 let sub: Option<GString> = if flags & F_CUSTOM != 0 {
                     let _cbp = crate::prof::scope("c.subst.cb_custom");
@@ -1698,6 +1717,13 @@ impl Cascade {
                     }
                 };
                 pairs = self.expand(pid, &raw);
+                if flags & F_CUSTOM == 0 && cid > 0 {
+                    if self.var_exp.len() > 65536 {
+                        self.var_exp.clear();
+                    }
+                    self.var_exp.insert(vkey, (c_decls[j].clone(), failed, raw.clone(), pairs.clone()));
+                }
+                let decl = &c_decls[j][c_d[j]];
                 if pairs.is_empty() {
                     let m = format!("{}: {} -- wrong number of values; declaration dropped", decl.prop, raw);
                     warns.push(self.diag(i, "invalid-shorthand", m));

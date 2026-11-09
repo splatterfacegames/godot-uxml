@@ -522,6 +522,12 @@ func _start_runtime() -> bool:
 	return false
 
 
+## The children of `el` (a handle's made now): runtime v1's hot paths read
+## the backing array without the property getter.
+static func _kids(el: UxmlElement) -> Array:
+	return el._children if el._m == null else el.children
+
+
 ## Whether a load asks for runtime v2 (its model is then parsed into the
 ## table: UxmlLoader.parse_table).
 func _wants_v2() -> bool:
@@ -1216,7 +1222,7 @@ func _index() -> void:
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
-		for child in el.children:
+		for child in (el.children if el._m != null else el._children):
 			_parents[child] = el
 			stack.append(child)
 	for el in _doc.root.walk():
@@ -1851,7 +1857,7 @@ func _settle_snapshot() -> void:
 		for el in _controls:
 			var c: Control = _controls[el]
 			var box := c is UxmlBox
-			if box and not (el as UxmlElement).children.is_empty() and el != _doc.root:
+			if box and not _kids(el).is_empty() and el != _doc.root:
 				_snap_cs.append(c)
 				_snap_kind.append(3)
 				continue
@@ -2122,7 +2128,7 @@ func _emit_transition_event(kind: int, index: int, property: String, elapsed: fl
 func _percent_base(index: int, property: String, sub: int) -> float:
 	var el: UxmlElement = _cascade.els[index]
 	var own: Control = _controls.get(el)
-	var par = _parent_el(el)
+	var par = _parents.get(el)
 	var pc: Control = null if par == null else _controls.get(par)
 	match property:
 		"top", "bottom", "height", "min-height", "max-height":
@@ -2403,7 +2409,7 @@ func _text_controls() -> Dictionary:
 		var out := {&"_of": _doc}
 		for el in _controls:
 			var c = _controls[el]
-			if not (el as UxmlElement).children.is_empty() and (c is Label or c is RichTextLabel or c is Button):
+			if not _kids(el).is_empty() and (c is Label or c is RichTextLabel or c is Button):
 				out[el] = true
 		_text_parents = out
 	return _text_parents
@@ -2511,9 +2517,9 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 	if r == null:
 		if _layout_roots.is_empty():
 			return false
-		r = _parent_el(x)
+		r = _parents.get(x)
 		while r != null and not _layout_roots.has(r):
-			r = _parent_el(r)
+			r = _parents.get(r)
 		if r == null:
 			return false
 	# A root inside a root of `local` is laid out with it.
@@ -2523,7 +2529,7 @@ func _add_local(local: Dictionary, x: UxmlElement, root, fresh: bool) -> bool:
 			if fresh:
 				local[a] = true
 			return true
-		a = _parent_el(a)
+		a = _parents.get(a)
 	# Roots that cover a third of the document: one layout of the
 	# document costs less than a layout of each.
 	var ri = _cascade.index.get(r)
@@ -2583,9 +2589,9 @@ var _shown_memo: Dictionary = {}
 ## when that view has a fixed size: a new item source or an expand changes
 ## the content height and the rows, and lays out the view alone.
 func _add_local_view(local: Dictionary, x: UxmlElement, fresh: bool) -> bool:
-	var v = _parent_el(x)
+	var v = _parents.get(x)
 	while v != null and not (UxmlContainerParts.is_collection(v.local) and v.part_of == null):
-		v = _parent_el(v)
+		v = _parents.get(v)
 	# A multi-column view sizes its header columns after the layout of the
 	# document (update_columns): it is not laid out alone (seen once R33 let
 	# a view with a large hidden pool take the subtree layout).
@@ -2625,11 +2631,11 @@ func _local_measures(r: UxmlElement) -> Array:
 
 ## True when `el` is strictly inside one of the roots of `local`.
 func _under_local(el: UxmlElement, local: Dictionary) -> bool:
-	var p = _parent_el(el)
+	var p = _parents.get(el)
 	while p != null:
 		if local.has(p):
 			return true
-		p = _parent_el(p)
+		p = _parents.get(p)
 	return false
 
 
@@ -2668,12 +2674,12 @@ func _do_local_layout(local: Dictionary, applied: Array) -> void:
 		var opts := _layout_options()
 		for r in roots:
 			var origin := Vector2.ZERO
-			var p = _parent_el(r)
+			var p = _parents.get(r)
 			while p != null:
 				var pr = _raw_rects.get(p)
 				if pr != null:
 					origin += (pr as Rect2).position
-				p = _parent_el(p)
+				p = _parents.get(p)
 			var res := UxmlFlexLayout.compute_subtree(r, _raw_rects[r], _cbs[r], origin,
 				_styles, _measure_leaf, _rt_warnings, opts)
 			var rects: Dictionary = res["rects"]
@@ -2848,7 +2854,7 @@ func _park_hidden() -> void:
 	var idx: Dictionary = _cascade.index
 	var below := {}
 	for el in _cascade.els:
-		var parent = _parent_el(el)
+		var parent = _parents.get(el)
 		if parent == null:
 			continue
 		if below.has(parent):
@@ -2938,15 +2944,15 @@ func _expose(el: UxmlElement) -> void:
 	for pel in _parked.keys():
 		var cur: UxmlElement = pel
 		while cur != null and cur != el:
-			cur = _parent_el(cur)
+			cur = _parents.get(cur)
 		if cur == el:
 			_unpark(pel)
-	var up: UxmlElement = _parent_el(el)
+	var up: UxmlElement = _parents.get(el)
 	while up != null:
 		if _parked.has(up):
 			_unpark(up)
 			return
-		up = _parent_el(up)
+		up = _parents.get(up)
 
 
 ## Add a parked subtree's root control to its parent control where it was
@@ -2961,7 +2967,7 @@ func _unpark(el: UxmlElement) -> void:
 		return
 	c.remove_meta(&"uxml_parked")
 	var at := -1
-	var parent: UxmlElement = _parent_el(el)
+	var parent: UxmlElement = _parents.get(el)
 	var sibs: Array = parent.children if parent != null else []
 	var i := sibs.find(el)
 	for k in range(i - 1, -1, -1):
@@ -3350,9 +3356,10 @@ func _pick(el: UxmlElement, gp: Vector2, respect_picking: bool) -> UxmlElement:
 		var ins: Vector4 = clip.inset
 		into = Rect2(ins.x, ins.y, c.size.x - ins.x - ins.z, c.size.y - ins.y - ins.w).has_point(local)
 	if into:
-		var k := el.children.size() - 1
+		var ks := _kids(el)
+		var k := ks.size() - 1
 		while k >= 0:
-			var h := _pick(el.children[k], gp, respect_picking)
+			var h := _pick(ks[k], gp, respect_picking)
 			if h != null:
 				return h
 			k -= 1
@@ -3834,7 +3841,7 @@ func _text_leaf(c: Control):
 	if _doc == null or _cascade == null or _controls.is_empty():
 		return null
 	var el = _el_of.get(c)
-	if el == null or not (el as UxmlElement).children.is_empty():
+	if el == null or not _kids(el).is_empty():
 		return null
 	if c.autowrap_mode != TextServer.AUTOWRAP_OFF or c.has_meta(&"uxml_autosize"):
 		return null
@@ -3888,7 +3895,7 @@ func _fixed_axis(el: UxmlElement, st: Dictionary, horizontal: bool) -> bool:
 		return (mn == "auto" or _is_px(mn)) and (mx == "none" or _is_px(mx))
 	if _sv(st, "position", "relative") == "absolute":
 		return false
-	var parent: UxmlElement = _parent_el(el)
+	var parent: UxmlElement = _parents.get(el)
 	if parent == null:
 		return false
 	var pst: Dictionary = _styles.get(parent, {})
@@ -3933,7 +3940,7 @@ func _definite(el: UxmlElement, horizontal: bool, depth: int) -> bool:
 		return true
 	if _sv(st, "position", "relative") == "absolute":
 		return false
-	var parent: UxmlElement = _parent_el(el)
+	var parent: UxmlElement = _parents.get(el)
 	if parent == null:
 		return false
 	var pst: Dictionary = _styles.get(parent, {})
@@ -4768,7 +4775,7 @@ func _structure_changed() -> void:
 	var stack: Array = [_doc.root]
 	while not stack.is_empty():
 		var el: UxmlElement = stack.pop_back()
-		for child in el.children:
+		for child in (el.children if el._m != null else el._children):
 			_parents[child] = el
 			stack.append(child)
 	_cascade = null

@@ -274,7 +274,7 @@ func _index_tree() -> void:
 		_prefix.append(el.prefix)
 		_ots.append(el.open_tag_start)
 		_ote.append(el.open_tag_end)
-		var ch: Array = el.children
+		var ch: Array = el.children if el._m != null else el._children
 		var k := ch.size() - 1
 		while k >= 0:
 			stack.append(ch[k])

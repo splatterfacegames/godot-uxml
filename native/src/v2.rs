@@ -1223,6 +1223,7 @@ impl St {
         // background images read the element too.
         let mut key: Vec<usize> = vec![self.kind[i] as usize];
         let mut keep: Vec<Rc<Variant>> = vec![];
+        let p_items = crate::prof::scope("v2.vis.items");
         {
             let cb = self.cascade();
             let c = cb.inner.as_ref().unwrap();
@@ -1241,6 +1242,7 @@ impl St {
                 }
             }
         }
+        drop(p_items);
         if !lay_ok {
             return Err(format!("element {}: a property runtime v2 does not draw", i));
         }
@@ -1251,6 +1253,7 @@ impl St {
             && ![P_FONT, P_FONTDEF].iter().any(|&k| vals[k].as_ref().is_some_and(|x| s(x).contains("url(")));
         if memo_ok {
             if let Some((_, rec, hp)) = self.vis_memo.get(&key) {
+                let _ph = crate::prof::scope("v2.vis.hit");
                 let mut v = rec.clone();
                 v.picking_ignore = self.vis[i].picking_ignore;
                 v.gone = gone;
@@ -1270,6 +1273,7 @@ impl St {
                 return Ok(());
             }
         }
+        let _pm = crate::prof::scope("v2.vis.miss");
         let str_of = |k: usize| vals[k].as_ref().map(s).unwrap_or_default();
         let mut v = Vis { picking_ignore: self.vis[i].picking_ignore, opacity: 1.0, gone, ..Default::default() };
         // display / visibility (UxmlStyleApplier.apply_flags).
@@ -1796,6 +1800,7 @@ impl St {
     /// The text block of Label i (shaped again only when its text, font,
     /// size, wrap or spacing changed).
     fn make_text(&mut self, i: usize) {
+        let _pt = crate::prof::scope("v2.text");
         let Some(ts) = self.vis[i].text.clone() else { return };
         let text = self.texts_src[i].clone();
         if self.kind[i] == K_BUTTON {
