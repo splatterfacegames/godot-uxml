@@ -322,8 +322,6 @@ func _compile_rules() -> void:
 		var si: int = root["sheet"]
 		if root["scope"] == null and _add_theme_block(si, visited, reported_root):
 			continue
-		if root["scope"] != null and _add_theme_block(si, visited, reported_root, root["scope"]):
-			continue
 		var flat: Array = []
 		UssStyleResolver._walk_sheet(doc, si, root["scope"], visited, flat)
 		for f in flat:
