@@ -16,7 +16,7 @@ first round).
 
 Runtime v1 must not regress:
 
-- `python tests/run_tests.py --godot $G --timeout 1700` (3932 checks, of which
+- `python tests/run_tests.py --godot $G --timeout 1700` (3973 checks, of which
   54 of runtime v2's interaction suite `tests/test_runtime_v2.gd`);
 - `$G --headless --path . -s res://bench/parity.gd` (178/179; the runtime
   rects of `lay-label-floor`: v1 8/24, v2 24/24);
