@@ -45,6 +45,13 @@ const TAGS := {"VisualElement": true, "TemplateContainer": true, "Label": true, 
 	"RadioButtonGroup": true, "Foldout": true, "ProgressBar": true, "EnumField": true, "MinMaxSlider": true,
 	"ListView": true}
 
+const _COLLECTIONS := {"ListView": true, "TreeView": true, "MultiColumnListView": true, "MultiColumnTreeView": true}
+## The kinds of the controls (UxmlRuntimeV2 K_*).
+const _CONTROL_KINDS := {"Button": 4, "Toggle": 1, "Slider": 1, "SliderInt": 1, "DropdownField": 1, "TextField": 1,
+	"ScrollView": 1, "RadioButton": 1, "RadioButtonGroup": 1, "Foldout": 1, "ProgressBar": 1, "EnumField": 1,
+	"MinMaxSlider": 1, "ListView": 1}
+var _has_tabindex := false
+
 ## The part tags of the controls v2 covers, and the kinds the core gives
 ## them (v2.rs K_*).
 const K_BOX := 1
@@ -156,15 +163,22 @@ static func uncovered(model: UxmlDocumentModel) -> String:
 		return "no document"
 	if not model.bindings.is_empty():
 		return "data bindings"
-	for el in model.root.walk():
-		if el.part_of != null:
+	var stack: Array = [model.root]
+	while not stack.is_empty():
+		var el: UxmlElement = stack.pop_back()
+		var ch: Array = el.children
+		var k := ch.size() - 1
+		while k >= 0:
+			stack.append(ch[k])
+			k -= 1
+		if el._part_of != null:
 			if not PART_KINDS.has(el.local):
 				return "part <%s>" % el.local
 			continue
 		if not TAGS.has(el.local):
 			return "element <%s>" % el.local
-		var allowed: Array = CONTROL_ATTRS.get(el.local, [])
-		if allowed.is_empty():
+		var allowed = CONTROL_ATTRS.get(el.local)
+		if allowed == null or (allowed as Array).is_empty():
 			continue  # the core checks the attributes of static elements
 		for a in el.attributes:
 			var n := String(a["name"])
@@ -246,10 +260,8 @@ func load() -> String:
 	_make_proxies()
 	# tabindex: Unity's focus ring over the interaction Controls (runtime
 	# v1's UxmlCommonAttributes, which reads the document's element maps).
-	for el in cascade.els:
-		if el.has_attribute("tabindex"):
-			doc._attrs.rebuild_focus_ring()
-			break
+	if _has_tabindex:
+		doc._attrs.rebuild_focus_ring()
 	t0 = _step("v2: controls", t0)
 	cascade.update(_options())
 	t0 = _step("v2: first cascade", t0)
@@ -271,7 +283,9 @@ func load() -> String:
 		rt.call("set_edit_control", i, editors[i])
 	_flags = cascade.effective_flags()
 	_sync_disabled()
+	t0 = _step("v2: wire model", t0)
 	_apply_editors(PackedInt32Array(editors.keys()))
+	t0 = _step("v2: apply editors", t0)
 	_seen_rev = doc._opt_rev
 	_layout(true)
 	if not _failed.is_empty():
@@ -295,41 +309,57 @@ func _index() -> PackedByteArray:
 	var els: Array = cascade.els
 	var par: PackedInt32Array = cascade._parent
 	var kinds := PackedByteArray()
-	kinds.resize(els.size())
+	var n_els := els.size()
+	kinds.resize(n_els)
+	_has_tabindex = false
 	# The elements of the pooled rows of collection views: no names (the
 	# rows repeat them; runtime v1's _pooled).
 	var pooled := {}
 	for el in els:
-		if UxmlContainerParts.is_collection(el.local) and el.part_of == null:
+		if _COLLECTIONS.has(el.local) and el._part_of == null:
 			for row in UxmlContainerParts.rows_of(el):
 				for sub in row.walk():
 					if sub.part_of == null:
 						pooled[sub] = true
 	doc._pooled = pooled
-	for i in els.size():
+	var parents := doc._parents
+	var by_name := doc._by_name
+	var el_names := doc._el_names
+	for i in n_els:
 		var el: UxmlElement = els[i]
 		if i > 0:
-			doc._parents[el] = els[par[i]]
-		if el.part_of != null:
-			var k: int = PART_KINDS.get(el.local, 0)
-			if el.part_role == "editor":
+			parents[el] = els[par[i]]
+		var local := el.local
+		if el._part_of != null:
+			var k: int = PART_KINDS.get(local, 0)
+			var role := el.part_role
+			if role == "editor":
 				k = K_EDIT
-			if UNPICKED.has(el.part_role) or UxmlControlFactory.UNPICKED_CONTAINER_PARTS.has(el.part_role):
+			if UNPICKED.has(role) or UxmlControlFactory.UNPICKED_CONTAINER_PARTS.has(role):
 				k |= F_UNPICKED
 			kinds[i] = k | F_ATTRS_OK | F_PART
+			for a in el.attributes:
+				if a["name"] == "tabindex":
+					_has_tabindex = true
 			continue
-		match el.local:
-			"Button":
-				kinds[i] = K_BUTTON | F_ATTRS_OK
-			"Toggle", "Slider", "SliderInt", "DropdownField", "TextField", "ScrollView", "RadioButton", "RadioButtonGroup", "Foldout", "ProgressBar", "EnumField", "MinMaxSlider", "ListView":
-				kinds[i] = K_BOX | F_ATTRS_OK
-		if pooled.has(el):
+		var ck: int = _CONTROL_KINDS.get(local, 0)
+		if ck != 0:
+			kinds[i] = ck | F_ATTRS_OK
+		# The first `name` (get_attribute) and whether a tabindex is set.
+		var nm = null
+		for a in el.attributes:
+			var an: String = a["name"]
+			if an == "name":
+				if nm == null:
+					nm = a["value"]
+			elif an == "tabindex":
+				_has_tabindex = true
+		if not pooled.is_empty() and pooled.has(el):
 			kinds[i] |= F_PART
 			continue
-		var n = el.get_attribute("name")
-		if n != null and not doc._by_name.has(String(n)):
-			doc._by_name[String(n)] = el
-			doc._el_names[el] = String(n)
+		if nm != null and not by_name.has(String(nm)):
+			by_name[String(nm)] = el
+			el_names[el] = String(nm)
 	return kinds
 
 
@@ -393,7 +423,15 @@ func _make_proxies() -> void:
 	for i in els.size():
 		var el: UxmlElement = els[i]
 		var c: Control = null
-		if el.part_of != null and el.local in ["Toggle", "RadioButton"]:
+		var is_part := el._part_of != null
+		var local := el.local
+		# Most elements have no Control (Labels, boxes, most parts).
+		if is_part:
+			if local != "Toggle" and local != "RadioButton" and el.part_role != "content" and el.part_role != "editor":
+				continue
+		elif not _CONTROL_KINDS.has(local) and local != "VisualElement" and local != "TemplateContainer":
+			continue
+		if is_part and (local == "Toggle" or local == "RadioButton"):
 			# A control that is a part (a Foldout's Toggle, the choices of a
 			# RadioButtonGroup): its own UxmlToggle.
 			var pt := UxmlToggle.new()
@@ -403,14 +441,14 @@ func _make_proxies() -> void:
 			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			c.set_meta("uxml_focus", c.focus_mode)
 			doc._natives[el] = c
-		elif el.part_of != null and el.part_role == "content" and _collection_of(el) != null:
+		elif is_part and el.part_role == "content" and _collection_of(el) != null:
 			# Unity: the scroll view's content container of a collection
 			# view takes the focus (CollectionBehavior.setup connects it).
 			c = Control.new()
 			c.focus_mode = Control.FOCUS_ALL
 			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			c.set_meta("uxml_focus", c.focus_mode)
-		elif el.part_of != null:
+		elif is_part:
 			if el.part_role == "editor":
 				c = UxmlTextInput.create(el)
 				factory._apply_common_attributes(el, c)
@@ -559,13 +597,11 @@ class V2Nav extends Node:
 
 ## Whether the Control of `el` is made on first need.
 static func _lazy_kind(el: UxmlElement) -> bool:
-	if el.part_of != null:
-		return false
 	match el.local:
 		"Button":
-			return true
+			return el._part_of == null
 		"VisualElement", "TemplateContainer":
-			return UxmlParts._attr(el, "focusable") == "true"
+			return el._part_of == null and UxmlParts._attr(el, "focusable") == "true"
 	return false
 
 
@@ -574,10 +610,7 @@ static func _lazy_kind(el: UxmlElement) -> bool:
 func _needs_all() -> bool:
 	if doc.is_inside_tree() and doc.get_tree().is_accessibility_enabled():
 		return true
-	for el in cascade.els:
-		if el.has_attribute("tabindex"):
-			return true
-	return false
+	return _has_tabindex  # (_index)
 
 
 ## The Control of a lazy kind (a flat Button, a plain focusable Control).
@@ -1328,10 +1361,13 @@ func _restyle_pass() -> PackedInt32Array:
 ## and lay out again (as runtime v1's _post_layout). The interaction
 ## Controls follow.
 func _layout(force: bool = false, restyled: bool = true) -> void:
+	var t0 := Time.get_ticks_usec()
 	var moved: bool = rt.call("layout_if_needed", doc._layout_host(), force or _editor_measures_changed())
+	t0 = _step("layout: pass", t0)
 	if (moved or force) and _editor_insets():
 		# The resolved insets changed what an editor measures.
 		rt.call("layout_if_needed", doc._layout_host(), true)
+		t0 = _step("layout: editor insets pass", t0)
 	if not moved and not restyled and not force:
 		# Position offsets (a scroll, collection rows) move the interaction
 		# Controls without a restyle.
@@ -1359,17 +1395,22 @@ func _layout(force: bool = false, restyled: bool = true) -> void:
 				hooked = true
 			else:
 				hooked = b.v2_after_layout() or hooked
+		t0 = _step("layout: hooks", t0)
 		if not hooked or _dirty.is_empty():
 			break
 		var ch := _restyle_pass()
+		t0 = _step("layout: hook restyle", t0)
 		if rt == null:
 			return
 		if rt.call("layout_if_needed", doc._layout_host(), false):
 			moved = true
+		t0 = _step("layout: hook pass", t0)
 		restyled = restyled or not ch.is_empty()
 	rt.call("take_vis_changed")
 	_place_proxies()
+	t0 = _step("layout: place", t0)
 	elide_placeholders()
+	_step("layout: elide", t0)
 
 
 ## text-overflow: ellipsis on a text field elides its placeholder at the
@@ -1799,6 +1840,19 @@ func computed_style(el: UxmlElement) -> Dictionary:
 	return st
 
 
+## The edge lengths of `el`'s computed style that the slider hooks read
+## (UxmlInputParts.layout_styles: margins, borders), as computed_style's
+## entries ({prop: {value}}), without making the whole style.
+const _HOOK_PROPS := ["margin-left", "margin-right", "border-left-width", "border-right-width"]
+
+
+func style_lengths(el: UxmlElement) -> Dictionary:
+	var i := index_of(el)
+	if i < 0:
+		return {}
+	return cascade._native.call("style_values", i, PackedStringArray(_HOOK_PROPS))
+
+
 ## The border box of `el` in the root box's coordinates, or null when it
 ## has no layout (display: none on it or above, or not drawn).
 func host_rect(el: UxmlElement):
@@ -1884,7 +1938,7 @@ class V2SliderBehavior extends UxmlInputBehaviors.SliderBehavior:
 		if key == _hook_key and not glue.restyled(part("dragger")):
 			return false
 		_hook_key = key
-		return UxmlInputParts.layout_styles(el, size_of, style_of, _parts)
+		return UxmlInputParts.layout_styles(el, size_of, glue.style_lengths, _parts)
 
 	func _local(x: UxmlElement, p: Vector2) -> Vector2:
 		var r = glue.host_rect(x)
@@ -2206,7 +2260,7 @@ class V2MinMaxBehavior extends UxmlInputBehaviors.MinMaxBehavior:
 		if key == _hook_key and not glue.restyled(part("dragger")):
 			return false
 		_hook_key = key
-		return UxmlInputParts.layout_styles(el, size_of, style_of, _parts)
+		return UxmlInputParts.layout_styles(el, size_of, glue.style_lengths, _parts)
 
 	func _input_pos(p: Vector2) -> Vector2:
 		var r = glue.host_rect(part("input"))

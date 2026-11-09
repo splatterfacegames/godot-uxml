@@ -1965,6 +1965,25 @@ impl Cascade {
         d
     }
 
+    /// The entries `{value}` of `props` in element i's computed style (those
+    /// it has): the values style_dict gives, without the origins and the
+    /// other properties (a layout hook reading a few lengths).
+    pub fn style_values(&self, i: usize, props: &PackedStringArray) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let want: Vec<u32> = props.as_slice().iter().filter_map(|p| self.props.index.get(&p.to_string()).copied()).collect();
+        if want.is_empty() {
+            return d;
+        }
+        for it in self.out_items[i].iter() {
+            if want.contains(&it.pid) {
+                let mut e = VarDictionary::new();
+                e.set(&self.k_value, &*it.value);
+                d.set(&self.props.keys[it.pid as usize], &e);
+            }
+        }
+        d
+    }
+
     /// Computed overrides for element i (empty clears them); see
     /// UssCascade.set_override.
     pub fn set_override(&mut self, i: usize, entries: VarDictionary) {
@@ -2735,6 +2754,16 @@ impl UxmlNativeCascade {
     fn style_of(&self, i: i64) -> VarDictionary {
         match self.inner.as_ref() {
             Some(c) if i >= 0 && (i as usize) < c.len() => c.style_dict(i as usize),
+            _ => VarDictionary::new(),
+        }
+    }
+
+    /// The values of `props` in element i's computed style ({prop: {value}},
+    /// the properties it has): style_of's values, without the rest.
+    #[func]
+    fn style_values(&self, i: i64, props: PackedStringArray) -> VarDictionary {
+        match self.inner.as_ref() {
+            Some(c) if i >= 0 && (i as usize) < c.len() => c.style_values(i as usize, &props),
             _ => VarDictionary::new(),
         }
     }

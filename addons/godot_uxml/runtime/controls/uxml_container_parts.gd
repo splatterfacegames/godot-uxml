@@ -1166,19 +1166,17 @@ static func update_lone_tab(el: UxmlElement, size_of: Callable) -> bool:
 
 ## Before UxmlParts.expand moves author children: the Column UxmlObjects
 ## of the multi-column views leave the tree (META_COLUMNS).
-static func before_expand(doc: UxmlDocumentModel) -> void:
-	for el in doc.root.walk():
-		if is_multi_column(el) and not el.has_meta(META_COLUMNS):
-			read_columns(el)
+## (UxmlParts.expand calls it per element of its walk, before the walk
+## enters the element.)
+static func before_expand_el(el: UxmlElement) -> void:
+	if is_multi_column(el) and not el.has_meta(META_COLUMNS):
+		read_columns(el)
 
 
 ## Steps of UxmlParts.expand that need every part tree built: Tab headers
-## move into their TabView, split views style their panes.
-static func after_expand(doc: UxmlDocumentModel) -> void:
-	var views: Array = []
-	for el in doc.root.walk():
-		if el.local == "TabView" or el.local == "TwoPaneSplitView":
-			views.append(el)
+## move into their TabView, split views style their panes. `views`: the
+## TabViews and TwoPaneSplitViews of the model, in document order.
+static func after_expand(views: Array) -> void:
 	for el in views:
 		if el.local == "TabView":
 			move_tab_headers(el)
