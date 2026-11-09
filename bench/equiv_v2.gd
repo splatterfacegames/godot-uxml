@@ -123,7 +123,38 @@ func _cases() -> Array:
 	for f in ["big-static.uxml", "hud.uxml", "big.uxml", "wl_dialog.uxml", "wl_settings.uxml", "wl_inventory.uxml"]:
 		out.append({"name": "gen:" + f, "file": "Assets/UI/" + f, "root": "user://godot_uxml_equiv_v2/bench"})
 	out.append({"name": "gen:static-cards", "uxml": _static_cards(), "uss": ""})
+	# Panel scaling: the cases of bench/parity/scaled/matrix.json under
+	# three pixel grids (2, 1.33 and 0.8 pixels per point).
+	for n in ["lay-percent", "lay-minmax", "lay-wrap", "lay-fraction", "lay-absolute",
+			"px-border", "px-background", "px-clip", "px-text", "scl-settings"]:
+		var dir2 := CASES_DIR if FileAccess.file_exists(CASES_DIR + n + ".uxml") else "res://bench/parity/scaled/cases/"
+		var up: String = dir2 + n + ".uss"
+		for cfg in SCALES:
+			out.append({"name": "scaled:%s@%s" % [n, cfg], "scale": cfg,
+				"uxml": FileAccess.get_file_as_string(dir2 + n + ".uxml"),
+				"uss": FileAccess.get_file_as_string(up) if FileAccess.file_exists(up) else "", "files": {}})
 	return out
+
+
+## Panel settings of the scaled documents.
+const SCALES := {
+	"cps-s2": {"mode": UxmlPanelSettings.ScaleMode.CONSTANT_PIXEL_SIZE, "scale": 2.0},
+	"cph-r72": {"mode": UxmlPanelSettings.ScaleMode.CONSTANT_PHYSICAL_SIZE, "reference_dpi": 72.0},
+	"sws-800": {"mode": UxmlPanelSettings.ScaleMode.SCALE_WITH_SCREEN_SIZE, "reference": Vector2i(800, 600), "match": 0.5},
+}
+
+
+func _panel_settings(cfg: String) -> UxmlPanelSettings:
+	var c: Dictionary = SCALES[cfg]
+	var ps := UxmlPanelSettings.new()
+	ps.scale_mode = c["mode"]
+	ps.scale = float(c.get("scale", 1.0))
+	ps.reference_dpi = float(c.get("reference_dpi", 96.0))
+	ps.fallback_dpi = 96.0
+	if c.has("reference"):
+		ps.reference_resolution = c["reference"]
+		ps.match_width_or_height = float(c["match"])
+	return ps
 
 
 func _fixture_files(dir: String) -> Array:
@@ -185,6 +216,9 @@ func _doc(c: Dictionary) -> void:
 		d.runtime = rt
 		d.size = SIZE
 		d.transitions_manual = true
+		if c.has("scale"):
+			d.screen_dpi = 96.0
+			d.panel_settings = _panel_settings(c["scale"])
 		(host if rt == 1 else host2).add_child(d)
 		_load(d, c)
 		docs.append(d)

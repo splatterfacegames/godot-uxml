@@ -394,7 +394,12 @@ func _ready() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED and _v2 != null:
-		_v2.relayout()
+		# A scaled panel resolves its scale for the new size.
+		if panel_settings != null:
+			_update_scale()
+			_v2.rescale()
+		else:
+			_v2.relayout()
 	elif what == NOTIFICATION_RESIZED:
 		# A scaled panel resolves its scale for the new size; a new pixel
 		# grid applies every control again (see _on_panel_settings_changed).
@@ -500,8 +505,6 @@ func _start_runtime() -> bool:
 	runtime_fallback = ""
 	if pinned_v1:
 		pass
-	elif (default_runtime if default_runtime != 0 else runtime) == 2 and panel_settings != null:
-		runtime_fallback = "panel settings (scaling)"
 	elif (default_runtime if default_runtime != 0 else runtime) == 2:
 		var g := UxmlRuntimeV2Glue.new(self)
 		var why := g.load()
@@ -3144,6 +3147,10 @@ func _screen_dpi() -> float:
 
 
 func _on_panel_settings_changed() -> void:
+	if _v2 != null:
+		_update_scale()
+		_v2.rescale()
+		return
 	var old := _layout_host()
 	if not _update_scale() or _doc == null:
 		if _doc != null and _scaled and _layout_host() != old:
@@ -3300,13 +3307,14 @@ func get_element_transform(element: UxmlElement, space: UxmlElement = null) -> T
 		var er = _v2.host_rect(element)
 		if er == null:
 			return none
-		var at: Vector2 = _root_box.position + (er as Rect2).position
+		# Points of the panel; this control's coordinates are pixels (the
+		# root box's scale on a scaled panel).
 		if space != null:
 			var sr = _v2.host_rect(space)
 			if sr == null:
 				return none
-			at -= _root_box.position + (sr as Rect2).position
-		return Transform2D(0.0, at)
+			return Transform2D(0.0, (er as Rect2).position - (sr as Rect2).position)
+		return Transform2D(0.0, _root_box.scale, 0.0, _root_box.position + (er as Rect2).position * _root_box.scale)
 	if _restyle_queued:
 		_restyle_now()
 	var c := _laid_out_control(element)

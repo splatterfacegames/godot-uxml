@@ -197,7 +197,9 @@ func test_text_field_editor_is_a_line_edit() -> void:
 	var le := doc.get_native("tf") as LineEdit
 	h.eq(le.text, "abc", "the editor has the value")
 	var ed := UxmlParts.find_part(doc.get_element_model("tf"), "editor")
-	h.eq(le.get_rect(), doc.get_element_rect(ed), "the LineEdit is at the editor part's rect")
+	# It sits in a Control at its field's place (as v1's in its field's).
+	var er := Rect2((le.get_parent() as Control).position + le.position, le.size)
+	h.eq(er, doc.get_element_rect(ed), "the LineEdit is at the editor part's rect")
 	var vals := []
 	doc.value_changed.connect(func(n, v): vals.append([n, v]))
 	le.grab_focus()
@@ -285,4 +287,43 @@ func test_scroll_view_wheel_and_focus_scroll() -> void:
 	var off := doc.get_scroll_offset("sv")
 	h.check(off.y > 400.0, "scroll_to shows a row below the viewport (%s)" % off)
 	h.check(not doc.get_native("r0").visible, "a row scrolled out has its Control hidden")
+	_unload(doc)
+
+
+func test_panel_scaling_on_runtime_v2() -> void:
+	if not _native():
+		return
+	DirAccess.make_dir_recursive_absolute(TMP + "/Assets")
+	var x := FileAccess.open(TMP + "/Assets/s.uxml", FileAccess.WRITE)
+	x.store_string('<ui:UXML xmlns:ui="UnityEngine.UIElements">%s</ui:UXML>' % WIDGETS)
+	x.close()
+	var doc := UxmlDocument.new()
+	doc.runtime = 2
+	var ps := UxmlPanelSettings.new()
+	ps.scale_mode = UxmlPanelSettings.ScaleMode.CONSTANT_PIXEL_SIZE
+	ps.scale = 2.0
+	doc.panel_settings = ps
+	h.root.add_child(doc)
+	doc.size = Vector2(640, 480)
+	doc.load_document("Assets/s.uxml", TMP)
+	h.eq(doc.get_runtime(), 2, "a scaled document loads on v2 (%s)" % doc.runtime_fallback)
+	h.eq(doc.get_pixels_per_point(), 2.0, "two pixels per point")
+	h.eq(doc.get_panel_size(), Vector2(320, 240), "the panel in points")
+	var b := doc.get_element_model("b")
+	var r := doc.get_element_rect(b)
+	var rp := doc.get_element_rect(b, doc.get_document_model().root)
+	h.eq(r.size, rp.size * 2.0, "get_element_rect without a space is in document pixels (%s, %s)" % [r, rp])
+	h.eq(r.position, doc.panel_to_document(rp.position), "and at the panel point's place")
+	h.eq(doc.element_at(r.get_center()), b, "element_at takes document pixels")
+	var got := []
+	doc.button_pressed.connect(func(n): got.append(n))
+	_click(doc, doc.document_to_panel(r.get_center()))
+	h.eq(got, ["b"], "a click on the scaled Button presses it")
+	var w := (doc.get_native("s") as Control).size.x
+	h.eq(w, 300.0, "an interaction Control is sized in points (%s)" % w)
+	ps.scale = 1.0
+	doc._restyle_now()
+	h.eq(doc.get_runtime(), 2, "a new scale keeps the document on v2 (%s)" % doc.runtime_fallback)
+	h.eq(doc.get_pixels_per_point(), 1.0, "one pixel per point")
+	h.eq(doc.get_element_rect(b), doc.get_element_rect(b, doc.get_document_model().root), "at one pixel per point the rect is the panel rect")
 	_unload(doc)

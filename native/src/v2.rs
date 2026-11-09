@@ -189,6 +189,12 @@ impl LeafSource for Leaves {
         let mut t = self.texts.borrow_mut();
         t[i].as_mut().map(|b| b.max_content()).unwrap_or(0.0)
     }
+    fn line_fix(&self, i: usize) -> Option<(f64, f64)> {
+        if self.kind[i] == K_BUTTON {
+            return self.btexts.borrow()[i].as_ref().and_then(|b| b.st.line_fix);
+        }
+        self.texts.borrow()[i].as_ref().and_then(|t| t.st.line_fix)
+    }
     fn natural(&self, i: usize) -> Vector2 {
         if self.kind[i] == K_EDIT {
             // UxmlDocument._measure_leaf of the editor: its combined
@@ -198,6 +204,19 @@ impl LeafSource for Leaves {
             if let Some(m) = layout::read_margins(c, &StringName::from("normal"), &StringName::from("uxml_margins")) {
                 ms.x = layout::f(f64::max(0.0, layout::d(ms.x) - m[0] - m[2]));
                 ms.y = layout::f(f64::max(0.0, layout::d(ms.y) - m[1] - m[3]));
+            }
+            // Unity's lines on a scaled panel (the applier sets the meta
+            // only then; measure_leaf).
+            if c.has_meta("uxml_line_fix") {
+                if let Ok(lf) = c.get_meta("uxml_line_fix").try_to::<PackedFloat64Array>() {
+                    let q = lf.as_slice();
+                    if q.len() == 2 && q[0] > 0.0 {
+                        let n = (layout::d(ms.y) / q[0]).round();
+                        if n > 0.0 {
+                            ms.y = layout::f(n * q[1]);
+                        }
+                    }
+                }
             }
             return ms;
         }
@@ -250,7 +269,7 @@ struct St {
     clips: Vec<Rid>,
     color_memo: HashMap<String, Option<Color>>,
     opacity_memo: HashMap<String, Option<f32>>,
-    font_memo: HashMap<String, (Gd<Font>, i32)>,
+    font_memo: HashMap<String, (Gd<Font>, i32, Option<(f64, f64)>)>,
     box_memo: HashMap<Vec<u64>, Option<Gd<StyleBox>>>,
     /// Visual records by the values they read (see make_vis); the values
     /// are kept so their addresses stay theirs.
@@ -279,6 +298,12 @@ struct St {
     /// run only when a size they read changed (size_epoch).
     size_ep: Vec<i64>,
     lay_ep: i64,
+    /// Panel scaling (UxmlPanelScale): the pixel grid in device pixels per
+    /// point (layout rounding, border widths, the antialiased edges of the
+    /// boxes and clip masks, Unity's text lines) and the oversampling the
+    /// text is rasterized at (0: the viewport's).
+    ppp: f64,
+    oversampling: f32,
     /// A record's display, visibility, opacity, clip or translate changed
     /// since the last take (the interaction Controls follow them).
     vis_changed: bool,
@@ -311,12 +336,14 @@ struct St {
 pub struct UxmlRuntimeV2 {
     base: Base<RefCounted>,
     st: Option<St>,
+    /// set_scale before build: the grid and oversampling the build uses.
+    pre_scale: (f64, f32),
 }
 
 #[godot_api]
 impl IRefCounted for UxmlRuntimeV2 {
     fn init(base: Base<RefCounted>) -> Self {
-        Self { base, st: None }
+        Self { base, st: None, pre_scale: (1.0, 0.0) }
     }
 }
 
@@ -555,6 +582,8 @@ impl UxmlRuntimeV2 {
             edit_nat: vec![None; n],
             size_ep: vec![0; n],
             lay_ep: 0,
+            ppp: 1.0,
+            oversampling: 0.0,
             vis_changed: true,
             placed: vec![None; n],
             elide_memo: vec![None; n],
@@ -580,6 +609,8 @@ impl UxmlRuntimeV2 {
                 }
             }
         }
+        st.ppp = self.pre_scale.0;
+        st.oversampling = self.pre_scale.1;
         if let Err(why) = st.restyle_all() {
             return GString::from(why.as_str());
         }
@@ -664,6 +695,14 @@ impl UxmlRuntimeV2 {
             }
         }
         vis_out
+    }
+
+    /// The f32 next to `x` (towards +inf for `dir` > 0, else -inf): the
+    /// glue places an editor Control on the f32 grid (_editor_pos).
+    #[func]
+    fn f32_step(x: f64, dir: i64) -> f64 {
+        let v = x as f32;
+        (if dir > 0 { v.next_up() } else { v.next_down() }) as f64
     }
 
     /// The last layout that changed the size of one of `idx` (0: none
@@ -763,16 +802,50 @@ impl UxmlRuntimeV2 {
         if st.kind[i] == K_BUTTON {
             let (s0, e0) = st.insets[i].unwrap_or((Vector2::ZERO, Vector2::ZERO));
             if let Some(b) = st.leaves.btexts.borrow().get(i).and_then(|b| b.as_ref()) {
-                return b.fit(r.size, [s0.x, s0.y, e0.x, e0.y], st.vis[i].bclip).1;
+                return b.fit(ctl_size(r), [s0.x, s0.y, e0.x, e0.y], st.vis[i].bclip).1;
             }
         }
-        r.size
+        ctl_size(r)
     }
 
     /// The size of element i at its last layout (zero before one).
     #[func]
     fn last_size(&self, i: i64) -> Vector2 {
         self.st.as_ref().and_then(|s| s.last_size.get(i as usize).copied()).unwrap_or(Vector2::ZERO)
+    }
+
+    /// Panel scaling: the pixel grid `ppp` (device pixels per point) and the
+    /// oversampling of the text (0: the viewport's). A new grid makes every
+    /// record again (border widths, box edges, text lines) and lays out
+    /// without the cross-pass cache; "" or why the document cannot stay on
+    /// runtime v2.
+    #[func]
+    fn set_scale(&mut self, ppp: f64, oversampling: f64) -> GString {
+        let os = oversampling as f32;
+        let Some(st) = self.st.as_mut() else {
+            self.pre_scale = (ppp, os);
+            return GString::new();
+        };
+        if os != st.oversampling {
+            st.oversampling = os;
+            st.dirty.fill(true);
+        }
+        if ppp == st.ppp {
+            return GString::new();
+        }
+        st.ppp = ppp;
+        st.box_memo.clear();
+        st.vis_memo.clear();
+        st.font_memo.clear();
+        st.xcarry = None;
+        st.last_out = None;
+        st.leaf_chg.fill(true);
+        st.measure_dirty = true;
+        st.dirty.fill(true);
+        match st.restyle_all() {
+            Ok(()) => GString::new(),
+            Err(w) => GString::from(w.as_str()),
+        }
     }
 
     /// Whether a record's display, visibility, opacity, clip or translate
@@ -1102,7 +1175,7 @@ impl St {
         for k in 0..4 {
             if let Some(x) = &vals[P_BW + k] {
                 match layout::parse_length(&s(x)) {
-                    Len::Px(w) => widths[k] = crate::panel_scale::grid_box(w.max(0.0), true, 1.0),
+                    Len::Px(w) => widths[k] = crate::panel_scale::grid_box(w.max(0.0), true, self.ppp),
                     _ => return Err("border width".into()),
                 }
             }
@@ -1185,7 +1258,10 @@ impl St {
             v.img_tex = a.get(2).and_then(|x| x.try_to::<Gd<Texture2D>>().ok());
             v.boxed = a.get(3).and_then(|x| x.try_to::<bool>().ok()).unwrap_or(false);
         } else if has_visual {
-            let kind = if any_radius || mixed || (any_border && bg.is_some_and(|b| b.a > 0.0)) { 1 } else { 2 };
+            // StyleBoxFlat has whole border widths: a border off the whole
+            // points of a scaled panel is a UxmlBoxStyle (_box_rec_of).
+            let fractional = any_border && self.ppp != 1.0 && widths.iter().any(|w| *w != w.floor());
+            let kind = if any_radius || mixed || fractional || (any_border && bg.is_some_and(|b| b.a > 0.0)) { 1 } else { 2 };
             let mut key: Vec<u64> = vec![kind as u64];
             let cbits = |c: &Color| -> [u64; 2] {
                 [((c.r.to_bits() as u64) << 32) | c.g.to_bits() as u64, ((c.b.to_bits() as u64) << 32) | c.a.to_bits() as u64]
@@ -1224,9 +1300,8 @@ impl St {
                         m.push(&x.to_variant());
                     }
                     rec.push(&m.to_variant());
-                    // _R_PX: the antialiased edge, one device pixel (pixels
-                    // per point 1: runtime v2 has no panel scaling).
-                    rec.push(&1.0f64.to_variant());
+                    // _R_PX: the antialiased edge, one device pixel.
+                    rec.push(&self.ppp.to_variant());
                     let b = self.helper.call("v2_make_box", &[rec.to_variant()]).try_to::<Gd<StyleBox>>().ok();
                     self.box_memo.insert(key, b.clone());
                     b
@@ -1300,17 +1375,23 @@ impl St {
                 str_of(P_FONT), str_of(P_FONTDEF), str_of(P_FONTSTYLE), str_of(P_LSP), str_of(P_WSP), str_of(P_FONTSIZE)
             );
             let hit = if url { None } else { self.font_memo.get(&fkey).cloned() };
-            let (font, size) = match hit {
+            let (font, size, line_fix) = match hit {
                 Some(h) => h,
                 None => {
                     let r = self.helper.call("v2_font", &[(i as i64).to_variant(), button.to_variant()]);
                     let a = r.try_to::<VarArray>().map_err(|_| "font".to_string())?;
                     let f = a.get(0).and_then(|x| x.try_to::<Gd<Font>>().ok()).ok_or("font")?;
                     let z = a.get(1).and_then(|x| x.try_to::<i64>().ok()).unwrap_or(16) as i32;
+                    // Unity's line height on a scaled panel (UxmlStyleApplier.
+                    // _set_line_fix): [Godot line height, Unity's].
+                    let lf = a.get(2).and_then(|x| x.try_to::<PackedFloat64Array>().ok()).and_then(|p| {
+                        let q = p.as_slice();
+                        if q.len() == 2 { Some((q[0], q[1])) } else { None }
+                    });
                     if !url {
-                        self.font_memo.insert(fkey, (f.clone(), z));
+                        self.font_memo.insert(fkey, (f.clone(), z, lf));
                     }
-                    (f, z)
+                    (f, z, lf)
                 }
             };
             // -unity-text-align, white-space (UxmlStyleApplier._apply_text_layout).
@@ -1389,6 +1470,7 @@ impl St {
                 shadow_color: self.theme.shadow_color,
                 shadow_ofs: self.theme.shadow_ofs,
                 shadow_outline_size: self.theme.shadow_outline_size,
+                line_fix,
             });
         }
         if self.kind[i] == K_IMAGE {
@@ -1454,7 +1536,14 @@ impl St {
             let c = cb.inner.as_ref().unwrap();
             for (kk, &i) in idx.iter().enumerate() {
                 let i = i as usize;
-                let r = self.host_rect_c(c, i);
+                let mut r = self.host_rect_c(c, i);
+                // The size runtime v1's Control of the element has (its
+                // offsets in its parent), as Godot keeps it at the
+                // absolute position the Control is placed at here.
+                if let Some(rel) = self.rects.get(i).copied().flatten() {
+                    let want = ctl_size(rel);
+                    r.size = Vector2::new(size_at(r.position.x, want.x), size_at(r.position.y, want.y));
+                }
                 let mut sh = i < self.n && self.rects[i].is_some();
                 let mut o = 1.0f32;
                 let mut vis = r;
@@ -1604,7 +1693,7 @@ impl St {
             buttons: vec![false; n],
             text_clip: false,
             pixel_grid: true,
-            ppp: 1.0,
+            ppp: self.ppp,
             auto_size: None,
             fields: vec![false; n],
             texrects: vec![None; n],
@@ -1682,14 +1771,25 @@ impl St {
 
     fn host_rect_c(&self, c: &Cascade, i: usize) -> Rect2 {
         let Some(r) = self.rects.get(i).copied().flatten() else { return Rect2::new(Vector2::ZERO, Vector2::ZERO) };
-        let mut pos = r.position + self.tr_of(i);
+        // Summed from the root down, as Godot composes the transforms of
+        // nested Controls (f32 sums in another order differ by an ulp,
+        // which moves text by a pixel on a scaled panel).
+        let mut chain: [usize; 64] = [0; 64];
+        let mut n = 0;
         let mut p = c.parent_of(i);
-        while p > 0 {
-            if let Some(pr) = self.rects[p as usize] {
-                pos += pr.position + self.tr_of(p as usize);
-            }
+        while p > 0 && n < 64 {
+            chain[n] = p as usize;
+            n += 1;
             p = c.parent_of(p as usize);
         }
+        let mut pos = Vector2::ZERO;
+        for k in (0..n).rev() {
+            let q = chain[k];
+            if let Some(pr) = self.rects[q] {
+                pos += pr.position + self.tr_of(q);
+            }
+        }
+        pos += r.position + self.tr_of(i);
         Rect2::new(pos, r.size)
     }
 
@@ -1842,7 +1942,7 @@ impl St {
                 // Moved, same size and insets: only the item's transform.
                 let moved_only = !self.dirty[i]
                     && match (&self.drawn[i], &at) {
-                        (Some((r0, i0)), Some((r1, i1))) => r0.size == r1.size && i0 == i1,
+                        (Some((r0, i0)), Some((r1, i1))) => ctl_size(*r0) == ctl_size(*r1) && i0 == i1,
                         _ => false,
                     };
                 if moved_only && self.kind[i] != K_NONE {
@@ -1902,7 +2002,7 @@ impl St {
         // A Button is fitted into its box and never smaller than its
         // minimum size (UxmlStyleApplier.fit_button, Godot's floor).
         let mut bfit: Option<[f32; 4]> = None;
-        let mut size = rect.size;
+        let mut size = ctl_size(rect);
         if self.kind[i] == K_BUTTON {
             let (s0, e0) = self.insets[i].unwrap_or((Vector2::ZERO, Vector2::ZERO));
             if let Some(b) = self.leaves.btexts.borrow().get(i).and_then(|b| b.as_ref()) {
@@ -2001,7 +2101,7 @@ impl St {
                         self.btheme.font_color
                     };
                 }
-                b.draw(it, size, m);
+                b.draw(it, size, m, self.oversampling);
             }
         }
         if self.kind[i] == K_LABEL && !self.text_hidden {
@@ -2047,7 +2147,7 @@ impl St {
                 let content_w = ((size.x - (m[0] + m[2])) as i32).max(if b.st.autowrap != AUTOWRAP_OFF { 1 } else { 0 });
                 let min = b.min_size(content_w);
                 let h = size.y.max(min.y + m[1] + m[3]);
-                b.draw(it, Vector2::ZERO, Vector2::new(size.x, h), m);
+                b.draw(it, Vector2::ZERO, Vector2::new(size.x, h), m, self.oversampling);
             }
         }
     }
@@ -2062,6 +2162,27 @@ impl St {
             }
         }
     }
+}
+
+/// The size of a Control of runtime v1 placed at rect `r` in its parent:
+/// Godot keeps its offsets and its size is their difference in f32
+/// (`(x + w) - x`), an ulp off `w` at fractional points of a scaled panel.
+fn ctl_size(r: Rect2) -> Vector2 {
+    Vector2::new((r.position.x + r.size.x) - r.position.x, (r.position.y + r.size.y) - r.position.y)
+}
+
+/// The size to give a Control at `pos` so that Godot keeps `want`
+/// (see ctl_size).
+fn size_at(pos: f32, want: f32) -> f32 {
+    let mut s = want;
+    for _ in 0..4 {
+        let got = (pos + s) - pos;
+        if got == want {
+            return s;
+        }
+        s = if got < want { s.next_up() } else { s.next_down() };
+    }
+    want
 }
 
 /// TextureRect's draw (EXPAND_IGNORE_SIZE) of `tex` in `area` with

@@ -1848,11 +1848,8 @@ screen size at reference 1920 x 1080 (match 0, 0.5 and 1, Expand, Shrink) on
 dumps, 19 scales from 0.5625 to 2 pixels per point. See docs/parity.md,
 "Panel scaling".
 
-For runtime v2 (`runtime/v2`): take `panel_scale.rs` (resolve, pixel,
-grid_box, ceil_pixel) as is; lay out in points with `ppp` as the grid; draw
-the panel under one transform of `ppp` with edges built in device pixels
-and text rasterized at the scale; keep the contract of the API above
-(document pixels without a space, points in an element's space).
+Runtime v2 (phase 3, `runtime/v2-phase3`) scales the same way: see
+"Panel scaling on v2" under "Runtime v2".
 
 ### Style application
 
@@ -2388,10 +2385,8 @@ dialog) load on v2.
   in one native call (`place_states`: rect, visible rect inside the clips,
   shown, opacity) that returns only those whose placement changed, after a
   layout that moved a rect or a restyle that changed a display, visibility,
-  opacity, clip or translate. A layout is a full pass of the table (runtime
-  v1's cross-pass cache, `XCache`, keys its entries on Controls): a class or
-  text change that lays out the big document costs about twice v1's
-  (phase 3: the cache on the table).
+  opacity, clip or translate. The layout keeps what unchanged subtrees
+  computed (phase 3, "The layout cache on the table" below).
 
 **The API on v2** (what it hands out):
 
@@ -2404,14 +2399,84 @@ dialog) load on v2.
 | `set_text(name, text)` | a Label's or a Button's text (code that wrote `Label.text` on `get_native()` uses this on v2: the benchmarks do) |
 | `set_field_value`, `get_field_value`, `set_field_placeholder`, `set_enabled`, `set_element_state`, `get/set_scroll_offset`, `scroll_to` | as on v1 |
 
-Not covered yet (the document loads on v1): `tabindex`, panel scaling
-(`panel_settings`), `show-input-field` sliders, a multiline TextField with a
+Not covered yet (the document loads on v1): `tabindex`, `show-input-field` sliders, a multiline TextField with a
 scroller, ToggleButtonGroup, GroupBox, HelpBox, the numeric and composite
 fields, the collection views, TabView, TwoPaneSplitView, the editor
 controls, transitions, rotate/scale, text-shadow, filters and materials.
 The menu of a popup field (`UxmlPopupMenu`) is a document of its own that
 reads its item Controls: it is always a runtime v1 document
 (`UxmlDocument.pinned_v1`), also under `default_runtime = 2`.
+
+#### Phase 3 (`runtime/v2-phase3`)
+
+**The layout cache on the table.** The v2 layout runs runtime v1's cached
+placing pass (`Pass::new_cached`, "Cross-pass layout cache"): an element
+*changed* when its layout record changed (`RecCache::take_changed`) or a
+leaf measure of it changed (`St::mark_leaf`: a text shaped again, a
+Button's text, an image's natural size, the horizontal box padding of a
+text, an editor Control set; an editor's measured size is compared at the
+start of every layout, its fingerprint). A subtree with no changed element
+keeps its measure entries and its last `layout()` call, and the pass takes
+its rects, insets and content sizes from the last output (`St::last_out`);
+the entries are pure functions of their subtree and key, as on v1, so the
+results are those of a full pass (`bench/equiv_v2.gd`). A new pixel grid or
+a new table drops the cache. After a layout:
+
+- an element that only moved (same size and insets, no new record) gets a
+  new item transform (`place_item`), not a new recording;
+- the interaction Controls whose placement changed get their position and
+  size in one native call (`UxmlRuntimeV2.apply_rects`, static: a Control's
+  signals may call back into the runtime), the glue then shows or hides
+  the few whose visibility changed (hiding a focused Control releases its
+  focus, which calls back);
+- the layout hooks of the sliders run only when a layout changed a size
+  they read (`size_epoch`: the last layout that changed the size of one of
+  the elements, kept per element) or their dragger was restyled.
+
+On the big document a class change lays out in about 1 ms of native layout
+(5.4 ms before), and a text change in about 1.1 ms.
+
+**Panel scaling on v2.** `panel_settings` no longer keeps a document on
+v1. The scale is runtime v1's (`UxmlDocument._update_scale`: the root box at
+the panel size in points, scaled by the pixels per point); on v2:
+
+- the layout runs in points at the panel size (`_layout_host()`) with the
+  device grid (`LayoutIn::ppp`): positions, sizes and box edges on the grid,
+  leaf measures rounded up to it (`panel_scale.rs`, shared with v1);
+- the box records have their border widths on the grid (`grid_box`), a
+  border off the whole points is a `UxmlBoxStyle`, and `_R_PX` (the
+  antialiased edge, one device pixel) is the grid; rounded clip masks have
+  the same `px`;
+- text: `v2_font` returns Unity's line height on a scaled panel
+  (`_set_line_fix`'s pair: the font's line height and Unity's), the text
+  measure counts its lines in Unity's height (as `measure_leaf` reads
+  `uxml_line_fix`), and the glyphs are rasterized at the oversampling a
+  Label under the root box gets (`oversampling_with_scale`: the root box's
+  global scale times the viewport's oversampling), passed to
+  `shaped_text_draw` and `TextParagraph.draw`;
+- an editor (LineEdit/TextEdit) gets the insets the layout resolved as its
+  stylebox margins (`apply_resolved_insets`, as v1's placement does: 2pt
+  of padding is 1.714pt at 7/6 pixels per point), and sits in a plain
+  Control at its field's place, so its position, size and global transform
+  are the f32 values v1's editor has inside its field's Control;
+- an element is drawn at the size v1's Control has: Godot keeps a Control's
+  offsets, so its size is `(x + w) - x` in f32, an ulp off `w` at the
+  fractional points of a scaled panel (`ctl_size`), which can move a
+  right-aligned text by a device pixel;
+- a new grid (a resize of a ScaleWithScreenSize panel, new settings, the
+  stretch) makes every record again (`UxmlRuntimeV2.set_scale`), applies the
+  editors again and lays out without the cache; the API keeps its contract
+  (`get_element_rect` without a space in document pixels, with an element
+  as space in points; `element_at` in document pixels).
+
+`bench/equiv_v2.gd` loads the ten cases of `bench/parity/scaled/matrix.json`
+under three grids (2, 1.33 and 0.8 pixels per point) on both runtimes.
+Where they differ: runtime v1's Buttons in `scl-settings` keep a Control
+taller or wider than their layout rect on some scales (51.33 px for a 51 px
+rect at 1.33, 114.22 for 114 at 0.5625: the Control's minimum size is below
+the rect, so a size from an earlier placement stays, which the placement,
+skipping a control at its last rect, does not correct); v2 draws the
+layout's rect, Unity's (38.25 points).
 
 **Two fixes of phase 1 found on the way**: a clip of the children inset by
 the borders (`overflow: hidden` with a border, no radii) did not clip:

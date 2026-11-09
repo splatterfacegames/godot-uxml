@@ -127,6 +127,8 @@ var _last_dis := PackedByteArray()
 var _hooked: Array = []
 ## The interaction Controls in the order of _proxy_idx, and which are editors.
 var _proxy_ctls: Array = []
+## The Control each editor sits in (at its field's place), by element.
+var _edit_wrap: Dictionary = {}
 var _proxy_edit := PackedByteArray()
 var _proxy_idx := PackedInt32Array()
 var _editor_shown: Dictionary = {}  # editor index -> shown at its last placement
@@ -204,6 +206,9 @@ func load() -> String:
 	applier = UxmlStyleApplier.new(doc._resolver, doc._doc.path, doc._doc.source, warnings)
 	applier.element_paths = doc._doc.element_paths
 	applier.unity_line_metrics = doc.theme_path == UxmlTheme.DEFAULT
+	# Panel scaling: the boxes, borders and text lines on the device pixel
+	# grid (UxmlDocument._update_scale).
+	applier.set_pixels_per_point(doc._grid_ppp)
 	factory = UxmlControlFactory.new(doc._resolver, doc._doc.path, doc._doc.source, warnings)
 	factory.element_paths = doc._doc.element_paths
 	_probe = Label.new()
@@ -226,6 +231,7 @@ func load() -> String:
 	cascade.update(_options())
 	t0 = _step("v2: first cascade", t0)
 	rt = ClassDB.instantiate("UxmlRuntimeV2")
+	rt.call("set_scale", doc._grid_ppp, _oversampling())
 	why = rt.call("build", cascade._native, doc._root_box, self, applier.unity_line_metrics, kinds)
 	t0 = _step("v2: build", t0)
 	if why.is_empty() and not _diag_free():
@@ -406,7 +412,19 @@ func _make_proxies() -> void:
 		doc._controls[el] = c
 		doc._el_of[c] = el
 		c.visible = false
-		doc._root_box.add_child(c)
+		if editors.has(i):
+			# The editor sits in a Control at its field's place, as runtime
+			# v1's sits in its field's Control: its position and size are
+			# then the same f32 values in the same frame (_place_proxies).
+			var w := Control.new()
+			w.name = "uxml-v2-editor-%d" % i
+			w.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			w.focus_mode = Control.FOCUS_NONE
+			_edit_wrap[i] = w
+			doc._root_box.add_child(w)
+			w.add_child(c)
+		else:
+			doc._root_box.add_child(c)
 		var target := c
 		target.focus_entered.connect(_on_focus.bind(el, true))
 		target.focus_exited.connect(_on_focus.bind(el, false))
@@ -483,12 +501,15 @@ func _place_proxies() -> void:
 			continue
 		var i := _proxy_idx[w]
 		var c: Control = _proxy_ctls[w]
-		var pos := rects[k * 4]
-		var size := rects[k * 4 + 1]
-		if c.position != pos:
-			c.position = pos
-		if c.size != size:
-			c.size = size
+		var wrap: Control = _edit_wrap[i]
+		var r: Rect2 = rt.call("local_rect", i)
+		var wp := _editor_frame(i, rects[k * 4] - r.position)
+		if wrap.position != wp:
+			wrap.position = wp
+		if c.position != r.position:
+			c.position = r.position
+		if c.size != r.size:
+			c.size = r.size
 		# The editor draws: it stays at its rect (its own clip), with the
 		# opacity of its ancestors (v1 nests it in their Controls).
 		var a := ops[k]
@@ -498,6 +519,37 @@ func _place_proxies() -> void:
 		var want := shown_f[k] == 1 and bool(c.get_meta(&"uxml_v2_visible", true))
 		if c.visible != want:
 			c.visible = want
+
+
+## Where the Control editor `i` sits in goes in the root box: the position
+## whose global transform is that of runtime v1's field Control the editor
+## is nested in (Godot composes the transforms of nested Controls in f32;
+## another sum moves the text by a device pixel on a scaled panel). `pos`:
+## the field's host position.
+func _editor_frame(i: int, pos: Vector2) -> Vector2:
+	if not doc._scaled or not doc.is_inside_tree():
+		return pos
+	var chain: Array = []
+	var k: int = cascade._parent[i]
+	while k > 0:
+		chain.append(k)
+		k = cascade._parent[k]
+	var root_g := doc._root_box.get_global_transform()
+	var g := root_g
+	for j in range(chain.size() - 1, -1, -1):
+		var r: Rect2 = rt.call("local_rect", chain[j])
+		g = g * Transform2D(0.0, r.position)
+	var want := g.origin
+	var p := root_g.affine_inverse() * want
+	for n in 8:
+		var got := (root_g * Transform2D(0.0, p)).origin
+		if got == want:
+			return p
+		if got.x != want.x:
+			p.x = ClassDB.class_call_static(&"UxmlRuntimeV2", &"f32_step", p.x, 1 if got.x < want.x else -1)
+		if got.y != want.y:
+			p.y = ClassDB.class_call_static(&"UxmlRuntimeV2", &"f32_step", p.y, 1 if got.y < want.y else -1)
+	return pos
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +655,13 @@ func v2_font(i: int, button: bool = false) -> Array:
 	var fs := applier._effective_font_size(probe, style, el)
 	if font == null:
 		font = probe.get_theme_font(&"font")
-	return [font, fs]
+	# Unity's line height on a scaled panel (UxmlStyleApplier._set_line_fix).
+	var lf := PackedFloat64Array()
+	var ppp := applier.pixels_per_point
+	if ppp != 1.0 and applier.unity_line_metrics and not UxmlStyleApplier._has_url_font(style) and fs > 0 and font != null:
+		lf = PackedFloat64Array([font.get_height(fs),
+			ceilf(UxmlStyleApplier.UNITY_LINE_EM * floorf(float(fs) * ppp + 0.5) - 0.001) / ppp])
+	return [font, fs, lf]
 
 
 ## [box style, image style, image texture, text inset by the box] of
@@ -673,6 +731,7 @@ func v2_mask(radii: PackedFloat64Array, widths: PackedFloat64Array) -> Array:
 	mask.radii = radii
 	mask.fill_inner = true
 	mask.widths = widths
+	mask.px = applier.pixels_per_point
 	if _mask_material == null:
 		var sh := Shader.new()
 		sh.code = UxmlClip.MASK_SHADER
@@ -712,6 +771,12 @@ func dispose() -> void:
 			if c.get_parent() != null:
 				c.get_parent().remove_child(c)
 			c.free()
+	for w in _edit_wrap.values():
+		if is_instance_valid(w):
+			if w.get_parent() != null:
+				w.get_parent().remove_child(w)
+			w.free()
+	_edit_wrap = {}
 	_probe = null
 	_bprobe = null
 	proxies = {}
@@ -862,7 +927,10 @@ func _restyle_pass() -> PackedInt32Array:
 ## and lay out again (as runtime v1's _post_layout). The interaction
 ## Controls follow.
 func _layout(force: bool = false, restyled: bool = true) -> void:
-	var moved: bool = rt.call("layout_if_needed", doc.size, force or _editor_measures_changed())
+	var moved: bool = rt.call("layout_if_needed", doc._layout_host(), force or _editor_measures_changed())
+	if (moved or force) and _editor_insets():
+		# The resolved insets changed what an editor measures.
+		rt.call("layout_if_needed", doc._layout_host(), true)
 	if not moved and not restyled and not force:
 		return
 	if not moved and not force:
@@ -891,11 +959,25 @@ func _layout(force: bool = false, restyled: bool = true) -> void:
 		var ch := _restyle_pass()
 		if rt == null:
 			return
-		if rt.call("layout_if_needed", doc.size, false):
+		if rt.call("layout_if_needed", doc._layout_host(), false):
 			moved = true
 		restyled = restyled or not ch.is_empty()
 	rt.call("take_vis_changed")
 	_place_proxies()
+
+
+## The insets the layout resolved (padding and borders on the pixel grid)
+## become the editors' stylebox margins, as runtime v1's placement hands
+## them to UxmlStyleApplier.apply_resolved_insets. True when that changed
+## what an editor measures.
+func _editor_insets() -> bool:
+	if editors.is_empty():
+		return false
+	for i in editors:
+		var ins: Array = rt.call("insets_of", i)
+		if ins.size() == 2:
+			applier.apply_resolved_insets(editors[i], ins[0], ins[1])
+	return _editor_measures_changed()
 
 
 ## The editors' minimum sizes (what the layout measures of them) changed
@@ -964,6 +1046,39 @@ func refresh() -> void:
 	for el in cascade.els:
 		_dirty[el] = true
 	queue()
+
+
+## The oversampling of the text: a scaled panel rasterizes its glyphs at
+## the font size times the canvas scale, as runtime v1's Labels under the
+## root box (CanvasItem.oversampling_with_scale); 0 (the viewport's) when
+## not scaled.
+func _oversampling() -> float:
+	if not doc._scaled or not doc.is_inside_tree():
+		return 0.0
+	var sc := doc._root_box.get_global_transform().get_scale()
+	var vp := doc.get_viewport()
+	return maxf(absf(sc.x), absf(sc.y)) * (vp.get_oversampling() if vp != null else 1.0)
+
+
+## Panel scaling changed (UxmlDocument._on_panel_settings_changed, a resize
+## of a scaled panel, entering the tree): the new grid (records made again,
+## the editors applied again) and oversampling, laid out and drawn.
+func rescale() -> void:
+	if rt == null:
+		return
+	var regrid := applier.pixels_per_point != doc._grid_ppp
+	applier.set_pixels_per_point(doc._grid_ppp)
+	var why: String = rt.call("set_scale", doc._grid_ppp, _oversampling())
+	if why.is_empty() and not _diag_free():
+		why = "a style diagnostic"
+	if not why.is_empty():
+		doc._v2_fallback(why)
+		return
+	if regrid:
+		for i in editors:
+			(editors[i] as Control).remove_meta(&"uxml_v2_flags")
+		_apply_editors(PackedInt32Array())
+	relayout()
 
 
 ## A resize (NOTIFICATION_RESIZED): lays out and draws now.
